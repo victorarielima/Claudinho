@@ -2,12 +2,18 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import {
+  SignInButton,
+  SignUpButton,
+  Show,
+  UserButton,
+} from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 
 const LINKS = [
-  { href: "/", rotulo: "Performance" },
-  { href: "/criacao", rotulo: "Criação" },
+  { href: "/", rotulo: "Criação" },
+  { href: "/performance", rotulo: "Performance" },
 ];
 
 export function Navegacao() {
@@ -43,6 +49,24 @@ export function Navegacao() {
             </Link>
           ))}
         </nav>
+
+        <div className="ml-auto flex items-center gap-2">
+          <Show when="signed-out">
+            <SignInButton>
+              <button className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground transition-colors">
+                Entrar
+              </button>
+            </SignInButton>
+            <SignUpButton>
+              <button className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
+                Cadastrar
+              </button>
+            </SignUpButton>
+          </Show>
+          <Show when="signed-in">
+            <UserButton />
+          </Show>
+        </div>
       </div>
     </header>
   );

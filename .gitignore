@@ -55,3 +55,6 @@ next-env.d.ts
 /secrets/
 *.key
 *.cert
+
+# clerk configuration (can include secrets)
+/.clerk/

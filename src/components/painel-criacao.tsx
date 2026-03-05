@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   TabelaPendentes,
@@ -17,6 +17,7 @@ export function PainelCriacao() {
   const [serviceAccountEmail, setServiceAccountEmail] = useState<string>("");
   const [selecionados, setSelecionados] = useState<Set<number>>(new Set());
   const [filtroStatus, setFiltroStatus] = useState<string>("todos");
+  const [filtroData, setFiltroData] = useState<string>("todas");
 
   const validarVideos = useCallback(
     async (linhasParaValidar: LinhaComStatus[]) => {
@@ -120,6 +121,10 @@ export function PainelCriacao() {
       setCarregando(false);
     }
   }, [validarVideos]);
+
+  useEffect(() => {
+    carregarPlanilha();
+  }, [carregarPlanilha]);
 
   const revalidarVideo = useCallback(
     async (linha: LinhaComStatus) => {
@@ -261,10 +266,23 @@ export function PainelCriacao() {
   ).length;
   const total = linhas.length;
 
-  const linhasFiltradas =
-    filtroStatus === "todos"
-      ? linhas
-      : linhas.filter((l) => l.statusProcessamento === filtroStatus);
+  const datasUnicas = Array.from(
+    new Set(linhas.map((l) => l.data).filter(Boolean))
+  ).sort((a, b) => {
+    // Tentar ordenar como data (dd/mm/yyyy ou yyyy-mm-dd)
+    const parseData = (s: string) => {
+      const partes = s.split("/");
+      if (partes.length === 3) return new Date(`${partes[2]}-${partes[1]}-${partes[0]}`).getTime();
+      return new Date(s).getTime();
+    };
+    return parseData(b) - parseData(a);
+  });
+
+  const linhasFiltradas = linhas.filter((l) => {
+    if (filtroStatus !== "todos" && l.statusProcessamento !== filtroStatus) return false;
+    if (filtroData !== "todas" && l.data !== filtroData) return false;
+    return true;
+  });
 
   return (
     <div className="flex flex-col gap-8">
@@ -470,37 +488,54 @@ export function PainelCriacao() {
       {/* Conteúdo */}
       {jaCarregou ? (
         <section>
-          <div className="mb-4 flex items-center gap-1 rounded-lg border bg-muted/40 p-1 w-fit">
-            {[
-              { valor: "todos", rotulo: "Todos", contagem: total },
-              { valor: "pendente", rotulo: "Pendentes", contagem: totalPendentes },
-              { valor: "processando", rotulo: "Processando", contagem: totalProcessando },
-              { valor: "concluido", rotulo: "Concluídos", contagem: totalConcluidos },
-              { valor: "erro", rotulo: "Erros", contagem: totalErros },
-            ]
-              .filter((f) => f.valor === "todos" || f.contagem > 0)
-              .map((f) => (
-                <button
-                  key={f.valor}
-                  onClick={() => setFiltroStatus(f.valor)}
-                  className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-all ${
-                    filtroStatus === f.valor
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {f.rotulo}
-                  <span
-                    className={`tabular-nums text-xs ${
+          <div className="mb-4 flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-1 rounded-lg border bg-muted/40 p-1 w-fit">
+              {[
+                { valor: "todos", rotulo: "Todos", contagem: total },
+                { valor: "pendente", rotulo: "Pendentes", contagem: totalPendentes },
+                { valor: "processando", rotulo: "Processando", contagem: totalProcessando },
+                { valor: "concluido", rotulo: "Concluídos", contagem: totalConcluidos },
+                { valor: "erro", rotulo: "Erros", contagem: totalErros },
+              ]
+                .filter((f) => f.valor === "todos" || f.contagem > 0)
+                .map((f) => (
+                  <button
+                    key={f.valor}
+                    onClick={() => setFiltroStatus(f.valor)}
+                    className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-all ${
                       filtroStatus === f.valor
-                        ? "text-foreground/60"
-                        : "text-muted-foreground/60"
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    {f.contagem}
-                  </span>
-                </button>
-              ))}
+                    {f.rotulo}
+                    <span
+                      className={`tabular-nums text-xs ${
+                        filtroStatus === f.valor
+                          ? "text-foreground/60"
+                          : "text-muted-foreground/60"
+                      }`}
+                    >
+                      {f.contagem}
+                    </span>
+                  </button>
+                ))}
+            </div>
+
+            {datasUnicas.length > 0 && (
+              <select
+                value={filtroData}
+                onChange={(e) => setFiltroData(e.target.value)}
+                className="h-9 rounded-lg border border-input bg-background px-3 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+              >
+                <option value="todas">Todas as datas</option>
+                {datasUnicas.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
           <TabelaPendentes
             linhas={linhasFiltradas}

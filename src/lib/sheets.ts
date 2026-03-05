@@ -33,6 +33,7 @@ export interface LinhaAnuncio {
   adIdGerado: string;
   pageId: string;
   accountId: string;
+  data: string;
 }
 
 let nomeAbaCacheado: string | null = null;
@@ -69,7 +70,7 @@ export async function lerLinhas(): Promise<LinhaAnuncio[]> {
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `'${nomeAba}'!A:O`,
+    range: `'${nomeAba}'!A:P`,
   });
 
   const linhas = res.data.values;
@@ -103,6 +104,7 @@ export async function lerLinhas(): Promise<LinhaAnuncio[]> {
       adIdGerado: row[12] ?? "",
       pageId: row[13] ?? "",
       accountId: row[14] ?? "",
+      data: row[15] ?? "",
     });
   }
 
@@ -143,6 +145,30 @@ export async function atualizarLinha(
           values: [[accountId]],
         },
       ],
+    },
+  });
+}
+
+export async function atualizarAccountId(
+  indiceLinha: number,
+  accountId: string
+): Promise<void> {
+  const auth = getAuth();
+  const sheets = google.sheets({ version: "v4", auth });
+  const spreadsheetId = process.env.GOOGLE_SHEETS_ID;
+
+  if (!spreadsheetId) {
+    throw new Error("GOOGLE_SHEETS_ID não configurado");
+  }
+
+  const nomeAba = await obterNomeAba();
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: `'${nomeAba}'!O${indiceLinha}`,
+    valueInputOption: "RAW",
+    requestBody: {
+      values: [[accountId]],
     },
   });
 }
