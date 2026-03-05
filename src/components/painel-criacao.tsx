@@ -71,6 +71,7 @@ export function PainelCriacao() {
                 : ("inacessivel" as const),
               erroVideo: resultado.erro,
               nomeArquivoVideo: resultado.nomeArquivo,
+              thumbnailLink: resultado.thumbnailLink,
             };
           })
         );
@@ -206,11 +207,11 @@ export function PainelCriacao() {
         prev.map((l) =>
           l.indiceLinha === linha.indiceLinha
             ? {
-                ...l,
-                statusProcessamento: "concluido" as const,
-                adIdCriado: json.adId,
-                accountId: json.accountId || "",
-              }
+              ...l,
+              statusProcessamento: "concluido" as const,
+              adIdCriado: json.adId,
+              accountId: json.accountId || "",
+            }
             : l
         )
       );
@@ -221,10 +222,10 @@ export function PainelCriacao() {
         prev.map((l) =>
           l.indiceLinha === linha.indiceLinha
             ? {
-                ...l,
-                statusProcessamento: "erro" as const,
-                mensagemErro: mensagem,
-              }
+              ...l,
+              statusProcessamento: "erro" as const,
+              mensagemErro: mensagem,
+            }
             : l
         )
       );
@@ -242,8 +243,8 @@ export function PainelCriacao() {
     const alvo =
       selecionados.size > 0
         ? linhas.filter(
-            (l) => selecionados.has(l.indiceLinha) && podeSubir(l)
-          )
+          (l) => selecionados.has(l.indiceLinha) && podeSubir(l)
+        )
         : linhas.filter(podeSubir);
 
     for (const linha of alvo) {
@@ -533,19 +534,17 @@ export function PainelCriacao() {
                   <button
                     key={f.valor}
                     onClick={() => setFiltroStatus(f.valor)}
-                    className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-all ${
-                      filtroStatus === f.valor
+                    className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-all ${filtroStatus === f.valor
                         ? "bg-background text-foreground shadow-sm"
                         : "text-muted-foreground hover:text-foreground"
-                    }`}
+                      }`}
                   >
                     {f.rotulo}
                     <span
-                      className={`tabular-nums text-xs ${
-                        filtroStatus === f.valor
+                      className={`tabular-nums text-xs ${filtroStatus === f.valor
                           ? "text-foreground/60"
                           : "text-muted-foreground/60"
-                      }`}
+                        }`}
                     >
                       {f.contagem}
                     </span>

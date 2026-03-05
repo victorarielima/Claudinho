@@ -35,7 +35,7 @@ export interface ArquivoDrive {
  */
 export async function verificarAcessoArquivo(
   driveUrl: string
-): Promise<{ acessivel: boolean; nomeArquivo?: string; erro?: string }> {
+): Promise<{ acessivel: boolean; nomeArquivo?: string; thumbnailLink?: string; erro?: string }> {
   try {
     const fileId = extrairFileId(driveUrl);
     const auth = getAuth();
@@ -43,13 +43,14 @@ export async function verificarAcessoArquivo(
 
     const meta = await drive.files.get({
       fileId,
-      fields: "name,mimeType,size",
+      fields: "name,mimeType,size,thumbnailLink",
       supportsAllDrives: true,
     });
 
     return {
       acessivel: true,
       nomeArquivo: meta.data.name ?? undefined,
+      thumbnailLink: meta.data.thumbnailLink ?? undefined,
     };
   } catch (error: unknown) {
     const gaxiosError = error as { code?: number; message?: string };
