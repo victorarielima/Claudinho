@@ -33,6 +33,7 @@ export interface LinhaComStatus extends LinhaAnuncio {
   statusVideo: StatusVideo;
   erroVideo?: string;
   nomeArquivoVideo?: string;
+  thumbnailLink?: string;
 }
 
 interface TabelaPendentesProps {
@@ -478,7 +479,7 @@ export function TabelaPendentes({
                   <div className="flex gap-4">
                     {/* Checkbox */}
                     {podeSelecionar && (
-                      <div className="pt-0.5">
+                      <div className="pt-0.5 shrink-0">
                         <Checkbox
                           checked={selecionada}
                           onCheckedChange={() =>
@@ -488,6 +489,32 @@ export function TabelaPendentes({
                         />
                       </div>
                     )}
+
+                    {/* Thumbnail */}
+                    <div className="relative shrink-0 w-24 h-24 overflow-hidden rounded-md border border-border bg-black/5 flex items-center justify-center">
+                      {linha.thumbnailLink ? (
+                        <img
+                          src={linha.thumbnailLink}
+                          alt="Thumbnail"
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className="text-muted-foreground">
+                          <svg className="w-8 h-8 opacity-20" fill="currentColor" viewBox="0 0 24 24"><path d="M4 6h16v12H4z" opacity="0.3" /><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V6h16v12zM8 15l2.5-3.2 1.5 1.9L14.5 10l3.5 4.5H8z" /></svg>
+                        </div>
+                      )}
+
+                      {videoAcessivel && (
+                        <button
+                          onClick={() => setPreviewAberto(linha.indiceLinha)}
+                          className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"
+                          title="Ver vídeo"
+                        >
+                          <svg className="w-8 h-8 text-white drop-shadow" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                        </button>
+                      )}
+                    </div>
 
                     <div className="flex flex-col gap-4 flex-1 min-w-0">
                       {/* Header: nome + status + ação */}
@@ -532,28 +559,7 @@ export function TabelaPendentes({
                           </p>
                         </div>
 
-                        <div className="flex-shrink-0 flex items-center gap-2">
-                          {videoAcessivel && (
-                            <button
-                              onClick={() => setPreviewAberto(linha.indiceLinha)}
-                              className="inline-flex h-10 items-center gap-2 rounded-lg border border-input bg-background px-3 text-sm font-medium shadow-sm transition-all hover:bg-accent hover:text-accent-foreground active:scale-[0.98]"
-                              title="Preview do vídeo"
-                            >
-                              <svg
-                                className="h-4 w-4"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                strokeWidth={1.5}
-                                stroke="currentColor"
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z"
-                                />
-                              </svg>
-                            </button>
-                          )}
+                        <div className="flex-shrink-0 flex items-center gap-2 flex-col justify-end">
                           {concluido ? (
                             <a
                               href={
