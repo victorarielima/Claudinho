@@ -1,19 +1,8 @@
 import { google } from "googleapis";
-import path from "path";
-
-const SCOPES = [
-  "https://www.googleapis.com/auth/spreadsheets",
-  "https://www.googleapis.com/auth/drive.readonly",
-];
+import { getGoogleAuth } from "./google-auth";
 
 function getAuth() {
-  const keyFilePath = path.resolve(
-    process.env.GOOGLE_SERVICE_ACCOUNT_PATH ?? "./secrets/evini-488110-2a7ec135e42d.json"
-  );
-  return new google.auth.GoogleAuth({
-    keyFile: keyFilePath,
-    scopes: SCOPES,
-  });
+  return getGoogleAuth();
 }
 
 export interface LinhaAnuncio {
