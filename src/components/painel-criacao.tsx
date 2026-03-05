@@ -18,6 +18,10 @@ export function PainelCriacao() {
   const [selecionados, setSelecionados] = useState<Set<number>>(new Set());
   const [filtroStatus, setFiltroStatus] = useState<string>("todos");
   const [filtroData, setFiltroData] = useState<string>("todas");
+  const [filtroCampanha, setFiltroCampanha] = useState<string>("todas");
+  const [filtroAdSet, setFiltroAdSet] = useState<string>("todos");
+  const [busca, setBusca] = useState<string>("");
+  const [compacto, setCompacto] = useState(false);
 
   const validarVideos = useCallback(
     async (linhasParaValidar: LinhaComStatus[]) => {
@@ -92,14 +96,17 @@ export function PainelCriacao() {
       const todas: LinhaAnuncio[] = json.data;
       const novasLinhas: LinhaComStatus[] = todas.map((l) => {
         const isConcluido = l.statusAutomacao === "Concluído";
+        const isProcessando = l.statusAutomacao === "Processando";
         const isErro = l.statusAutomacao.startsWith("Erro");
         return {
           ...l,
           statusProcessamento: isConcluido
             ? ("concluido" as const)
-            : isErro
-              ? ("erro" as const)
-              : ("pendente" as const),
+            : isProcessando
+              ? ("processando" as const)
+              : isErro
+                ? ("erro" as const)
+                : ("pendente" as const),
           adIdCriado: isConcluido ? l.adIdGerado : undefined,
           accountId: l.accountId || "",
           mensagemErro: isErro ? l.statusAutomacao.replace("Erro: ", "") : undefined,
@@ -269,7 +276,6 @@ export function PainelCriacao() {
   const datasUnicas = Array.from(
     new Set(linhas.map((l) => l.data).filter(Boolean))
   ).sort((a, b) => {
-    // Tentar ordenar como data (dd/mm/yyyy ou yyyy-mm-dd)
     const parseData = (s: string) => {
       const partes = s.split("/");
       if (partes.length === 3) return new Date(`${partes[2]}-${partes[1]}-${partes[0]}`).getTime();
@@ -278,9 +284,34 @@ export function PainelCriacao() {
     return parseData(b) - parseData(a);
   });
 
+  const campanhasUnicas = Array.from(
+    new Set(linhas.map((l) => l.campaign).filter(Boolean))
+  ).sort();
+
+  const adSetsUnicos = Array.from(
+    new Set(
+      linhas
+        .filter((l) => filtroCampanha === "todas" || l.campaign === filtroCampanha)
+        .map((l) => l.adSet)
+        .filter(Boolean)
+    )
+  ).sort();
+
+  const buscaLower = busca.toLowerCase();
+
   const linhasFiltradas = linhas.filter((l) => {
     if (filtroStatus !== "todos" && l.statusProcessamento !== filtroStatus) return false;
     if (filtroData !== "todas" && l.data !== filtroData) return false;
+    if (filtroCampanha !== "todas" && l.campaign !== filtroCampanha) return false;
+    if (filtroAdSet !== "todos" && l.adSet !== filtroAdSet) return false;
+    if (buscaLower && !(
+      l.adName.toLowerCase().includes(buscaLower) ||
+      l.textoPrincipal.toLowerCase().includes(buscaLower) ||
+      l.titulo.toLowerCase().includes(buscaLower) ||
+      l.descricao.toLowerCase().includes(buscaLower) ||
+      l.campaign.toLowerCase().includes(buscaLower) ||
+      l.adSet.toLowerCase().includes(buscaLower)
+    )) return false;
     return true;
   });
 
@@ -522,7 +553,40 @@ export function PainelCriacao() {
                 ))}
             </div>
 
-            {datasUnicas.length > 0 && (
+            {campanhasUnicas.length > 1 && (
+              <select
+                value={filtroCampanha}
+                onChange={(e) => {
+                  setFiltroCampanha(e.target.value);
+                  setFiltroAdSet("todos");
+                }}
+                className="h-9 rounded-lg border border-input bg-background px-3 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+              >
+                <option value="todas">Todas as campanhas</option>
+                {campanhasUnicas.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {adSetsUnicos.length > 1 && (
+              <select
+                value={filtroAdSet}
+                onChange={(e) => setFiltroAdSet(e.target.value)}
+                className="h-9 rounded-lg border border-input bg-background px-3 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+              >
+                <option value="todos">Todos os ad sets</option>
+                {adSetsUnicos.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {datasUnicas.length > 1 && (
               <select
                 value={filtroData}
                 onChange={(e) => setFiltroData(e.target.value)}
@@ -536,6 +600,46 @@ export function PainelCriacao() {
                 ))}
               </select>
             )}
+
+            <div className="relative">
+              <svg
+                className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={2}
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
+                />
+              </svg>
+              <input
+                type="text"
+                value={busca}
+                onChange={(e) => setBusca(e.target.value)}
+                placeholder="Buscar anúncio..."
+                className="h-9 w-56 rounded-lg border border-input bg-background pl-9 pr-3 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+              />
+            </div>
+
+            <button
+              onClick={() => setCompacto((v) => !v)}
+              className={`ml-auto inline-flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-3 text-sm font-medium shadow-sm transition-all hover:bg-accent hover:text-accent-foreground active:scale-[0.98] ${compacto ? "ring-1 ring-primary/30 border-primary/40" : ""}`}
+              title={compacto ? "Visualização detalhada" : "Visualização compacta"}
+            >
+              {compacto ? (
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
+                </svg>
+              ) : (
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 0 1 0 3.75H5.625a1.875 1.875 0 0 1 0-3.75Z" />
+                </svg>
+              )}
+              {compacto ? "Detalhado" : "Compacto"}
+            </button>
           </div>
           <TabelaPendentes
             linhas={linhasFiltradas}
@@ -546,6 +650,7 @@ export function PainelCriacao() {
             serviceAccountEmail={serviceAccountEmail}
             selecionados={selecionados}
             aoAlternarSelecao={alternarSelecao}
+            compacto={compacto}
           />
         </section>
       ) : !erro ? (

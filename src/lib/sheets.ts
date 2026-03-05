@@ -115,7 +115,10 @@ export async function atualizarLinha(
 
   const nomeAba = await obterNomeAba();
 
-  // Atualizar Status (L), Ad ID (M), Account ID (O)
+  const agora = new Date();
+  const dataCriacao = agora.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+
+  // Atualizar Status (L), Ad ID (M), Account ID (O), Data (P)
   await sheets.spreadsheets.values.batchUpdate({
     spreadsheetId,
     requestBody: {
@@ -133,9 +136,66 @@ export async function atualizarLinha(
           range: `'${nomeAba}'!O${indiceLinha}`,
           values: [[accountId]],
         },
+        {
+          range: `'${nomeAba}'!P${indiceLinha}`,
+          values: [[dataCriacao]],
+        },
       ],
     },
   });
+}
+
+/**
+ * Lê o status atual da coluna L direto da planilha (sem cache).
+ * Retorna o valor raw da célula (ex: "Pendente", "Processando", "Concluído", "Erro: ...").
+ */
+export async function lerStatusLinha(indiceLinha: number): Promise<string> {
+  const auth = getAuth();
+  const sheets = google.sheets({ version: "v4", auth });
+  const spreadsheetId = process.env.GOOGLE_SHEETS_ID;
+
+  if (!spreadsheetId) {
+    throw new Error("GOOGLE_SHEETS_ID não configurado");
+  }
+
+  const nomeAba = await obterNomeAba();
+
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `'${nomeAba}'!L${indiceLinha}`,
+  });
+
+  return (res.data.values?.[0]?.[0] ?? "").trim();
+}
+
+/**
+ * Marca a linha como "Processando" na planilha.
+ * Retorna true se conseguiu reservar (status anterior era Pendente ou Erro).
+ * Retorna false se outro processo já reservou.
+ */
+export async function reservarLinha(indiceLinha: number): Promise<boolean> {
+  const statusAtual = await lerStatusLinha(indiceLinha);
+
+  // Só permite processar se estiver Pendente ou com Erro
+  if (statusAtual !== "Pendente" && !statusAtual.startsWith("Erro")) {
+    return false;
+  }
+
+  const auth = getAuth();
+  const sheets = google.sheets({ version: "v4", auth });
+  const spreadsheetId = process.env.GOOGLE_SHEETS_ID!;
+  const nomeAba = await obterNomeAba();
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: `'${nomeAba}'!L${indiceLinha}`,
+    valueInputOption: "RAW",
+    requestBody: {
+      values: [["Processando"]],
+    },
+  });
+
+  return true;
 }
 
 export async function atualizarAccountId(
@@ -176,6 +236,9 @@ export async function marcarErro(
 
   const nomeAba = await obterNomeAba();
 
+  const agora = new Date();
+  const dataErro = agora.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+
   await sheets.spreadsheets.values.batchUpdate({
     spreadsheetId,
     requestBody: {
@@ -184,6 +247,10 @@ export async function marcarErro(
         {
           range: `'${nomeAba}'!L${indiceLinha}`,
           values: [[`Erro: ${mensagemErro.slice(0, 100)}`]],
+        },
+        {
+          range: `'${nomeAba}'!P${indiceLinha}`,
+          values: [[dataErro]],
         },
       ],
     },

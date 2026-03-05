@@ -44,6 +44,7 @@ interface TabelaPendentesProps {
   serviceAccountEmail?: string;
   selecionados: Set<number>;
   aoAlternarSelecao: (indiceLinha: number) => void;
+  compacto?: boolean;
 }
 
 function extrairFileIdCliente(driveUrl: string): string | null {
@@ -195,6 +196,168 @@ function PreviewVideoDialog({
   );
 }
 
+function StatusDot({ status }: { status: StatusProcessamento }) {
+  const cores: Record<StatusProcessamento, string> = {
+    pendente: "bg-yellow-500",
+    processando: "bg-blue-400 animate-pulse",
+    concluido: "bg-green-500",
+    erro: "bg-red-500",
+  };
+  const rotulos: Record<StatusProcessamento, string> = {
+    pendente: "Pendente",
+    processando: "Processando",
+    concluido: "Concluído",
+    erro: "Erro",
+  };
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground" title={rotulos[status]}>
+      <span className={`h-2 w-2 rounded-full ${cores[status]}`} />
+      {rotulos[status]}
+    </span>
+  );
+}
+
+function TabelaCompacta({
+  linhas,
+  aoSubir,
+  processando,
+  selecionados,
+  aoAlternarSelecao,
+  setPreviewAberto,
+}: {
+  linhas: LinhaComStatus[];
+  aoSubir: (linha: LinhaComStatus) => void;
+  processando: boolean;
+  selecionados: Set<number>;
+  aoAlternarSelecao: (indiceLinha: number) => void;
+  setPreviewAberto: (indiceLinha: number) => void;
+}) {
+  return (
+    <div className="rounded-lg border overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b bg-muted/50">
+              <th className="w-10 px-3 py-2.5" />
+              <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Status</th>
+              <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Nome do Anúncio</th>
+              <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Campanha</th>
+              <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Ad Set</th>
+              <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">CTA</th>
+              <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Vídeo</th>
+              <th className="px-3 py-2.5 text-right font-medium text-muted-foreground">Ação</th>
+            </tr>
+          </thead>
+          <tbody>
+            {linhas.map((linha) => {
+              const concluido = linha.statusProcessamento === "concluido";
+              const temErro = linha.statusProcessamento === "erro";
+              const processandoLinha = linha.statusProcessamento === "processando";
+              const videoInacessivel = linha.statusVideo === "inacessivel";
+              const selecionada = selecionados.has(linha.indiceLinha);
+              const podeSelecionar = !concluido && !processandoLinha && !videoInacessivel;
+
+              return (
+                <tr
+                  key={linha.indiceLinha}
+                  className={`border-b last:border-b-0 transition-colors ${
+                    concluido
+                      ? "bg-green-50/30"
+                      : temErro
+                        ? "bg-destructive/5"
+                        : selecionada
+                          ? "bg-primary/5"
+                          : "hover:bg-muted/30"
+                  }`}
+                >
+                  <td className="px-3 py-2">
+                    {podeSelecionar && (
+                      <Checkbox
+                        checked={selecionada}
+                        onCheckedChange={() => aoAlternarSelecao(linha.indiceLinha)}
+                        aria-label={`Selecionar ${linha.adName}`}
+                      />
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    <StatusDot status={linha.statusProcessamento} />
+                  </td>
+                  <td className="px-3 py-2">
+                    <span className="font-medium truncate block max-w-xs" title={linha.adName}>
+                      {linha.adName}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-muted-foreground truncate max-w-[10rem]" title={linha.campaign}>
+                    {linha.campaign}
+                  </td>
+                  <td className="px-3 py-2 text-muted-foreground truncate max-w-[10rem]" title={linha.adSet}>
+                    {linha.adSet}
+                  </td>
+                  <td className="px-3 py-2 text-muted-foreground">
+                    {linha.cta}
+                  </td>
+                  <td className="px-3 py-2">
+                    {linha.linkVideo ? (
+                      <button
+                        onClick={() => setPreviewAberto(linha.indiceLinha)}
+                        className="inline-flex items-center gap-1 text-xs text-green-700 hover:text-green-900 transition-colors"
+                        title="Ver vídeo"
+                      >
+                        <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M8 5v14l11-7z" />
+                        </svg>
+                        Ver
+                      </button>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">-</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    {concluido ? (
+                      <a
+                        href={
+                          linha.accountId
+                            ? `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${linha.accountId}&selected_ad_ids=${linha.adIdCriado}`
+                            : `https://adsmanager.facebook.com/adsmanager/manage/ads?selected_ad_ids=${linha.adIdCriado}`
+                        }
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs font-medium text-green-700 hover:text-green-900 transition-colors"
+                      >
+                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                        </svg>
+                        Ads Manager
+                      </a>
+                    ) : (
+                      <button
+                        onClick={() => aoSubir(linha)}
+                        disabled={processando || processandoLinha || videoInacessivel}
+                        className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
+                      >
+                        {processandoLinha ? (
+                          <>
+                            <span className="h-3 w-3 animate-spin rounded-full border-[1.5px] border-primary-foreground/30 border-t-primary-foreground" />
+                            Subindo
+                          </>
+                        ) : temErro ? (
+                          "Tentar"
+                        ) : (
+                          "Subir"
+                        )}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export function TabelaPendentes({
   linhas,
   carregando,
@@ -204,6 +367,7 @@ export function TabelaPendentes({
   serviceAccountEmail,
   selecionados,
   aoAlternarSelecao,
+  compacto = false,
 }: TabelaPendentesProps) {
   const [previewAberto, setPreviewAberto] = useState<number | null>(null);
 
@@ -259,6 +423,16 @@ export function TabelaPendentes({
         />
       )}
 
+      {compacto ? (
+        <TabelaCompacta
+          linhas={linhas}
+          aoSubir={aoSubir}
+          processando={processando}
+          selecionados={selecionados}
+          aoAlternarSelecao={aoAlternarSelecao}
+          setPreviewAberto={setPreviewAberto}
+        />
+      ) : (
       <div className="flex flex-col gap-4">
         {linhas.map((linha) => {
           const concluido = linha.statusProcessamento === "concluido";
@@ -308,15 +482,34 @@ export function TabelaPendentes({
                           {linha.adName}
                         </h3>
                         <StatusBadge status={linha.statusProcessamento} />
-                        <VideoBadge
-                          status={linha.statusVideo}
-                          nomeArquivo={linha.nomeArquivoVideo}
-                          onClick={
-                            videoAcessivel
-                              ? () => setPreviewAberto(linha.indiceLinha)
-                              : undefined
-                          }
-                        />
+                        {concluido ? (
+                          linha.linkVideo && (
+                            <Badge
+                              variant="secondary"
+                              className="gap-1.5 border-green-200 bg-green-50 text-green-700 cursor-pointer hover:bg-green-100 transition-colors"
+                              onClick={() => setPreviewAberto(linha.indiceLinha)}
+                            >
+                              <svg
+                                className="h-3 w-3"
+                                fill="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path d="M8 5v14l11-7z" />
+                              </svg>
+                              Ver vídeo
+                            </Badge>
+                          )
+                        ) : (
+                          <VideoBadge
+                            status={linha.statusVideo}
+                            nomeArquivo={linha.nomeArquivoVideo}
+                            onClick={
+                              videoAcessivel
+                                ? () => setPreviewAberto(linha.indiceLinha)
+                                : undefined
+                            }
+                          />
+                        )}
                       </div>
                       <p className="text-sm text-muted-foreground leading-relaxed">
                         {linha.textoPrincipal}
@@ -473,6 +666,7 @@ export function TabelaPendentes({
           );
         })}
       </div>
+      )}
     </>
   );
 }

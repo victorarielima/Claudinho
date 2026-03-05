@@ -6,7 +6,7 @@ import {
   criarAnuncio,
   buscarAccountIdDoAdSet,
 } from "@/lib/meta-criar";
-import { atualizarLinha, marcarErro } from "@/lib/sheets";
+import { atualizarLinha, marcarErro, reservarLinha } from "@/lib/sheets";
 
 const PAGE_IDS_POR_CONTA: Record<string, string | undefined> = {
   [process.env.META_AD_ACCOUNT_EVINO ?? ""]: process.env.META_PAGE_ID_EVINO,
@@ -46,6 +46,17 @@ export async function POST(request: NextRequest) {
         { erro: "Campos obrigatórios: adSetId, adName, linkVideo" },
         { status: 400 }
       );
+    }
+
+    // 0. Reservar linha na planilha (check real-time + marcar "Processando")
+    if (indiceLinha) {
+      const reservou = await reservarLinha(indiceLinha);
+      if (!reservou) {
+        return NextResponse.json(
+          { erro: "Este anúncio já está sendo processado ou já foi criado." },
+          { status: 409 }
+        );
+      }
     }
 
     // 1. Descobrir account ID a partir do adset
