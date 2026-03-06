@@ -16,9 +16,18 @@ function formatarHora(iso: string) {
   });
 }
 
+type Canal = "todos" | "ecommerce" | "clube";
+
+const CANAIS: { valor: Canal; rotulo: string }[] = [
+  { valor: "todos", rotulo: "Todos" },
+  { valor: "ecommerce", rotulo: "Ecommerce" },
+  { valor: "clube", rotulo: "Clube" },
+];
+
 export function PainelAnuncios() {
   const [contaId, setContaId] = useState(CONTA_PADRAO);
   const [periodo, setPeriodo] = useState<PresetPeriodo>("last_30d");
+  const [canal, setCanal] = useState<Canal>("todos");
   const [anuncios, setAnuncios] = useState<AnuncioMeta[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
@@ -34,6 +43,7 @@ export function PainelAnuncios() {
         const params = new URLSearchParams({
           accountId: contaId,
           datePreset: periodo,
+          canal,
         });
         if (forcar) params.set("fresh", "1");
 
@@ -54,7 +64,7 @@ export function PainelAnuncios() {
         setCarregando(false);
       }
     },
-    [contaId, periodo]
+    [contaId, periodo, canal]
   );
 
   useEffect(() => {
@@ -75,6 +85,21 @@ export function PainelAnuncios() {
         <div className="flex items-center gap-3">
           <SeletorConta valor={contaId} aoMudar={setContaId} />
           <SeletorPeriodo valor={periodo} aoMudar={setPeriodo} />
+          <div className="flex items-center gap-1 rounded-lg border bg-muted/40 p-1">
+            {CANAIS.map((c) => (
+              <button
+                key={c.valor}
+                onClick={() => setCanal(c.valor)}
+                className={`rounded-md px-3 py-1 text-sm font-medium transition-all ${
+                  canal === c.valor
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {c.rotulo}
+              </button>
+            ))}
+          </div>
           <button
             onClick={() => buscarDados(true)}
             disabled={carregando}

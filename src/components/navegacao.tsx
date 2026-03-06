@@ -14,6 +14,7 @@ import { Separator } from "@/components/ui/separator";
 const LINKS = [
   { href: "/", rotulo: "Criação" },
   { href: "/performance", rotulo: "Performance" },
+  { href: "/historico", rotulo: "Histórico" },
 ];
 
 export function Navegacao() {

@@ -3,19 +3,33 @@ import {
   buscarAnunciosAtivos,
   CONTAS_META,
   type PresetPeriodo,
+  type AnuncioMeta,
 } from "@/lib/meta";
 
 // Cache em memória: chave = "accountId:datePreset", valor = { data, timestamp }
 const cache = new Map<
   string,
-  { data: unknown; timestamp: number }
+  { data: AnuncioMeta[]; timestamp: number }
 >();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos
+
+type Canal = "todos" | "ecommerce" | "clube";
+
+function filtrarPorCanal(anuncios: AnuncioMeta[], canal: Canal): AnuncioMeta[] {
+  if (canal === "todos") return anuncios;
+
+  return anuncios.filter((a) => {
+    const nomeCampanha = a.campaign?.name?.toLowerCase() ?? "";
+    const ehClube = nomeCampanha.includes("clube");
+    return canal === "clube" ? ehClube : !ehClube;
+  });
+}
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const accountId = searchParams.get("accountId");
   const datePreset = (searchParams.get("datePreset") ?? "last_30d") as PresetPeriodo;
+  const canal = (searchParams.get("canal") ?? "todos") as Canal;
   const forcarAtualizacao = searchParams.get("fresh") === "1";
 
   if (!accountId) {
@@ -33,34 +47,53 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  // Cache key não inclui canal — cacheamos todos e filtramos depois
   const cacheKey = `${accountId}:${datePreset}`;
 
-  // Verificar cache
+  let anuncios: AnuncioMeta[];
+  let fromCache = false;
+  let timestamp: number;
+
   if (!forcarAtualizacao) {
     const cached = cache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-      return NextResponse.json({
-        data: cached.data,
-        cache: true,
-        atualizadoEm: new Date(cached.timestamp).toISOString(),
-      });
+      anuncios = cached.data;
+      fromCache = true;
+      timestamp = cached.timestamp;
+    } else {
+      anuncios = await buscarAnunciosAtivosComCache(accountId, datePreset, cacheKey);
+      fromCache = false;
+      timestamp = Date.now();
     }
+  } else {
+    anuncios = await buscarAnunciosAtivosComCache(accountId, datePreset, cacheKey);
+    fromCache = false;
+    timestamp = Date.now();
   }
 
+  // Filtrar por canal
+  const filtrados = filtrarPorCanal(anuncios, canal);
+
+  return NextResponse.json({
+    data: filtrados,
+    total: filtrados.length,
+    canal,
+    cache: fromCache,
+    atualizadoEm: new Date(timestamp).toISOString(),
+  });
+}
+
+async function buscarAnunciosAtivosComCache(
+  accountId: string,
+  datePreset: PresetPeriodo,
+  cacheKey: string
+): Promise<AnuncioMeta[]> {
   try {
     const anuncios = await buscarAnunciosAtivos(accountId, datePreset);
-
-    // Salvar no cache
     cache.set(cacheKey, { data: anuncios, timestamp: Date.now() });
-
-    return NextResponse.json({
-      data: anuncios,
-      cache: false,
-      atualizadoEm: new Date().toISOString(),
-    });
+    return anuncios;
   } catch (error) {
-    const mensagem =
-      error instanceof Error ? error.message : "Erro desconhecido";
-    return NextResponse.json({ erro: mensagem }, { status: 500 });
+    const mensagem = error instanceof Error ? error.message : "Erro desconhecido";
+    throw new Error(mensagem);
   }
 }

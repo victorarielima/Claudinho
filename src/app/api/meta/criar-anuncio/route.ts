@@ -1,11 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import { baixarArquivoDrive } from "@/lib/drive";
 import {
   uploadVideo,
-  criarCreative,
+  uploadImage,
+  criarCreativeVideo,
+  criarCreativeImagem,
   criarAnuncio,
   buscarAccountIdDoAdSet,
+  type ImagemPlacement,
 } from "@/lib/meta-criar";
+import { buscarAd, buscarBrand, atualizarStatusAd, atualizarMetaAssetId } from "@/lib/db";
+
+// Fallback para compatibilidade: se o ad veio da planilha e ainda não tem brand no banco
 import { atualizarLinha, marcarErro, reservarLinha, ABAS, type ChaveAba } from "@/lib/sheets";
 
 const PAGE_IDS_POR_CONTA: Record<string, string | undefined> = {
@@ -13,14 +20,22 @@ const PAGE_IDS_POR_CONTA: Record<string, string | undefined> = {
   [process.env.META_AD_ACCOUNT_GRANDCRU ?? ""]: process.env.META_PAGE_ID_GRANDCRU,
 };
 
-function resolverPageId(pageIdPlanilha: string, accountId: string): string | null {
-  if (pageIdPlanilha && pageIdPlanilha.trim()) {
-    return pageIdPlanilha.trim();
+function resolverPageId(pageIdExplicito: string | null, accountId: string): string | null {
+  if (pageIdExplicito && pageIdExplicito.trim()) {
+    return pageIdExplicito.trim();
   }
   return PAGE_IDS_POR_CONTA[accountId] ?? null;
 }
 
-interface CorpoRequisicao {
+// ─── Novo fluxo: via Supabase (adId) ───────────────────────
+
+interface CorpoNovoFluxo {
+  adId: string;
+}
+
+// ─── Fluxo legado: via planilha (indiceLinha) ───────────────
+
+interface CorpoLegado {
   indiceLinha: number;
   aba: ChaveAba;
   adSetId: string;
@@ -35,15 +50,152 @@ interface CorpoRequisicao {
 }
 
 export async function POST(request: NextRequest) {
+  const body = await request.json();
+
+  // Detectar qual fluxo usar
+  if (body.adId) {
+    return processarFluxoNovo(body as CorpoNovoFluxo);
+  }
+  return processarFluxoLegado(body as CorpoLegado);
+}
+
+// ─── Fluxo novo: lê do banco, suporta video + image ────────
+
+async function processarFluxoNovo(body: CorpoNovoFluxo) {
+  const { userId } = await auth();
+
+  try {
+    const ad = await buscarAd(body.adId);
+    if (!ad) {
+      return NextResponse.json({ erro: "Ad não encontrado" }, { status: 404 });
+    }
+
+    if (ad.status !== "pendente" && ad.status !== "erro") {
+      return NextResponse.json(
+        { erro: "Este anúncio já está sendo processado ou já foi criado." },
+        { status: 409 }
+      );
+    }
+
+    // Marcar como processando
+    await atualizarStatusAd(ad.id, "processando", undefined, userId ?? "system");
+
+    // Buscar brand para page_id
+    const brand = await buscarBrand(ad.brand_id);
+    if (!brand) {
+      throw new Error("Brand não encontrado");
+    }
+
+    if (!ad.ad_set_id) {
+      throw new Error("Ad Set ID é obrigatório para subir na Meta");
+    }
+
+    // Descobrir account ID a partir do adset
+    const accountId = await buscarAccountIdDoAdSet(ad.ad_set_id);
+
+    const pageId = resolverPageId(brand.meta_page_id, accountId);
+    if (!pageId) {
+      throw new Error("Page ID não encontrado. Configure na brand ou no .env");
+    }
+
+    const assets = ad.ad_assets ?? [];
+    let creativeId: string;
+
+    if (ad.type === "video") {
+      // ── Fluxo vídeo ──
+      const videoAsset = assets.find((a) => a.asset_type === "video");
+      if (!videoAsset) throw new Error("Asset de vídeo não encontrado");
+
+      const arquivo = await baixarArquivoDrive(videoAsset.asset_url);
+      const videoId = await uploadVideo(accountId, arquivo.buffer, arquivo.fileName);
+
+      await atualizarMetaAssetId(videoAsset.id, videoId);
+
+      creativeId = await criarCreativeVideo(accountId, {
+        pageId,
+        videoId,
+        message: ad.texto_principal || "",
+        title: ad.titulo || "",
+        linkDescription: ad.descricao || "",
+        ctaType: ad.cta || "SHOP_NOW",
+        link: ad.link_anuncio || "",
+        name: `Creative - ${ad.ad_name}`,
+      });
+    } else {
+      // ── Fluxo imagem (multi-placement) ──
+      const imageAssets = assets.filter((a) => a.asset_type === "image");
+      if (imageAssets.length === 0) throw new Error("Nenhum asset de imagem encontrado");
+
+      // Upload de todas as imagens em paralelo
+      const imagensComHash: ImagemPlacement[] = await Promise.all(
+        imageAssets.map(async (asset) => {
+          const hash = await uploadImage(accountId, asset.asset_url);
+          await atualizarMetaAssetId(asset.id, hash);
+          return { imageHash: hash, placement: asset.placement };
+        })
+      );
+
+      creativeId = await criarCreativeImagem(accountId, {
+        pageId,
+        imagens: imagensComHash,
+        message: ad.texto_principal || "",
+        title: ad.titulo || "",
+        linkDescription: ad.descricao || "",
+        ctaType: ad.cta || "SHOP_NOW",
+        link: ad.link_anuncio || "",
+        name: `Creative - ${ad.ad_name}`,
+      });
+    }
+
+    // Criar anúncio (PAUSED)
+    const metaAdId = await criarAnuncio(accountId, ad.ad_set_id, ad.ad_name, creativeId);
+
+    // Atualizar banco com sucesso
+    await atualizarStatusAd(
+      ad.id,
+      "concluido",
+      {
+        meta_ad_id: metaAdId,
+        meta_creative_id: creativeId,
+        meta_account_id: accountId.replace("act_", ""),
+      },
+      userId ?? "system"
+    );
+
+    return NextResponse.json({
+      sucesso: true,
+      adId: metaAdId,
+      creativeId,
+      accountId: accountId.replace("act_", ""),
+    });
+  } catch (error) {
+    const mensagem = error instanceof Error ? error.message : "Erro desconhecido";
+
+    try {
+      await atualizarStatusAd(
+        body.adId,
+        "erro",
+        { error_message: mensagem.slice(0, 200) },
+        userId ?? "system"
+      );
+    } catch {
+      // Ignora erro ao marcar no banco
+    }
+
+    return NextResponse.json({ erro: mensagem }, { status: 500 });
+  }
+}
+
+// ─── Fluxo legado: lê da planilha (mantido para transição) ──
+
+async function processarFluxoLegado(body: CorpoLegado) {
   let indiceLinha: number | undefined;
   let nomeAba: string = ABAS.evino;
 
   try {
-    const body: CorpoRequisicao = await request.json();
     indiceLinha = body.indiceLinha;
     nomeAba = ABAS[body.aba] ?? ABAS.evino;
 
-    // Validações básicas
     if (!body.adSetId || !body.adName || !body.linkVideo) {
       return NextResponse.json(
         { erro: "Campos obrigatórios: adSetId, adName, linkVideo" },
@@ -51,7 +203,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 0. Reservar linha na planilha (check real-time + marcar "Processando")
     if (indiceLinha) {
       const reservou = await reservarLinha(nomeAba, indiceLinha);
       if (!reservou) {
@@ -62,10 +213,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 1. Descobrir account ID a partir do adset
     const accountId = await buscarAccountIdDoAdSet(body.adSetId);
 
-    // Resolver Page ID: planilha → fallback .env por conta
     const pageId = resolverPageId(body.pageId, accountId);
     if (!pageId) {
       return NextResponse.json(
@@ -74,18 +223,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 2. Baixar vídeo do Google Drive
     const arquivo = await baixarArquivoDrive(body.linkVideo);
 
-    // 3. Upload do vídeo para o Meta (ad account)
     const videoId = await uploadVideo(
       accountId,
       arquivo.buffer,
       arquivo.fileName
     );
 
-    // 4. Criar o Ad Creative (User Token via FormData — testado e confirmado)
-    const creativeId = await criarCreative(accountId, {
+    const creativeId = await criarCreativeVideo(accountId, {
       pageId,
       videoId,
       message: body.textoPrincipal,
@@ -96,7 +242,6 @@ export async function POST(request: NextRequest) {
       name: `Creative - ${body.adName}`,
     });
 
-    // 5. Criar o Anúncio (PAUSED)
     const adId = await criarAnuncio(
       accountId,
       body.adSetId,
@@ -104,7 +249,6 @@ export async function POST(request: NextRequest) {
       creativeId
     );
 
-    // 6. Atualizar a planilha com o Ad ID e status "Concluído"
     if (indiceLinha) {
       await atualizarLinha(nomeAba, indiceLinha, adId, accountId.replace("act_", ""));
     }
@@ -120,7 +264,6 @@ export async function POST(request: NextRequest) {
     const mensagem =
       error instanceof Error ? error.message : "Erro desconhecido";
 
-    // Marcar erro na planilha se possível
     if (indiceLinha) {
       try {
         await marcarErro(nomeAba, indiceLinha, mensagem);

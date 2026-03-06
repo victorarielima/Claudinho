@@ -29,6 +29,8 @@ function extrairErroMeta(json: Record<string, unknown>): string {
   return parts.join(" ") || "Erro desconhecido";
 }
 
+// ─── Video Upload ───────────────────────────────────────────
+
 export async function uploadVideo(
   accountId: string,
   videoBuffer: Buffer,
@@ -65,11 +67,6 @@ export async function uploadVideo(
   return videoId;
 }
 
-/**
- * Faz polling no status do vídeo até que o Meta finalize o processamento.
- * O vídeo precisa estar com status "ready" para ser usado em um Creative.
- * Tenta por até 5 minutos com intervalos crescentes.
- */
 async function aguardarProcessamentoVideo(videoId: string): Promise<void> {
   const token = getAccessToken();
   const maxTentativas = 30;
@@ -111,9 +108,6 @@ async function aguardarProcessamentoVideo(videoId: string): Promise<void> {
   );
 }
 
-/**
- * Busca a URL do thumbnail preferido do vídeo no Meta.
- */
 async function buscarThumbnailVideo(videoId: string): Promise<string> {
   const token = getAccessToken();
   const url = `${META_API_BASE}/${videoId}?fields=picture,thumbnails&access_token=${token}`;
@@ -127,22 +121,72 @@ async function buscarThumbnailVideo(videoId: string): Promise<string> {
     );
   }
 
-  // Tentar pegar o thumbnail preferido
   const preferido = json.thumbnails?.data?.find(
     (t: { is_preferred?: boolean }) => t.is_preferred
   );
   if (preferido?.uri) return preferido.uri;
-
-  // Fallback: primeiro thumbnail disponível
   if (json.thumbnails?.data?.[0]?.uri) return json.thumbnails.data[0].uri;
-
-  // Fallback: picture (menor resolução)
   if (json.picture) return json.picture;
 
   throw new Error("Não foi possível obter thumbnail do vídeo.");
 }
 
-export interface ParamsCriativo {
+// ─── Image Upload ───────────────────────────────────────────
+
+/**
+ * Faz upload de uma imagem para o Meta a partir de uma URL pública (Cloudinary).
+ * Baixa a imagem e envia como multipart/form-data (o método `url` requer permissões
+ * avançadas do app; multipart funciona com qualquer app em modo desenvolvimento).
+ * Retorna o image_hash necessário para criar o creative.
+ */
+export async function uploadImage(
+  accountId: string,
+  imageUrl: string
+): Promise<string> {
+  const token = getAccessToken();
+  const endpoint = `${META_API_BASE}/${accountId}/adimages`;
+
+  // Baixar a imagem da URL pública
+  const imgRes = await fetch(imageUrl);
+  if (!imgRes.ok) {
+    throw new Error(`Erro ao baixar imagem de ${imageUrl}: ${imgRes.status}`);
+  }
+  const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
+  const filename = imageUrl.split("/").pop()?.split("?")[0] || "image.jpg";
+
+  // Montar multipart/form-data
+  const formData = new FormData();
+  formData.append("filename", new Blob([imgBuffer]), filename);
+  formData.append("access_token", token);
+
+  const res = await fetch(endpoint, {
+    method: "POST",
+    body: formData,
+  });
+
+  const json = await res.json();
+  if (!res.ok || json.error) {
+    throw new Error(`Erro ao fazer upload da imagem: ${extrairErroMeta(json)}`);
+  }
+
+  // A resposta tem formato: { images: { "filename": { hash: "..." } } }
+  const images = json.images;
+  if (!images) {
+    throw new Error("Resposta inesperada do Meta ao fazer upload da imagem");
+  }
+
+  const firstKey = Object.keys(images)[0];
+  const hash = images[firstKey]?.hash;
+  if (!hash) {
+    throw new Error("Image hash não encontrado na resposta do Meta");
+  }
+
+  return hash;
+}
+
+// ─── Video Creative ─────────────────────────────────────────
+
+export interface ParamsCriativoVideo {
   pageId: string;
   videoId: string;
   message: string;
@@ -153,14 +197,13 @@ export interface ParamsCriativo {
   name: string;
 }
 
-export async function criarCreative(
+export async function criarCreativeVideo(
   accountId: string,
-  params: ParamsCriativo
+  params: ParamsCriativoVideo
 ): Promise<string> {
   const token = getAccessToken();
   const url = `${META_API_BASE}/${accountId}/adcreatives`;
 
-  // Buscar thumbnail gerado automaticamente pelo Meta
   const imageUrl = await buscarThumbnailVideo(params.videoId);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -172,13 +215,10 @@ export async function criarCreative(
     image_url: imageUrl,
   };
 
-  // Só incluir CTA se houver link
   if (params.link && params.link.trim()) {
     videoData.call_to_action = {
       type: params.ctaType || "SHOP_NOW",
-      value: {
-        link: params.link,
-      },
+      value: { link: params.link },
     };
   }
 
@@ -187,7 +227,6 @@ export async function criarCreative(
     video_data: videoData,
   };
 
-  // Meta exige multipart form-data para /adcreatives (JSON não funciona)
   const formData = new FormData();
   formData.append("name", params.name);
   formData.append("object_story_spec", JSON.stringify(objectStorySpec));
@@ -200,11 +239,168 @@ export async function criarCreative(
 
   const json = await res.json();
   if (!res.ok || json.error) {
-    throw new Error(`Erro ao criar creative: ${extrairErroMeta(json)}`);
+    throw new Error(`Erro ao criar creative de vídeo: ${extrairErroMeta(json)}`);
   }
 
   return json.id;
 }
+
+// Manter export legado para compatibilidade durante migração
+export const criarCreative = criarCreativeVideo;
+export type ParamsCriativo = ParamsCriativoVideo;
+
+// ─── Image Creative (multi-placement) ──────────────────────
+
+export interface ImagemPlacement {
+  imageHash: string;
+  placement: string; // 'feed', 'stories', 'reels'
+}
+
+export interface ParamsCriativoImagem {
+  pageId: string;
+  imagens: ImagemPlacement[];
+  message: string;
+  title: string;
+  linkDescription: string;
+  ctaType: string;
+  link: string;
+  name: string;
+}
+
+// Mapa de placement genérico → customization_spec do Meta
+const PLACEMENT_RULES: Record<string, object> = {
+  feed: {
+    publisher_platforms: ["facebook", "instagram"],
+    facebook_positions: ["feed"],
+    instagram_positions: ["stream"],
+  },
+  stories: {
+    publisher_platforms: ["facebook", "instagram"],
+    facebook_positions: ["story"],
+    instagram_positions: ["story"],
+  },
+  reels: {
+    publisher_platforms: ["facebook", "instagram"],
+    facebook_positions: ["reels"],
+    instagram_positions: ["reels"],
+  },
+};
+
+export async function criarCreativeImagem(
+  accountId: string,
+  params: ParamsCriativoImagem
+): Promise<string> {
+  const token = getAccessToken();
+  const url = `${META_API_BASE}/${accountId}/adcreatives`;
+
+  // Se só tem 1 imagem, usar link_data simples
+  if (params.imagens.length === 1) {
+    return criarCreativeImagemSimples(accountId, params);
+  }
+
+  // Usar a imagem de feed (ou a primeira) como default no object_story_spec
+  const defaultImage =
+    params.imagens.find((img) => img.placement === "feed") ?? params.imagens[0];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const linkData: Record<string, any> = {
+    message: params.message,
+    link: params.link,
+    name: params.title,
+    description: params.linkDescription,
+    image_hash: defaultImage.imageHash,
+  };
+
+  if (params.ctaType) {
+    linkData.call_to_action = {
+      type: params.ctaType || "SHOP_NOW",
+      value: { link: params.link },
+    };
+  }
+
+  const objectStorySpec = {
+    page_id: params.pageId,
+    link_data: linkData,
+  };
+
+  // asset_customization_rules: cada regra mapeia 1 imagem → placements específicos
+  const assetCustomizationRules = params.imagens
+    .map((img) => {
+      const spec = PLACEMENT_RULES[img.placement];
+      if (!spec) return null;
+      return {
+        customization_spec: spec,
+        image_hash: img.imageHash,
+      };
+    })
+    .filter(Boolean);
+
+  const formData = new FormData();
+  formData.append("name", params.name);
+  formData.append("object_story_spec", JSON.stringify(objectStorySpec));
+  formData.append("asset_customization_rules", JSON.stringify(assetCustomizationRules));
+  formData.append("access_token", token);
+
+  const res = await fetch(url, {
+    method: "POST",
+    body: formData,
+  });
+
+  const json = await res.json();
+  if (!res.ok || json.error) {
+    throw new Error(`Erro ao criar creative de imagem: ${extrairErroMeta(json)}`);
+  }
+
+  return json.id;
+}
+
+async function criarCreativeImagemSimples(
+  accountId: string,
+  params: ParamsCriativoImagem
+): Promise<string> {
+  const token = getAccessToken();
+  const url = `${META_API_BASE}/${accountId}/adcreatives`;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const linkData: Record<string, any> = {
+    message: params.message,
+    link: params.link,
+    name: params.title,
+    description: params.linkDescription,
+    image_hash: params.imagens[0].imageHash,
+  };
+
+  if (params.ctaType) {
+    linkData.call_to_action = {
+      type: params.ctaType || "SHOP_NOW",
+      value: { link: params.link },
+    };
+  }
+
+  const objectStorySpec = {
+    page_id: params.pageId,
+    link_data: linkData,
+  };
+
+  const formData = new FormData();
+  formData.append("name", params.name);
+  formData.append("object_story_spec", JSON.stringify(objectStorySpec));
+  formData.append("access_token", token);
+
+  const res = await fetch(url, {
+    method: "POST",
+    body: formData,
+  });
+
+  const json = await res.json();
+  if (!res.ok || json.error) {
+    throw new Error(`Erro ao criar creative de imagem: ${extrairErroMeta(json)}`);
+  }
+
+  return json.id;
+}
+
+// ─── Criar Anúncio ──────────────────────────────────────────
 
 export async function criarAnuncio(
   accountId: string,
@@ -237,9 +433,8 @@ export async function criarAnuncio(
   return json.id;
 }
 
-/**
- * Descobre o account ID a partir do adset_id, buscando na API do Meta.
- */
+// ─── Utilitários ────────────────────────────────────────────
+
 export async function buscarAccountIdDoAdSet(
   adsetId: string
 ): Promise<string> {

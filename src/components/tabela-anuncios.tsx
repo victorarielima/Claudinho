@@ -161,7 +161,21 @@ export function TabelaAnuncios({ anuncios, carregando }: TabelaAnunciosProps) {
                   </div>
                 </TableCell>
                 <TableCell className="text-sm text-muted-foreground">
-                  {anuncio.campaign?.name ?? "—"}
+                  <div className="flex items-center gap-2">
+                    <span>{anuncio.campaign?.name ?? "—"}</span>
+                    {anuncio.campaign?.name && (
+                      <Badge
+                        variant="outline"
+                        className={`text-[10px] px-1.5 py-0 h-4 font-normal ${
+                          anuncio.campaign.name.toLowerCase().includes("clube")
+                            ? "border-purple-200 bg-purple-50 text-purple-700"
+                            : "border-blue-200 bg-blue-50 text-blue-700"
+                        }`}
+                      >
+                        {anuncio.campaign.name.toLowerCase().includes("clube") ? "Clube" : "Ecommerce"}
+                      </Badge>
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell>
                   <Badge variant="outline" className="text-xs font-normal">

@@ -34,6 +34,12 @@ export interface LinhaComStatus extends LinhaAnuncio {
   erroVideo?: string;
   nomeArquivoVideo?: string;
   thumbnailLink?: string;
+  // Campos novos (Supabase)
+  adId?: string;
+  tipo?: "video" | "image";
+  imageAssets?: { placement: string; url: string }[];
+  linkCampanha?: string;
+  linkAux?: string;
 }
 
 interface TabelaPendentesProps {
@@ -248,12 +254,13 @@ function TabelaCompacta({
             <tr className="border-b bg-muted/50">
               <th className="w-10 px-3 py-2.5" />
               <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Status</th>
+              <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Tipo</th>
               <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Nome do Anúncio</th>
               <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Campanha</th>
               <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Ad Set</th>
               <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Legenda</th>
               <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">CTA</th>
-              <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Vídeo</th>
+              <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Mídia</th>
               <th className="px-3 py-2.5 text-right font-medium text-muted-foreground">Ação</th>
             </tr>
           </thead>
@@ -262,7 +269,8 @@ function TabelaCompacta({
               const concluido = linha.statusProcessamento === "concluido";
               const temErro = linha.statusProcessamento === "erro";
               const processandoLinha = linha.statusProcessamento === "processando";
-              const videoInacessivel = linha.statusVideo === "inacessivel";
+              const isImage = linha.tipo === "image";
+              const videoInacessivel = !isImage && linha.statusVideo === "inacessivel";
               const selecionada = selecionados.has(linha.indiceLinha);
               const podeSelecionar = !concluido && !processandoLinha && !videoInacessivel;
 
@@ -291,6 +299,11 @@ function TabelaCompacta({
                     <StatusDot status={linha.statusProcessamento} />
                   </td>
                   <td className="px-3 py-2">
+                    <span className="text-xs text-muted-foreground">
+                      {linha.tipo === "image" ? "Imagem" : "Vídeo"}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2">
                     <span className="font-medium truncate block max-w-xs" title={linha.adName}>
                       {linha.adName}
                     </span>
@@ -314,7 +327,11 @@ function TabelaCompacta({
                     {linha.cta}
                   </td>
                   <td className="px-3 py-2">
-                    {linha.linkVideo ? (
+                    {isImage && linha.imageAssets && linha.imageAssets.length > 0 ? (
+                      <span className="text-xs text-muted-foreground">
+                        {linha.imageAssets.length} img
+                      </span>
+                    ) : linha.linkVideo && !isImage ? (
                       <button
                         onClick={() => setPreviewAberto(linha.indiceLinha)}
                         className="inline-flex items-center gap-1 text-xs text-green-700 hover:text-green-900 transition-colors"
@@ -455,8 +472,9 @@ export function TabelaPendentes({
             const concluido = linha.statusProcessamento === "concluido";
             const temErro = linha.statusProcessamento === "erro";
             const processandoLinha = linha.statusProcessamento === "processando";
-            const videoInacessivel = linha.statusVideo === "inacessivel";
-            const videoAcessivel = linha.statusVideo === "acessivel";
+            const isImage = linha.tipo === "image";
+            const videoInacessivel = !isImage && linha.statusVideo === "inacessivel";
+            const videoAcessivel = !isImage && linha.statusVideo === "acessivel";
 
             const selecionada = selecionados.has(linha.indiceLinha);
             const podeSelecionar =
@@ -492,7 +510,13 @@ export function TabelaPendentes({
 
                     {/* Thumbnail */}
                     <div className="relative shrink-0 w-24 h-24 overflow-hidden rounded-md border border-border bg-black/5 flex items-center justify-center">
-                      {linha.thumbnailLink ? (
+                      {isImage && linha.imageAssets && linha.imageAssets.length > 0 ? (
+                        <img
+                          src={linha.imageAssets[0].url}
+                          alt="Preview"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : linha.thumbnailLink ? (
                         <img
                           src={linha.thumbnailLink}
                           alt="Thumbnail"
@@ -525,33 +549,38 @@ export function TabelaPendentes({
                               {linha.adName}
                             </h3>
                             <StatusBadge status={linha.statusProcessamento} />
-                            {concluido ? (
-                              linha.linkVideo && (
-                                <Badge
-                                  variant="secondary"
-                                  className="gap-1.5 border-green-200 bg-green-50 text-green-700 cursor-pointer hover:bg-green-100 transition-colors"
-                                  onClick={() => setPreviewAberto(linha.indiceLinha)}
-                                >
-                                  <svg
-                                    className="h-3 w-3"
-                                    fill="currentColor"
-                                    viewBox="0 0 24 24"
+                            <Badge variant="outline" className="gap-1 text-xs">
+                              {isImage ? "Imagem" : "Vídeo"}
+                            </Badge>
+                            {!isImage && (
+                              concluido ? (
+                                linha.linkVideo && (
+                                  <Badge
+                                    variant="secondary"
+                                    className="gap-1.5 border-green-200 bg-green-50 text-green-700 cursor-pointer hover:bg-green-100 transition-colors"
+                                    onClick={() => setPreviewAberto(linha.indiceLinha)}
                                   >
-                                    <path d="M8 5v14l11-7z" />
-                                  </svg>
-                                  Ver vídeo
-                                </Badge>
+                                    <svg
+                                      className="h-3 w-3"
+                                      fill="currentColor"
+                                      viewBox="0 0 24 24"
+                                    >
+                                      <path d="M8 5v14l11-7z" />
+                                    </svg>
+                                    Ver vídeo
+                                  </Badge>
+                                )
+                              ) : (
+                                <VideoBadge
+                                  status={linha.statusVideo}
+                                  nomeArquivo={linha.nomeArquivoVideo}
+                                  onClick={
+                                    videoAcessivel
+                                      ? () => setPreviewAberto(linha.indiceLinha)
+                                      : undefined
+                                  }
+                                />
                               )
-                            ) : (
-                              <VideoBadge
-                                status={linha.statusVideo}
-                                nomeArquivo={linha.nomeArquivoVideo}
-                                onClick={
-                                  videoAcessivel
-                                    ? () => setPreviewAberto(linha.indiceLinha)
-                                    : undefined
-                                }
-                              />
                             )}
                           </div>
                           <p className="text-sm text-muted-foreground leading-relaxed">
@@ -612,7 +641,7 @@ export function TabelaPendentes({
                         </div>
                       </div>
 
-                      {/* Alerta: vídeo inacessível */}
+                      {/* Alerta: vídeo inacessível (somente para vídeos) */}
                       {videoInacessivel && (
                         <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3">
                           <div className="flex items-start justify-between gap-3">
@@ -660,6 +689,22 @@ export function TabelaPendentes({
                         </div>
                       )}
 
+                      {/* Preview de imagens (somente para image ads) */}
+                      {isImage && linha.imageAssets && linha.imageAssets.length > 0 && !concluido && (
+                        <div className="flex gap-3">
+                          {linha.imageAssets.map((asset) => (
+                            <div key={asset.placement} className="flex flex-col gap-1">
+                              <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                                {asset.placement}
+                              </span>
+                              <div className="h-16 w-16 rounded-md border overflow-hidden bg-muted">
+                                <img src={asset.url} alt={asset.placement} className="w-full h-full object-cover" />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
                       {/* Mensagem de erro */}
                       {temErro && linha.mensagemErro && (
                         <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -676,10 +721,9 @@ export function TabelaPendentes({
                         <DetalheItem rotulo="Título" valor={linha.titulo} />
                         <DetalheItem rotulo="CTA" valor={linha.cta} />
                         <DetalheItem rotulo="Descrição" valor={linha.descricao} />
-                        <DetalheItem
-                          rotulo="Page ID"
-                          valor={linha.pageId || "via .env"}
-                        />
+                        {linha.linkAnuncio && (
+                          <DetalheItem rotulo="Link UTM" valor={linha.linkAnuncio} />
+                        )}
                       </div>
                     </div>
                   </div>
