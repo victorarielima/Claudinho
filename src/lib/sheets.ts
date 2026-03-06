@@ -41,9 +41,12 @@ export async function lerLinhas(nomeAba: string): Promise<LinhaAnuncio[]> {
     throw new Error("GOOGLE_SHEETS_ID não configurado");
   }
 
+  // Colunas: A-I (campaign…cta), J (linkAux — não usado), K (linkAux2),
+  //          L (linkAnuncio), M (linkVideo), N (statusAutomacao),
+  //          O (adIdGerado), P (pageId), Q (accountId), R (data)
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `'${nomeAba}'!A:P`,
+    range: `'${nomeAba}'!A:R`,
   });
 
   const linhas = res.data.values;
@@ -55,7 +58,7 @@ export async function lerLinhas(nomeAba: string): Promise<LinhaAnuncio[]> {
 
   for (let i = 1; i < linhas.length; i++) {
     const row = linhas[i];
-    const statusAutomacao = (row[11] ?? "").trim();
+    const statusAutomacao = (row[13] ?? "").trim();
 
     // Ignorar linhas sem dados essenciais
     if (!row[4] && !row[3]) continue;
@@ -71,13 +74,13 @@ export async function lerLinhas(nomeAba: string): Promise<LinhaAnuncio[]> {
       titulo: row[6] ?? "",
       descricao: row[7] ?? "",
       cta: row[8] ?? "",
-      linkAnuncio: row[9] ?? "",
-      linkVideo: row[10] ?? "",
+      linkAnuncio: row[11] ?? "",
+      linkVideo: row[12] ?? "",
       statusAutomacao,
-      adIdGerado: row[12] ?? "",
-      pageId: row[13] ?? "",
-      accountId: row[14] ?? "",
-      data: row[15] ?? "",
+      adIdGerado: row[14] ?? "",
+      pageId: row[15] ?? "",
+      accountId: row[16] ?? "",
+      data: row[17] ?? "",
     });
   }
 
@@ -101,26 +104,26 @@ export async function atualizarLinha(
   const agora = new Date();
   const dataCriacao = agora.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
 
-  // Atualizar Status (L), Ad ID (M), Account ID (O), Data (P)
+  // Atualizar Status (N), Ad ID (O), Account ID (Q), Data (R)
   await sheets.spreadsheets.values.batchUpdate({
     spreadsheetId,
     requestBody: {
       valueInputOption: "RAW",
       data: [
         {
-          range: `'${nomeAba}'!L${indiceLinha}`,
+          range: `'${nomeAba}'!N${indiceLinha}`,
           values: [["Concluído"]],
         },
         {
-          range: `'${nomeAba}'!M${indiceLinha}`,
+          range: `'${nomeAba}'!O${indiceLinha}`,
           values: [[adId]],
         },
         {
-          range: `'${nomeAba}'!O${indiceLinha}`,
+          range: `'${nomeAba}'!Q${indiceLinha}`,
           values: [[accountId]],
         },
         {
-          range: `'${nomeAba}'!P${indiceLinha}`,
+          range: `'${nomeAba}'!R${indiceLinha}`,
           values: [[dataCriacao]],
         },
       ],
@@ -129,7 +132,7 @@ export async function atualizarLinha(
 }
 
 /**
- * Lê o status atual da coluna L direto da planilha (sem cache).
+ * Lê o status atual da coluna N direto da planilha (sem cache).
  * Retorna o valor raw da célula (ex: "Pendente", "Processando", "Concluído", "Erro: ...").
  */
 export async function lerStatusLinha(nomeAba: string, indiceLinha: number): Promise<string> {
@@ -143,7 +146,7 @@ export async function lerStatusLinha(nomeAba: string, indiceLinha: number): Prom
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `'${nomeAba}'!L${indiceLinha}`,
+    range: `'${nomeAba}'!N${indiceLinha}`,
   });
 
   return (res.data.values?.[0]?.[0] ?? "").trim();
@@ -168,7 +171,7 @@ export async function reservarLinha(nomeAba: string, indiceLinha: number): Promi
 
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: `'${nomeAba}'!L${indiceLinha}`,
+    range: `'${nomeAba}'!N${indiceLinha}`,
     valueInputOption: "RAW",
     requestBody: {
       values: [["Processando"]],
@@ -193,7 +196,7 @@ export async function atualizarAccountId(
 
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: `'${nomeAba}'!O${indiceLinha}`,
+    range: `'${nomeAba}'!Q${indiceLinha}`,
     valueInputOption: "RAW",
     requestBody: {
       values: [[accountId]],
@@ -223,11 +226,11 @@ export async function marcarErro(
       valueInputOption: "RAW",
       data: [
         {
-          range: `'${nomeAba}'!L${indiceLinha}`,
+          range: `'${nomeAba}'!N${indiceLinha}`,
           values: [[`Erro: ${mensagemErro.slice(0, 100)}`]],
         },
         {
-          range: `'${nomeAba}'!P${indiceLinha}`,
+          range: `'${nomeAba}'!R${indiceLinha}`,
           values: [[dataErro]],
         },
       ],
