@@ -6,7 +6,7 @@ import {
   criarAnuncio,
   buscarAccountIdDoAdSet,
 } from "@/lib/meta-criar";
-import { atualizarLinha, marcarErro, reservarLinha } from "@/lib/sheets";
+import { atualizarLinha, marcarErro, reservarLinha, ABAS, type ChaveAba } from "@/lib/sheets";
 
 const PAGE_IDS_POR_CONTA: Record<string, string | undefined> = {
   [process.env.META_AD_ACCOUNT_EVINO ?? ""]: process.env.META_PAGE_ID_EVINO,
@@ -22,6 +22,7 @@ function resolverPageId(pageIdPlanilha: string, accountId: string): string | nul
 
 interface CorpoRequisicao {
   indiceLinha: number;
+  aba: ChaveAba;
   adSetId: string;
   adName: string;
   textoPrincipal: string;
@@ -35,10 +36,12 @@ interface CorpoRequisicao {
 
 export async function POST(request: NextRequest) {
   let indiceLinha: number | undefined;
+  let nomeAba: string = ABAS.evino;
 
   try {
     const body: CorpoRequisicao = await request.json();
     indiceLinha = body.indiceLinha;
+    nomeAba = ABAS[body.aba] ?? ABAS.evino;
 
     // Validações básicas
     if (!body.adSetId || !body.adName || !body.linkVideo) {
@@ -50,7 +53,7 @@ export async function POST(request: NextRequest) {
 
     // 0. Reservar linha na planilha (check real-time + marcar "Processando")
     if (indiceLinha) {
-      const reservou = await reservarLinha(indiceLinha);
+      const reservou = await reservarLinha(nomeAba, indiceLinha);
       if (!reservou) {
         return NextResponse.json(
           { erro: "Este anúncio já está sendo processado ou já foi criado." },
@@ -103,7 +106,7 @@ export async function POST(request: NextRequest) {
 
     // 6. Atualizar a planilha com o Ad ID e status "Concluído"
     if (indiceLinha) {
-      await atualizarLinha(indiceLinha, adId, accountId.replace("act_", ""));
+      await atualizarLinha(nomeAba, indiceLinha, adId, accountId.replace("act_", ""));
     }
 
     return NextResponse.json({
@@ -120,7 +123,7 @@ export async function POST(request: NextRequest) {
     // Marcar erro na planilha se possível
     if (indiceLinha) {
       try {
-        await marcarErro(indiceLinha, mensagem);
+        await marcarErro(nomeAba, indiceLinha, mensagem);
       } catch {
         // Ignora erro ao marcar na planilha
       }

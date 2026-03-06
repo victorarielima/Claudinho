@@ -1,10 +1,13 @@
-import { NextResponse } from "next/server";
-import { lerLinhas, atualizarAccountId } from "@/lib/sheets";
+import { NextRequest, NextResponse } from "next/server";
+import { lerLinhas, atualizarAccountId, ABAS, type ChaveAba } from "@/lib/sheets";
 import { buscarAccountIdDoAdSet } from "@/lib/meta-criar";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const linhas = await lerLinhas();
+    const aba = (request.nextUrl.searchParams.get("aba") ?? "evino") as ChaveAba;
+    const nomeAba = ABAS[aba] ?? ABAS.evino;
+
+    const linhas = await lerLinhas(nomeAba);
 
     // Para itens concluídos sem accountId, resolver via adSetId e persistir na planilha
     const semAccount = linhas.filter(
@@ -17,7 +20,7 @@ export async function GET() {
           const accountId = await buscarAccountIdDoAdSet(l.adSetId);
           const numericId = accountId.replace("act_", "");
           l.accountId = numericId;
-          await atualizarAccountId(l.indiceLinha, numericId);
+          await atualizarAccountId(nomeAba, l.indiceLinha, numericId);
         } catch {
           // Não bloqueia o carregamento
         }

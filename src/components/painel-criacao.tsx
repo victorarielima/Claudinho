@@ -6,9 +6,15 @@ import {
   TabelaPendentes,
   type LinhaComStatus,
 } from "@/components/tabela-pendentes";
-import type { LinhaAnuncio } from "@/lib/sheets";
+import type { LinhaAnuncio, ChaveAba } from "@/lib/sheets";
+
+const MARCAS: { chave: ChaveAba; rotulo: string }[] = [
+  { chave: "evino", rotulo: "Evino" },
+  { chave: "grandcru", rotulo: "GrandCru" },
+];
 
 export function PainelCriacao() {
+  const [aba, setAba] = useState<ChaveAba>("evino");
   const [linhas, setLinhas] = useState<LinhaComStatus[]>([]);
   const [carregando, setCarregando] = useState(false);
   const [processando, setProcessando] = useState(false);
@@ -87,7 +93,7 @@ export function PainelCriacao() {
     setErro(null);
 
     try {
-      const res = await fetch("/api/sheets/pendentes");
+      const res = await fetch(`/api/sheets/pendentes?aba=${aba}`);
       const json = await res.json();
 
       if (!res.ok) {
@@ -128,7 +134,7 @@ export function PainelCriacao() {
     } finally {
       setCarregando(false);
     }
-  }, [validarVideos]);
+  }, [aba, validarVideos]);
 
   useEffect(() => {
     carregarPlanilha();
@@ -185,6 +191,7 @@ export function PainelCriacao() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           indiceLinha: linha.indiceLinha,
+          aba,
           adSetId: linha.adSetId,
           adName: linha.adName,
           textoPrincipal: linha.textoPrincipal,
@@ -232,7 +239,7 @@ export function PainelCriacao() {
     } finally {
       setProcessando(false);
     }
-  }, []);
+  }, [aba]);
 
   const subirSelecionados = useCallback(async () => {
     const podeSubir = (l: LinhaComStatus) =>
@@ -329,6 +336,35 @@ export function PainelCriacao() {
             O time preenche a planilha com os dados do criativo e a ferramenta
             cria os anúncios no Meta Ads.
           </p>
+          <div className="mt-3 flex items-center gap-1 rounded-lg border bg-muted/40 p-1 w-fit">
+            {MARCAS.map((m) => (
+              <button
+                key={m.chave}
+                onClick={() => {
+                  if (m.chave !== aba) {
+                    setAba(m.chave);
+                    setLinhas([]);
+                    setJaCarregou(false);
+                    setSelecionados(new Set());
+                    setErro(null);
+                    setFiltroStatus("todos");
+                    setFiltroData("todas");
+                    setFiltroCampanha("todas");
+                    setFiltroAdSet("todos");
+                    setBusca("");
+                  }
+                }}
+                disabled={carregando || processando}
+                className={`inline-flex items-center gap-1.5 rounded-md px-4 py-1.5 text-sm font-medium transition-all disabled:opacity-50 ${
+                  aba === m.chave
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {m.rotulo}
+              </button>
+            ))}
+          </div>
         </div>
         <a
           href={`https://docs.google.com/spreadsheets/d/${process.env.NEXT_PUBLIC_GOOGLE_SHEETS_ID}/edit`}

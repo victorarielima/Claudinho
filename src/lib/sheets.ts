@@ -5,6 +5,13 @@ function getAuth() {
   return getGoogleAuth();
 }
 
+export const ABAS = {
+  evino: "Evino_Anuncios_Novos",
+  grandcru: "GrandCru_Anuncios_Novos",
+} as const;
+
+export type ChaveAba = keyof typeof ABAS;
+
 export interface LinhaAnuncio {
   indiceLinha: number; // índice da linha na planilha (2-indexed, 1 = header)
   campaign: string;
@@ -25,28 +32,7 @@ export interface LinhaAnuncio {
   data: string;
 }
 
-let nomeAbaCacheado: string | null = null;
-
-async function obterNomeAba(): Promise<string> {
-  if (nomeAbaCacheado) return nomeAbaCacheado;
-
-  const auth = getAuth();
-  const sheets = google.sheets({ version: "v4", auth });
-  const spreadsheetId = process.env.GOOGLE_SHEETS_ID!;
-
-  const meta = await sheets.spreadsheets.get({
-    spreadsheetId,
-    fields: "sheets.properties.title",
-  });
-
-  const nome = meta.data.sheets?.[0]?.properties?.title;
-  if (!nome) throw new Error("Não foi possível obter o nome da aba da planilha");
-
-  nomeAbaCacheado = nome;
-  return nome;
-}
-
-export async function lerLinhas(): Promise<LinhaAnuncio[]> {
+export async function lerLinhas(nomeAba: string): Promise<LinhaAnuncio[]> {
   const auth = getAuth();
   const sheets = google.sheets({ version: "v4", auth });
   const spreadsheetId = process.env.GOOGLE_SHEETS_ID;
@@ -54,8 +40,6 @@ export async function lerLinhas(): Promise<LinhaAnuncio[]> {
   if (!spreadsheetId) {
     throw new Error("GOOGLE_SHEETS_ID não configurado");
   }
-
-  const nomeAba = await obterNomeAba();
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
@@ -101,6 +85,7 @@ export async function lerLinhas(): Promise<LinhaAnuncio[]> {
 }
 
 export async function atualizarLinha(
+  nomeAba: string,
   indiceLinha: number,
   adId: string,
   accountId: string
@@ -112,8 +97,6 @@ export async function atualizarLinha(
   if (!spreadsheetId) {
     throw new Error("GOOGLE_SHEETS_ID não configurado");
   }
-
-  const nomeAba = await obterNomeAba();
 
   const agora = new Date();
   const dataCriacao = agora.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
@@ -149,7 +132,7 @@ export async function atualizarLinha(
  * Lê o status atual da coluna L direto da planilha (sem cache).
  * Retorna o valor raw da célula (ex: "Pendente", "Processando", "Concluído", "Erro: ...").
  */
-export async function lerStatusLinha(indiceLinha: number): Promise<string> {
+export async function lerStatusLinha(nomeAba: string, indiceLinha: number): Promise<string> {
   const auth = getAuth();
   const sheets = google.sheets({ version: "v4", auth });
   const spreadsheetId = process.env.GOOGLE_SHEETS_ID;
@@ -157,8 +140,6 @@ export async function lerStatusLinha(indiceLinha: number): Promise<string> {
   if (!spreadsheetId) {
     throw new Error("GOOGLE_SHEETS_ID não configurado");
   }
-
-  const nomeAba = await obterNomeAba();
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
@@ -173,8 +154,8 @@ export async function lerStatusLinha(indiceLinha: number): Promise<string> {
  * Retorna true se conseguiu reservar (status anterior era Pendente ou Erro).
  * Retorna false se outro processo já reservou.
  */
-export async function reservarLinha(indiceLinha: number): Promise<boolean> {
-  const statusAtual = await lerStatusLinha(indiceLinha);
+export async function reservarLinha(nomeAba: string, indiceLinha: number): Promise<boolean> {
+  const statusAtual = await lerStatusLinha(nomeAba, indiceLinha);
 
   // Só permite processar se estiver Pendente ou com Erro
   if (statusAtual !== "Pendente" && !statusAtual.startsWith("Erro")) {
@@ -184,7 +165,6 @@ export async function reservarLinha(indiceLinha: number): Promise<boolean> {
   const auth = getAuth();
   const sheets = google.sheets({ version: "v4", auth });
   const spreadsheetId = process.env.GOOGLE_SHEETS_ID!;
-  const nomeAba = await obterNomeAba();
 
   await sheets.spreadsheets.values.update({
     spreadsheetId,
@@ -199,6 +179,7 @@ export async function reservarLinha(indiceLinha: number): Promise<boolean> {
 }
 
 export async function atualizarAccountId(
+  nomeAba: string,
   indiceLinha: number,
   accountId: string
 ): Promise<void> {
@@ -209,8 +190,6 @@ export async function atualizarAccountId(
   if (!spreadsheetId) {
     throw new Error("GOOGLE_SHEETS_ID não configurado");
   }
-
-  const nomeAba = await obterNomeAba();
 
   await sheets.spreadsheets.values.update({
     spreadsheetId,
@@ -223,6 +202,7 @@ export async function atualizarAccountId(
 }
 
 export async function marcarErro(
+  nomeAba: string,
   indiceLinha: number,
   mensagemErro: string
 ): Promise<void> {
@@ -233,8 +213,6 @@ export async function marcarErro(
   if (!spreadsheetId) {
     throw new Error("GOOGLE_SHEETS_ID não configurado");
   }
-
-  const nomeAba = await obterNomeAba();
 
   const agora = new Date();
   const dataErro = agora.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
