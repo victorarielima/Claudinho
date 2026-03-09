@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { LinhaAnuncio } from "@/lib/sheets";
+import { rotuloPlacementImagem } from "@/lib/ad-media";
 
 export type StatusProcessamento =
   | "pendente"
@@ -695,10 +696,10 @@ export function TabelaPendentes({
                           {linha.imageAssets.map((asset) => (
                             <div key={asset.placement} className="flex flex-col gap-1">
                               <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                                {asset.placement}
+                                {rotuloPlacementImagem(asset.placement, asset.url)}
                               </span>
                               <div className="h-16 w-16 rounded-md border overflow-hidden bg-muted">
-                                <img src={asset.url} alt={asset.placement} className="w-full h-full object-cover" />
+                                <img src={asset.url} alt={rotuloPlacementImagem(asset.placement, asset.url)} className="w-full h-full object-cover" />
                               </div>
                             </div>
                           ))}

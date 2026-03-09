@@ -1,3 +1,5 @@
+import { normalizarPlacementImagem } from "./ad-media";
+
 const META_API_BASE = "https://graph.facebook.com/v23.0";
 
 function getAccessToken(): string {
@@ -253,7 +255,7 @@ export type ParamsCriativo = ParamsCriativoVideo;
 
 export interface ImagemPlacement {
   imageHash: string;
-  placement: string; // 'feed', 'stories', 'reels'
+  placement: string; // 'feed', 'stories', 'horizontal'
 }
 
 export interface ParamsCriativoImagem {
@@ -267,22 +269,29 @@ export interface ParamsCriativoImagem {
   name: string;
 }
 
-// Mapa de placement genérico → customization_spec do Meta
-const PLACEMENT_RULES: Record<string, object> = {
+type PlacementImagemNormalizado = "feed" | "stories" | "horizontal";
+
+function limparObjeto<T extends Record<string, unknown>>(objeto: T): T {
+  return Object.fromEntries(
+    Object.entries(objeto).filter(([, valor]) => valor !== undefined && valor !== null && valor !== "")
+  ) as T;
+}
+
+// Mapa de placement do asset → customization_spec do Meta
+const PLACEMENT_RULES: Record<PlacementImagemNormalizado, Record<string, unknown>> = {
   feed: {
     publisher_platforms: ["facebook", "instagram"],
-    facebook_positions: ["feed"],
-    instagram_positions: ["stream"],
+    facebook_positions: ["feed", "marketplace", "search"],
+    instagram_positions: ["stream", "explore", "profile_feed"],
   },
   stories: {
     publisher_platforms: ["facebook", "instagram"],
-    facebook_positions: ["story"],
-    instagram_positions: ["story"],
+    facebook_positions: ["story", "reels"],
+    instagram_positions: ["story", "reels"],
   },
-  reels: {
-    publisher_platforms: ["facebook", "instagram"],
-    facebook_positions: ["reels"],
-    instagram_positions: ["reels"],
+  horizontal: {
+    publisher_platforms: ["facebook"],
+    facebook_positions: ["instant_article", "right_hand_column", "suggested_video", "video_feeds"],
   },
 };
 
@@ -298,47 +307,65 @@ export async function criarCreativeImagem(
     return criarCreativeImagemSimples(accountId, params);
   }
 
-  // Usar a imagem de feed (ou a primeira) como default no object_story_spec
-  const defaultImage =
-    params.imagens.find((img) => img.placement === "feed") ?? params.imagens[0];
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const linkData: Record<string, any> = {
-    message: params.message,
-    link: params.link,
-    name: params.title,
-    description: params.linkDescription,
-    image_hash: defaultImage.imageHash,
-  };
-
-  if (params.ctaType) {
-    linkData.call_to_action = {
-      type: params.ctaType || "SHOP_NOW",
-      value: { link: params.link },
-    };
+  const imagensPorPlacement = new Map<PlacementImagemNormalizado, ImagemPlacement>();
+  for (const imagem of params.imagens) {
+    const placement = normalizarPlacementImagem(imagem.placement) as PlacementImagemNormalizado;
+    if (!PLACEMENT_RULES[placement] || imagensPorPlacement.has(placement)) continue;
+    imagensPorPlacement.set(placement, imagem);
   }
 
-  const objectStorySpec = {
-    page_id: params.pageId,
-    link_data: linkData,
+  if (imagensPorPlacement.size <= 1) {
+    const primeiraImagemValida = Array.from(imagensPorPlacement.values())[0] ?? params.imagens[0];
+    return criarCreativeImagemSimples(accountId, {
+      ...params,
+      imagens: [primeiraImagemValida],
+    });
+  }
+
+  const labels: Record<PlacementImagemNormalizado, string> = {
+    feed: "IMAGE_FEED",
+    stories: "IMAGE_VERTICAL",
+    horizontal: "IMAGE_HORIZONTAL",
   };
 
-  // asset_customization_rules: cada regra mapeia 1 imagem → placements específicos
-  const assetCustomizationRules = params.imagens
-    .map((img) => {
-      const spec = PLACEMENT_RULES[img.placement];
-      if (!spec) return null;
-      return {
-        customization_spec: spec,
-        image_hash: img.imageHash,
-      };
-    })
-    .filter(Boolean);
+  const images = Array.from(imagensPorPlacement.entries()).map(([placement, imagem]) => ({
+    hash: imagem.imageHash,
+    adlabels: [{ name: labels[placement] }],
+  }));
+
+  const assetCustomizationRules = Array.from(imagensPorPlacement.entries()).map(([placement]) => ({
+    customization_spec: PLACEMENT_RULES[placement],
+    image_label: { name: labels[placement] },
+  }));
+
+  const assetFeedSpec = limparObjeto({
+    ad_formats: ["SINGLE_IMAGE"],
+    images,
+    bodies: params.message ? [{ text: params.message }] : undefined,
+    titles: params.title ? [{ text: params.title }] : undefined,
+    descriptions: params.linkDescription ? [{ text: params.linkDescription }] : undefined,
+    link_urls: params.link ? [{ website_url: params.link }] : undefined,
+    call_to_action_types: params.ctaType ? [params.ctaType] : undefined,
+    asset_customization_rules: assetCustomizationRules,
+  });
 
   const formData = new FormData();
   formData.append("name", params.name);
-  formData.append("object_story_spec", JSON.stringify(objectStorySpec));
-  formData.append("asset_customization_rules", JSON.stringify(assetCustomizationRules));
+  formData.append("object_story_spec", JSON.stringify({ page_id: params.pageId }));
+  formData.append("asset_feed_spec", JSON.stringify(assetFeedSpec));
+  if (params.link?.trim()) {
+    formData.append("link_url", params.link);
+  }
+  formData.append(
+    "degrees_of_freedom_spec",
+    JSON.stringify({
+      creative_features_spec: {
+        standard_enhancements: {
+          enroll_status: "OPT_OUT",
+        },
+      },
+    })
+  );
   formData.append("access_token", token);
 
   const res = await fetch(url, {

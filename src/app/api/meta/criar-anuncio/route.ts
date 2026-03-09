@@ -11,6 +11,11 @@ import {
   type ImagemPlacement,
 } from "@/lib/meta-criar";
 import { buscarAd, buscarBrand, atualizarStatusAd, atualizarMetaAssetId } from "@/lib/db";
+import {
+  detectarTipoCriativo,
+  extrairImageAssets,
+  normalizarPlacementImagem,
+} from "@/lib/ad-media";
 
 // Fallback para compatibilidade: se o ad veio da planilha e ainda não tem brand no banco
 import { atualizarLinha, marcarErro, reservarLinha, ABAS, type ChaveAba } from "@/lib/sheets";
@@ -47,6 +52,9 @@ interface CorpoLegado {
   linkAnuncio: string;
   linkVideo: string;
   pageId: string;
+  tipo?: "video" | "image";
+  tipoPlanilha?: string;
+  imageAssets?: { placement: string; url: string }[];
 }
 
 export async function POST(request: NextRequest) {
@@ -131,7 +139,10 @@ async function processarFluxoNovo(body: CorpoNovoFluxo) {
         imageAssets.map(async (asset) => {
           const hash = await uploadImage(accountId, asset.asset_url);
           await atualizarMetaAssetId(asset.id, hash);
-          return { imageHash: hash, placement: asset.placement };
+          return {
+            imageHash: hash,
+            placement: normalizarPlacementImagem(asset.placement, asset.asset_url),
+          };
         })
       );
 
@@ -223,24 +234,57 @@ async function processarFluxoLegado(body: CorpoLegado) {
       );
     }
 
-    const arquivo = await baixarArquivoDrive(body.linkVideo);
+    const tipoCriativo = body.tipo ?? detectarTipoCriativo(body.tipoPlanilha, body.linkVideo);
+    let creativeId: string;
 
-    const videoId = await uploadVideo(
-      accountId,
-      arquivo.buffer,
-      arquivo.fileName
-    );
+    if (tipoCriativo === "image") {
+      const imageAssets = (body.imageAssets?.length ? body.imageAssets : extrairImageAssets(body.linkVideo))
+        .map((asset) => ({
+          ...asset,
+          placement: normalizarPlacementImagem(asset.placement, asset.url),
+        }))
+        .filter((asset) => Boolean(asset.url));
 
-    const creativeId = await criarCreativeVideo(accountId, {
-      pageId,
-      videoId,
-      message: body.textoPrincipal,
-      title: body.titulo,
-      linkDescription: body.descricao,
-      ctaType: body.cta || "SHOP_NOW",
-      link: body.linkAnuncio,
-      name: `Creative - ${body.adName}`,
-    });
+      if (imageAssets.length === 0) {
+        throw new Error("Nenhuma imagem válida encontrada para o anúncio estático");
+      }
+
+      const imagensComHash: ImagemPlacement[] = await Promise.all(
+        imageAssets.map(async (asset) => ({
+          imageHash: await uploadImage(accountId, asset.url),
+          placement: asset.placement,
+        }))
+      );
+
+      creativeId = await criarCreativeImagem(accountId, {
+        pageId,
+        imagens: imagensComHash,
+        message: body.textoPrincipal,
+        title: body.titulo,
+        linkDescription: body.descricao,
+        ctaType: body.cta || "SHOP_NOW",
+        link: body.linkAnuncio,
+        name: `Creative - ${body.adName}`,
+      });
+    } else {
+      const arquivo = await baixarArquivoDrive(body.linkVideo);
+      const videoId = await uploadVideo(
+        accountId,
+        arquivo.buffer,
+        arquivo.fileName
+      );
+
+      creativeId = await criarCreativeVideo(accountId, {
+        pageId,
+        videoId,
+        message: body.textoPrincipal,
+        title: body.titulo,
+        linkDescription: body.descricao,
+        ctaType: body.cta || "SHOP_NOW",
+        link: body.linkAnuncio,
+        name: `Creative - ${body.adName}`,
+      });
+    }
 
     const adId = await criarAnuncio(
       accountId,
@@ -257,7 +301,6 @@ async function processarFluxoLegado(body: CorpoLegado) {
       sucesso: true,
       adId,
       creativeId,
-      videoId,
       accountId: accountId.replace("act_", ""),
     });
   } catch (error) {

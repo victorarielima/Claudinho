@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { lerLinhas, ABAS, type ChaveAba } from "@/lib/sheets";
 import { getSupabase } from "@/lib/supabase";
 import { gerarLinkAnuncio } from "@/lib/utm";
+import { detectarTipoCriativo, extrairImageAssets } from "@/lib/ad-media";
 
 export async function POST(request: NextRequest) {
   const { userId } = await auth();
@@ -64,9 +65,8 @@ export async function POST(request: NextRequest) {
       else if (linha.statusAutomacao === "Processando") status = "processando";
       else if (linha.statusAutomacao.startsWith("Erro")) status = "erro";
 
-      // Detectar tipo: Cloudinary URLs = imagem, Drive URLs = vídeo
-      const isImage = linha.linkVideo?.includes("cloudinary.com") ?? false;
-      const adType = isImage ? "image" : "video";
+      const adType = detectarTipoCriativo(linha.tipoPlanilha, linha.linkVideo);
+      const isImage = adType === "image";
 
       // Gerar UTM
       const linkAnuncio = linha.linkAnuncio
@@ -107,25 +107,13 @@ export async function POST(request: NextRequest) {
 
       // Inserir assets
       if (isImage) {
-        // Extrair URLs individuais (separadas por \n na célula)
-        const urls = linha.linkVideo
-          .split(/\n/)
-          .map((u: string) => u.trim())
-          .filter((u: string) => u.startsWith("http"));
-
-        const assets = urls.map((url: string, i: number) => {
-          let placement = `formato_${i + 1}`;
-          if (url.includes("1080x1080")) placement = "feed";
-          else if (url.includes("1080x1920")) placement = "stories";
-          else if (url.includes("1200x628")) placement = "reels";
-          return {
-            ad_id: ad.id,
-            placement,
-            asset_url: url,
-            asset_type: "image" as const,
-            sort_order: i,
-          };
-        });
+        const assets = extrairImageAssets(linha.linkVideo).map((asset, i) => ({
+          ad_id: ad.id,
+          placement: asset.placement,
+          asset_url: asset.url,
+          asset_type: "image" as const,
+          sort_order: i,
+        }));
 
         if (assets.length > 0) {
           await sb.from("ad_assets").insert(assets);

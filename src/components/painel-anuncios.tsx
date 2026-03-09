@@ -78,8 +78,8 @@ export function PainelAnuncios() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Performance</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Acompanhe os anúncios ativos e suas métricas em tempo real.
-            Selecione a conta e o período para filtrar os dados.
+            Acompanhe os anúncios com investimento no período selecionado.
+            Os totais consideram o gasto real do intervalo, mesmo se o anúncio estiver pausado hoje.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -151,7 +151,7 @@ export function PainelAnuncios() {
       <section>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
-            Anúncios Ativos
+            Anúncios com Investimento
           </h2>
           {!carregando && anuncios.length > 0 && (
             <span className="text-xs text-muted-foreground">

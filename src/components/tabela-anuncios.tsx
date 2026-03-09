@@ -96,10 +96,10 @@ export function TabelaAnuncios({ anuncios, carregando }: TabelaAnunciosProps) {
     return (
       <div className="flex h-40 flex-col items-center justify-center rounded-lg border border-dashed gap-2">
         <p className="text-sm font-medium text-muted-foreground">
-          Nenhum anúncio ativo
+          Nenhum anúncio com investimento
         </p>
         <p className="text-xs text-muted-foreground/70">
-          Não há anúncios ativos para esta conta no período selecionado.
+          Não há anúncios com gasto acima de R$0 no período selecionado.
         </p>
       </div>
     );

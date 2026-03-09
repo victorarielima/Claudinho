@@ -5,6 +5,147 @@ function getAuth() {
   return getGoogleAuth();
 }
 
+type CampoPlanilha =
+  | "campaign"
+  | "adSet"
+  | "campaignId"
+  | "adSetId"
+  | "tipoPlanilha"
+  | "adName"
+  | "textoPrincipal"
+  | "titulo"
+  | "descricao"
+  | "cta"
+  | "linkAnuncio"
+  | "linkVideo"
+  | "statusAutomacao"
+  | "adIdGerado"
+  | "pageId"
+  | "accountId"
+  | "data";
+
+const HEADER_ALIASES: Record<CampoPlanilha, string[]> = {
+  campaign: ["campaign", "campanha", "campaign name", "nome da campanha"],
+  adSet: ["ad set", "adset", "conjunto", "conjunto de anuncios", "nome do ad set"],
+  campaignId: ["campaign id", "id da campanha", "id campanha"],
+  adSetId: ["ad set id", "adset id", "id do ad set", "id ad set", "id conjunto"],
+  tipoPlanilha: ["tipo", "tipo do anuncio", "tipo do anuncio", "tipo do criativo"],
+  adName: ["ad name", "nome do anuncio", "nome anuncio"],
+  textoPrincipal: [
+    "texto principal",
+    "texto",
+    "primary text",
+    "texto do anuncio",
+    "copy principal",
+  ],
+  titulo: ["titulo", "title", "headline"],
+  descricao: ["descricao", "description", "link description"],
+  cta: ["cta", "call to action"],
+  linkAnuncio: ["link anuncio", "link do anuncio", "url anuncio", "link campanha"],
+  linkVideo: ["link video", "link do video", "video", "midia", "link imagem/video"],
+  statusAutomacao: ["status", "status automacao", "status da automacao"],
+  adIdGerado: ["ad id", "id do anuncio", "meta ad id", "ad id gerado"],
+  pageId: ["page id", "id da pagina", "pagina id"],
+  accountId: ["account id", "id da conta", "meta account id", "ad account id"],
+  data: ["data", "data criacao", "criado em"],
+};
+
+const FALLBACK_COLUMN_INDEXES: Record<CampoPlanilha, number> = {
+  campaign: 0,
+  adSet: 1,
+  campaignId: 2,
+  adSetId: 3,
+  tipoPlanilha: 4,
+  adName: 5,
+  textoPrincipal: 6,
+  titulo: 7,
+  descricao: 8,
+  cta: 9,
+  linkAnuncio: 11,
+  linkVideo: 12,
+  statusAutomacao: 13,
+  adIdGerado: 14,
+  pageId: 15,
+  accountId: 16,
+  data: 17,
+};
+
+function normalizarCabecalho(valor: string): string {
+  return valor
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function encontrarIndiceCabecalho(cabecalhos: string[], aliases: string[]): number {
+  for (const alias of aliases) {
+    const indice = cabecalhos.indexOf(normalizarCabecalho(alias));
+    if (indice >= 0) return indice;
+  }
+  return -1;
+}
+
+function resolverIndicesColunas(cabecalhoBruto: string[] | undefined): Record<CampoPlanilha, number> {
+  const cabecalhos = (cabecalhoBruto ?? []).map((valor) => normalizarCabecalho(valor));
+  const encontrouCabecalhos = cabecalhos.some((valor) => valor.length > 0);
+
+  return (Object.keys(FALLBACK_COLUMN_INDEXES) as CampoPlanilha[]).reduce(
+    (acc, campo) => {
+      const indiceCabecalho = encontrouCabecalhos
+        ? encontrarIndiceCabecalho(cabecalhos, HEADER_ALIASES[campo])
+        : -1;
+
+      acc[campo] = indiceCabecalho >= 0 ? indiceCabecalho : FALLBACK_COLUMN_INDEXES[campo];
+      return acc;
+    },
+    {} as Record<CampoPlanilha, number>
+  );
+}
+
+function obterCelula(row: string[], colunas: Record<CampoPlanilha, number>, campo: CampoPlanilha): string {
+  return (row[colunas[campo]] ?? "").trim();
+}
+
+function indiceParaColunaA1(indiceBaseZero: number): string {
+  let restante = indiceBaseZero + 1;
+  let coluna = "";
+
+  while (restante > 0) {
+    const modulo = (restante - 1) % 26;
+    coluna = String.fromCharCode(65 + modulo) + coluna;
+    restante = Math.floor((restante - 1) / 26);
+  }
+
+  return coluna;
+}
+
+async function obterSheetsClient() {
+  return google.sheets({ version: "v4", auth: getAuth() });
+}
+
+async function obterSpreadsheetId(): Promise<string> {
+  const spreadsheetId = process.env.GOOGLE_SHEETS_ID;
+
+  if (!spreadsheetId) {
+    throw new Error("GOOGLE_SHEETS_ID não configurado");
+  }
+
+  return spreadsheetId;
+}
+
+async function lerCabecalho(nomeAba: string): Promise<Record<CampoPlanilha, number>> {
+  const sheets = await obterSheetsClient();
+  const spreadsheetId = await obterSpreadsheetId();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `'${nomeAba}'!1:1`,
+  });
+
+  return resolverIndicesColunas(res.data.values?.[0]);
+}
+
 export const ABAS = {
   evino: "Evino_Anuncios_Novos",
   grandcru: "GrandCru_Anuncios_Novos",
@@ -18,6 +159,7 @@ export interface LinhaAnuncio {
   adSet: string;
   campaignId: string;
   adSetId: string;
+  tipoPlanilha: string;
   adName: string;
   textoPrincipal: string;
   titulo: string;
@@ -33,20 +175,11 @@ export interface LinhaAnuncio {
 }
 
 export async function lerLinhas(nomeAba: string): Promise<LinhaAnuncio[]> {
-  const auth = getAuth();
-  const sheets = google.sheets({ version: "v4", auth });
-  const spreadsheetId = process.env.GOOGLE_SHEETS_ID;
-
-  if (!spreadsheetId) {
-    throw new Error("GOOGLE_SHEETS_ID não configurado");
-  }
-
-  // Colunas: A-I (campaign…cta), J (linkAux — não usado), K (linkAux2),
-  //          L (linkAnuncio), M (linkVideo), N (statusAutomacao),
-  //          O (adIdGerado), P (pageId), Q (accountId), R (data)
+  const sheets = await obterSheetsClient();
+  const spreadsheetId = await obterSpreadsheetId();
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `'${nomeAba}'!A:R`,
+    range: `'${nomeAba}'`,
   });
 
   const linhas = res.data.values;
@@ -54,33 +187,35 @@ export async function lerLinhas(nomeAba: string): Promise<LinhaAnuncio[]> {
     return [];
   }
 
+  const colunas = resolverIndicesColunas(linhas[0]);
   const todas: LinhaAnuncio[] = [];
 
   for (let i = 1; i < linhas.length; i++) {
     const row = linhas[i];
-    const statusAutomacao = (row[13] ?? "").trim();
+    const statusAutomacao = obterCelula(row, colunas, "statusAutomacao");
 
     // Ignorar linhas sem dados essenciais
-    if (!row[4] && !row[3]) continue;
+    if (!obterCelula(row, colunas, "adName") && !obterCelula(row, colunas, "adSetId")) continue;
 
     todas.push({
       indiceLinha: i + 1,
-      campaign: row[0] ?? "",
-      adSet: row[1] ?? "",
-      campaignId: row[2] ?? "",
-      adSetId: row[3] ?? "",
-      adName: row[4] ?? "",
-      textoPrincipal: row[5] ?? "",
-      titulo: row[6] ?? "",
-      descricao: row[7] ?? "",
-      cta: row[8] ?? "",
-      linkAnuncio: row[11] ?? "",
-      linkVideo: row[12] ?? "",
+      campaign: obterCelula(row, colunas, "campaign"),
+      adSet: obterCelula(row, colunas, "adSet"),
+      campaignId: obterCelula(row, colunas, "campaignId"),
+      adSetId: obterCelula(row, colunas, "adSetId"),
+      tipoPlanilha: obterCelula(row, colunas, "tipoPlanilha"),
+      adName: obterCelula(row, colunas, "adName"),
+      textoPrincipal: obterCelula(row, colunas, "textoPrincipal"),
+      titulo: obterCelula(row, colunas, "titulo"),
+      descricao: obterCelula(row, colunas, "descricao"),
+      cta: obterCelula(row, colunas, "cta"),
+      linkAnuncio: obterCelula(row, colunas, "linkAnuncio"),
+      linkVideo: obterCelula(row, colunas, "linkVideo"),
       statusAutomacao,
-      adIdGerado: row[14] ?? "",
-      pageId: row[15] ?? "",
-      accountId: row[16] ?? "",
-      data: row[17] ?? "",
+      adIdGerado: obterCelula(row, colunas, "adIdGerado"),
+      pageId: obterCelula(row, colunas, "pageId"),
+      accountId: obterCelula(row, colunas, "accountId"),
+      data: obterCelula(row, colunas, "data"),
     });
   }
 
@@ -93,37 +228,37 @@ export async function atualizarLinha(
   adId: string,
   accountId: string
 ): Promise<void> {
-  const auth = getAuth();
-  const sheets = google.sheets({ version: "v4", auth });
-  const spreadsheetId = process.env.GOOGLE_SHEETS_ID;
-
-  if (!spreadsheetId) {
-    throw new Error("GOOGLE_SHEETS_ID não configurado");
-  }
+  const sheets = await obterSheetsClient();
+  const spreadsheetId = await obterSpreadsheetId();
+  const colunas = await lerCabecalho(nomeAba);
 
   const agora = new Date();
   const dataCriacao = agora.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
 
-  // Atualizar Status (N), Ad ID (O), Account ID (Q), Data (R)
+  const colunaStatus = indiceParaColunaA1(colunas.statusAutomacao);
+  const colunaAdId = indiceParaColunaA1(colunas.adIdGerado);
+  const colunaAccountId = indiceParaColunaA1(colunas.accountId);
+  const colunaData = indiceParaColunaA1(colunas.data);
+
   await sheets.spreadsheets.values.batchUpdate({
     spreadsheetId,
     requestBody: {
       valueInputOption: "RAW",
       data: [
         {
-          range: `'${nomeAba}'!N${indiceLinha}`,
+          range: `'${nomeAba}'!${colunaStatus}${indiceLinha}`,
           values: [["Concluído"]],
         },
         {
-          range: `'${nomeAba}'!O${indiceLinha}`,
+          range: `'${nomeAba}'!${colunaAdId}${indiceLinha}`,
           values: [[adId]],
         },
         {
-          range: `'${nomeAba}'!Q${indiceLinha}`,
+          range: `'${nomeAba}'!${colunaAccountId}${indiceLinha}`,
           values: [[accountId]],
         },
         {
-          range: `'${nomeAba}'!R${indiceLinha}`,
+          range: `'${nomeAba}'!${colunaData}${indiceLinha}`,
           values: [[dataCriacao]],
         },
       ],
@@ -136,17 +271,14 @@ export async function atualizarLinha(
  * Retorna o valor raw da célula (ex: "Pendente", "Processando", "Concluído", "Erro: ...").
  */
 export async function lerStatusLinha(nomeAba: string, indiceLinha: number): Promise<string> {
-  const auth = getAuth();
-  const sheets = google.sheets({ version: "v4", auth });
-  const spreadsheetId = process.env.GOOGLE_SHEETS_ID;
-
-  if (!spreadsheetId) {
-    throw new Error("GOOGLE_SHEETS_ID não configurado");
-  }
+  const sheets = await obterSheetsClient();
+  const spreadsheetId = await obterSpreadsheetId();
+  const colunas = await lerCabecalho(nomeAba);
+  const colunaStatus = indiceParaColunaA1(colunas.statusAutomacao);
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `'${nomeAba}'!N${indiceLinha}`,
+    range: `'${nomeAba}'!${colunaStatus}${indiceLinha}`,
   });
 
   return (res.data.values?.[0]?.[0] ?? "").trim();
@@ -165,13 +297,14 @@ export async function reservarLinha(nomeAba: string, indiceLinha: number): Promi
     return false;
   }
 
-  const auth = getAuth();
-  const sheets = google.sheets({ version: "v4", auth });
-  const spreadsheetId = process.env.GOOGLE_SHEETS_ID!;
+  const sheets = await obterSheetsClient();
+  const spreadsheetId = await obterSpreadsheetId();
+  const colunas = await lerCabecalho(nomeAba);
+  const colunaStatus = indiceParaColunaA1(colunas.statusAutomacao);
 
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: `'${nomeAba}'!N${indiceLinha}`,
+    range: `'${nomeAba}'!${colunaStatus}${indiceLinha}`,
     valueInputOption: "RAW",
     requestBody: {
       values: [["Processando"]],
@@ -186,17 +319,14 @@ export async function atualizarAccountId(
   indiceLinha: number,
   accountId: string
 ): Promise<void> {
-  const auth = getAuth();
-  const sheets = google.sheets({ version: "v4", auth });
-  const spreadsheetId = process.env.GOOGLE_SHEETS_ID;
-
-  if (!spreadsheetId) {
-    throw new Error("GOOGLE_SHEETS_ID não configurado");
-  }
+  const sheets = await obterSheetsClient();
+  const spreadsheetId = await obterSpreadsheetId();
+  const colunas = await lerCabecalho(nomeAba);
+  const colunaAccountId = indiceParaColunaA1(colunas.accountId);
 
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: `'${nomeAba}'!Q${indiceLinha}`,
+    range: `'${nomeAba}'!${colunaAccountId}${indiceLinha}`,
     valueInputOption: "RAW",
     requestBody: {
       values: [[accountId]],
@@ -209,16 +339,14 @@ export async function marcarErro(
   indiceLinha: number,
   mensagemErro: string
 ): Promise<void> {
-  const auth = getAuth();
-  const sheets = google.sheets({ version: "v4", auth });
-  const spreadsheetId = process.env.GOOGLE_SHEETS_ID;
-
-  if (!spreadsheetId) {
-    throw new Error("GOOGLE_SHEETS_ID não configurado");
-  }
+  const sheets = await obterSheetsClient();
+  const spreadsheetId = await obterSpreadsheetId();
+  const colunas = await lerCabecalho(nomeAba);
 
   const agora = new Date();
   const dataErro = agora.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+  const colunaStatus = indiceParaColunaA1(colunas.statusAutomacao);
+  const colunaData = indiceParaColunaA1(colunas.data);
 
   await sheets.spreadsheets.values.batchUpdate({
     spreadsheetId,
@@ -226,11 +354,11 @@ export async function marcarErro(
       valueInputOption: "RAW",
       data: [
         {
-          range: `'${nomeAba}'!N${indiceLinha}`,
+          range: `'${nomeAba}'!${colunaStatus}${indiceLinha}`,
           values: [[`Erro: ${mensagemErro.slice(0, 100)}`]],
         },
         {
-          range: `'${nomeAba}'!R${indiceLinha}`,
+          range: `'${nomeAba}'!${colunaData}${indiceLinha}`,
           values: [[dataErro]],
         },
       ],

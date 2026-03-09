@@ -68,7 +68,7 @@ export type PresetPeriodo =
   | "this_month"
   | "last_month";
 
-export async function buscarAnunciosAtivos(
+export async function buscarAnunciosDoPeriodo(
   accountId: string,
   datePreset: PresetPeriodo = "last_30d"
 ): Promise<AnuncioMeta[]> {
@@ -88,7 +88,6 @@ export async function buscarAnunciosAtivos(
   ].join(",");
 
   const url = new URL(`${META_API_BASE}/${accountId}/ads`);
-  url.searchParams.set("effective_status", JSON.stringify(["ACTIVE"]));
   url.searchParams.set("fields", fields);
   url.searchParams.set("limit", "100");
   url.searchParams.set("access_token", accessToken);

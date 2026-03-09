@@ -14,25 +14,14 @@ import {
 } from "@/components/tabela-pendentes";
 import type { Ad, AdAsset, Brand } from "@/lib/db";
 import type { LinhaAnuncio, ChaveAba } from "@/lib/sheets";
+import {
+  detectarTipoCriativo,
+  extrairImageAssets,
+  normalizarPlacementImagem,
+  rotuloPlacementImagem,
+} from "@/lib/ad-media";
 
 type FonteDados = "supabase" | "sheets";
-
-function detectarTipo(linkVideo: string): "video" | "image" {
-  if (!linkVideo) return "video";
-  if (linkVideo.includes("cloudinary.com")) return "image";
-  return "video";
-}
-
-function extrairImageAssets(linkVideo: string): { placement: string; url: string }[] {
-  if (!linkVideo) return [];
-  const urls = linkVideo.split(/\n/).map((u) => u.trim()).filter((u) => u.startsWith("http"));
-  return urls.map((url, i) => {
-    if (url.includes("1080x1080")) return { placement: "feed", url };
-    if (url.includes("1080x1920")) return { placement: "stories", url };
-    if (url.includes("1200x628")) return { placement: "reels", url };
-    return { placement: `formato_${i + 1}`, url };
-  });
-}
 
 export function PainelCriacao() {
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -142,6 +131,7 @@ export function PainelCriacao() {
       adSet: ad.ad_set_name,
       campaignId: ad.campaign_id ?? "",
       adSetId: ad.ad_set_id ?? "",
+      tipoPlanilha: "",
       adName: ad.ad_name,
       textoPrincipal: ad.texto_principal ?? "",
       titulo: ad.titulo ?? "",
@@ -163,7 +153,10 @@ export function PainelCriacao() {
       statusVideo: videoAsset ? "nao_verificado" : "acessivel",
       adId: ad.id,
       tipo: ad.type as "video" | "image",
-      imageAssets: imageAssets.map((a: AdAsset) => ({ placement: a.placement, url: a.asset_url })),
+      imageAssets: imageAssets.map((a: AdAsset) => ({
+        placement: normalizarPlacementImagem(a.placement, a.asset_url),
+        url: a.asset_url,
+      })),
       linkCampanha: ad.link_campanha ?? "",
       linkAux: ad.link_aux ?? "",
     };
@@ -196,7 +189,7 @@ export function PainelCriacao() {
 
         const todas: LinhaAnuncio[] = json.data;
         const novasLinhas: LinhaComStatus[] = todas.map((l) => {
-          const tipo = detectarTipo(l.linkVideo);
+          const tipo = detectarTipoCriativo(l.tipoPlanilha, l.linkVideo);
           const imageAssets = tipo === "image" ? extrairImageAssets(l.linkVideo) : [];
           return {
             ...l,
@@ -286,6 +279,9 @@ export function PainelCriacao() {
             linkAnuncio: linha.linkAnuncio,
             linkVideo: linha.linkVideo,
             pageId: linha.pageId,
+            tipo: linha.tipo,
+            tipoPlanilha: linha.tipoPlanilha,
+            imageAssets: linha.imageAssets,
           };
 
       const res = await fetch("/api/meta/criar-anuncio", {
@@ -583,7 +579,7 @@ export function PainelCriacao() {
 function DialogCriarAnuncio({ aberto, aoFechar, brandId, aoSalvar }: { aberto: boolean; aoFechar: () => void; brandId: string; aoSalvar: () => void }) {
   const [tipo, setTipo] = useState<"video" | "image">("video");
   const [salvando, setSalvando] = useState(false);
-  const [form, setForm] = useState({ campaign_name: "", campaign_id: "", ad_set_name: "", ad_set_id: "", ad_name: "", texto_principal: "", titulo: "", descricao: "", cta: "SHOP_NOW", link_campanha: "", link_aux: "", videoUrl: "", imageFeed: "", imageStories: "", imageReels: "" });
+  const [form, setForm] = useState({ campaign_name: "", campaign_id: "", ad_set_name: "", ad_set_id: "", ad_name: "", texto_principal: "", titulo: "", descricao: "", cta: "SHOP_NOW", link_campanha: "", link_aux: "", videoUrl: "", imageFeed: "", imageStories: "", imageHorizontal: "" });
 
   const set = (campo: string, valor: string) => setForm((p) => ({ ...p, [campo]: valor }));
 
@@ -598,14 +594,14 @@ function DialogCriarAnuncio({ aberto, aoFechar, brandId, aoSalvar }: { aberto: b
       } else {
         if (form.imageFeed) assets.push({ placement: "feed", asset_url: form.imageFeed, asset_type: "image" });
         if (form.imageStories) assets.push({ placement: "stories", asset_url: form.imageStories, asset_type: "image" });
-        if (form.imageReels) assets.push({ placement: "reels", asset_url: form.imageReels, asset_type: "image" });
+        if (form.imageHorizontal) assets.push({ placement: "horizontal", asset_url: form.imageHorizontal, asset_type: "image" });
         if (assets.length === 0) { alert("Informe pelo menos 1 URL de imagem"); setSalvando(false); return; }
       }
       const res = await fetch("/api/ads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brand_id: brandId, type: tipo, ...form, assets }) });
       const json = await res.json();
       if (!res.ok) throw new Error(json.erro);
       aoFechar(); aoSalvar();
-      setForm({ campaign_name: "", campaign_id: "", ad_set_name: "", ad_set_id: "", ad_name: "", texto_principal: "", titulo: "", descricao: "", cta: "SHOP_NOW", link_campanha: "", link_aux: "", videoUrl: "", imageFeed: "", imageStories: "", imageReels: "" });
+      setForm({ campaign_name: "", campaign_id: "", ad_set_name: "", ad_set_id: "", ad_name: "", texto_principal: "", titulo: "", descricao: "", cta: "SHOP_NOW", link_campanha: "", link_aux: "", videoUrl: "", imageFeed: "", imageStories: "", imageHorizontal: "" });
     } catch (e) { alert(e instanceof Error ? e.message : "Erro"); } finally { setSalvando(false); }
   };
 
@@ -662,10 +658,10 @@ function DialogCriarAnuncio({ aberto, aoFechar, brandId, aoSalvar }: { aberto: b
               <div className="flex flex-col gap-3">
                 <Campo rotulo="Imagem Feed (1080x1080)" valor={form.imageFeed} aoMudar={(v) => set("imageFeed", v)} placeholder="URL pública (Cloudinary)" />
                 <Campo rotulo="Imagem Stories (1080x1920)" valor={form.imageStories} aoMudar={(v) => set("imageStories", v)} placeholder="URL pública (Cloudinary)" />
-                <Campo rotulo="Imagem Reels (1080x1920)" valor={form.imageReels} aoMudar={(v) => set("imageReels", v)} placeholder="URL pública (Cloudinary)" />
-                {(form.imageFeed || form.imageStories || form.imageReels) && (
+                <Campo rotulo="Imagem Horizontal (1200x628)" valor={form.imageHorizontal} aoMudar={(v) => set("imageHorizontal", v)} placeholder="URL pública (Cloudinary)" />
+                {(form.imageFeed || form.imageStories || form.imageHorizontal) && (
                   <div className="grid grid-cols-3 gap-3 mt-2">
-                    {[{ url: form.imageFeed, label: "Feed" }, { url: form.imageStories, label: "Stories" }, { url: form.imageReels, label: "Reels" }].map(({ url, label }) => (
+                    {[{ url: form.imageFeed, label: rotuloPlacementImagem("feed") }, { url: form.imageStories, label: rotuloPlacementImagem("stories") }, { url: form.imageHorizontal, label: rotuloPlacementImagem("horizontal") }].map(({ url, label }) => (
                       <div key={label} className="flex flex-col gap-1">
                         <span className="text-[10px] text-muted-foreground uppercase tracking-wider">{label}</span>
                         {url ? <div className="aspect-square rounded-md border overflow-hidden bg-muted"><img src={url} alt={label} className="w-full h-full object-cover" /></div>

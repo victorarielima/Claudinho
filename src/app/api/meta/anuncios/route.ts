@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  buscarAnunciosAtivos,
+  buscarAnunciosDoPeriodo,
   CONTAS_META,
   type PresetPeriodo,
   type AnuncioMeta,
@@ -14,6 +14,13 @@ const cache = new Map<
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos
 
 type Canal = "todos" | "ecommerce" | "clube";
+
+function filtrarComInvestimento(anuncios: AnuncioMeta[]): AnuncioMeta[] {
+  return anuncios.filter((anuncio) => {
+    const spend = anuncio.insights?.data?.[0]?.spend;
+    return Number.parseFloat(spend ?? "0") > 0;
+  });
+}
 
 function filtrarPorCanal(anuncios: AnuncioMeta[], canal: Canal): AnuncioMeta[] {
   if (canal === "todos") return anuncios;
@@ -61,18 +68,17 @@ export async function GET(request: NextRequest) {
       fromCache = true;
       timestamp = cached.timestamp;
     } else {
-      anuncios = await buscarAnunciosAtivosComCache(accountId, datePreset, cacheKey);
+      anuncios = await buscarAnunciosDoPeriodoComCache(accountId, datePreset, cacheKey);
       fromCache = false;
       timestamp = Date.now();
     }
   } else {
-    anuncios = await buscarAnunciosAtivosComCache(accountId, datePreset, cacheKey);
+    anuncios = await buscarAnunciosDoPeriodoComCache(accountId, datePreset, cacheKey);
     fromCache = false;
     timestamp = Date.now();
   }
 
-  // Filtrar por canal
-  const filtrados = filtrarPorCanal(anuncios, canal);
+  const filtrados = filtrarPorCanal(filtrarComInvestimento(anuncios), canal);
 
   return NextResponse.json({
     data: filtrados,
@@ -83,13 +89,13 @@ export async function GET(request: NextRequest) {
   });
 }
 
-async function buscarAnunciosAtivosComCache(
+async function buscarAnunciosDoPeriodoComCache(
   accountId: string,
   datePreset: PresetPeriodo,
   cacheKey: string
 ): Promise<AnuncioMeta[]> {
   try {
-    const anuncios = await buscarAnunciosAtivos(accountId, datePreset);
+    const anuncios = await buscarAnunciosDoPeriodo(accountId, datePreset);
     cache.set(cacheKey, { data: anuncios, timestamp: Date.now() });
     return anuncios;
   } catch (error) {
