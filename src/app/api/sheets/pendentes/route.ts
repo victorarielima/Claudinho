@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { lerLinhas, atualizarAccountId, ABAS, type ChaveAba } from "@/lib/sheets";
+import { lerLinhasComDiagnostico, atualizarAccountId, ABAS, type ChaveAba } from "@/lib/sheets";
 import { buscarAccountIdDoAdSet } from "@/lib/meta-criar";
 
 export async function GET(request: NextRequest) {
@@ -7,7 +7,7 @@ export async function GET(request: NextRequest) {
     const aba = (request.nextUrl.searchParams.get("aba") ?? "evino") as ChaveAba;
     const nomeAba = ABAS[aba] ?? ABAS.evino;
 
-    const linhas = await lerLinhas(nomeAba);
+    const { linhas, diagnostico } = await lerLinhasComDiagnostico(nomeAba);
 
     // Para itens concluídos sem accountId, resolver via adSetId e persistir na planilha
     const semAccount = linhas.filter(
@@ -27,7 +27,12 @@ export async function GET(request: NextRequest) {
       })
     );
 
-    return NextResponse.json({ data: linhas });
+    return NextResponse.json({
+      data: linhas,
+      meta: {
+        diagnosticoPlanilha: diagnostico,
+      },
+    });
   } catch (error) {
     const mensagem =
       error instanceof Error ? error.message : "Erro desconhecido";

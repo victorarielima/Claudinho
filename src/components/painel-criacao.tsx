@@ -13,15 +13,58 @@ import {
   type LinhaComStatus,
 } from "@/components/tabela-pendentes";
 import type { Ad, AdAsset, Brand } from "@/lib/db";
-import type { LinhaAnuncio, ChaveAba } from "@/lib/sheets";
+import type { LinhaAnuncio, ChaveAba, DiagnosticoPlanilha } from "@/lib/sheets";
 import {
   detectarTipoCriativo,
   extrairImageAssets,
   normalizarPlacementImagem,
   rotuloPlacementImagem,
 } from "@/lib/ad-media";
+import { analisarProntidaoAnuncio } from "@/lib/ad-readiness";
 
 type FonteDados = "supabase" | "sheets";
+
+type FeedbackPainel = {
+  tipo: "sucesso" | "erro" | "aviso" | "info";
+  titulo: string;
+  descricao?: string;
+} | null;
+
+const ROTULOS_COLUNA_PLANILHA: Record<string, string> = {
+  campaign: "Campanha",
+  adSet: "Ad Set",
+  adSetId: "Ad Set ID",
+  tipoPlanilha: "Tipo",
+  adName: "Ad Name",
+  linkVideo: "Mídia",
+  statusAutomacao: "Status",
+};
+
+function formatarColunaPlanilha(campo: string): string {
+  return ROTULOS_COLUNA_PLANILHA[campo] ?? campo;
+}
+
+function enriquecerLinha(linha: LinhaComStatus): LinhaComStatus {
+  const diagnostico = analisarProntidaoAnuncio({
+    tipo: linha.tipo ?? "video",
+    adSetId: linha.adSetId,
+    adName: linha.adName,
+    linkVideo: linha.linkVideo,
+    linkAnuncio: linha.linkAnuncio,
+    imageAssets: linha.imageAssets,
+  });
+
+  return {
+    ...linha,
+    imageAssets:
+      linha.tipo === "image" && diagnostico.imageAssetsNormalizados.length > 0
+        ? diagnostico.imageAssetsNormalizados
+        : linha.imageAssets,
+    prontoMeta: diagnostico.prontoParaSubir,
+    bloqueiosMeta: diagnostico.bloqueios.map((item) => item.mensagem),
+    avisosMeta: diagnostico.avisos.map((item) => item.mensagem),
+  };
+}
 
 export function PainelCriacao() {
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -32,8 +75,10 @@ export function PainelCriacao() {
   const [carregando, setCarregando] = useState(false);
   const [processando, setProcessando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<FeedbackPainel>(null);
   const [jaCarregou, setJaCarregou] = useState(false);
   const [serviceAccountEmail, setServiceAccountEmail] = useState<string>("");
+  const [diagnosticoPlanilha, setDiagnosticoPlanilha] = useState<DiagnosticoPlanilha | null>(null);
 
   const [selecionados, setSelecionados] = useState<Set<number>>(new Set());
   const [filtroStatus, setFiltroStatus] = useState<string>("todos");
@@ -174,8 +219,9 @@ export function PainelCriacao() {
         if (!res.ok) throw new Error(json.erro ?? "Erro ao carregar dados");
 
         const ads: Ad[] = json.data;
-        const novasLinhas = ads.map(adParaLinha);
+        const novasLinhas = ads.map(adParaLinha).map(enriquecerLinha);
         setLinhas(novasLinhas);
+        setDiagnosticoPlanilha(null);
         setJaCarregou(true);
 
         const paraValidar = novasLinhas.filter(
@@ -188,10 +234,11 @@ export function PainelCriacao() {
         if (!res.ok) throw new Error(json.erro ?? "Erro ao carregar planilha");
 
         const todas: LinhaAnuncio[] = json.data;
+        setDiagnosticoPlanilha(json.meta?.diagnosticoPlanilha ?? null);
         const novasLinhas: LinhaComStatus[] = todas.map((l) => {
           const tipo = detectarTipoCriativo(l.tipoPlanilha, l.linkVideo);
           const imageAssets = tipo === "image" ? extrairImageAssets(l.linkVideo) : [];
-          return {
+          return enriquecerLinha({
             ...l,
             statusProcessamento: l.statusAutomacao === "Concluído" ? "concluido" as const
               : l.statusAutomacao === "Processando" ? "processando" as const
@@ -203,7 +250,7 @@ export function PainelCriacao() {
             statusVideo: tipo === "image" ? "acessivel" as const : "nao_verificado" as const,
             tipo,
             imageAssets,
-          };
+          });
         });
 
         setLinhas(novasLinhas);
@@ -243,7 +290,7 @@ export function PainelCriacao() {
   }, []);
 
   const selecionaveis = linhas.filter(
-    (l) => (l.statusProcessamento === "pendente" || l.statusProcessamento === "erro") && l.statusVideo !== "inacessivel"
+    (l) => (l.statusProcessamento === "pendente" || l.statusProcessamento === "erro") && l.prontoMeta
   );
 
   const selecionarTodos = useCallback(() => {
@@ -254,6 +301,15 @@ export function PainelCriacao() {
 
   // ─── Subir anúncio ─────────────────────────────────────────
   const subirAnuncio = useCallback(async (linha: LinhaComStatus) => {
+    if (!linha.prontoMeta) {
+      setFeedback({
+        tipo: "aviso",
+        titulo: "Anúncio com pendências",
+        descricao: linha.bloqueiosMeta?.join(" ") ?? "Revise os bloqueios antes de subir.",
+      });
+      return;
+    }
+
     setProcessando(true);
 
     setLinhas((prev) =>
@@ -316,7 +372,7 @@ export function PainelCriacao() {
 
   const subirSelecionados = useCallback(async () => {
     const podeSubir = (l: LinhaComStatus) =>
-      (l.statusProcessamento === "pendente" || l.statusProcessamento === "erro") && l.statusVideo !== "inacessivel";
+      (l.statusProcessamento === "pendente" || l.statusProcessamento === "erro") && l.prontoMeta;
 
     const alvo = selecionados.size > 0
       ? linhas.filter((l) => selecionados.has(l.indiceLinha) && podeSubir(l))
@@ -330,6 +386,7 @@ export function PainelCriacao() {
   const importarDaPlanilha = useCallback(async () => {
     if (!brandSelecionado) return;
     setImportando(true);
+    setFeedback(null);
     try {
       const abaMap: Record<string, ChaveAba> = {};
       for (const b of brands) {
@@ -346,10 +403,19 @@ export function PainelCriacao() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.erro ?? "Erro ao importar");
 
-      alert(`Importação: ${json.data.importados} importados, ${json.data.ignorados} ignorados`);
+      setDiagnosticoPlanilha(json.meta?.diagnosticoPlanilha ?? null);
+      setFeedback({
+        tipo: "sucesso",
+        titulo: "Importação concluída",
+        descricao: `${json.data.importados} importados, ${json.data.ignorados} ignorados.`,
+      });
       await carregarDados();
     } catch (e) {
-      alert(`Erro: ${e instanceof Error ? e.message : "Erro desconhecido"}`);
+      setFeedback({
+        tipo: "erro",
+        titulo: "Falha ao importar da planilha",
+        descricao: e instanceof Error ? e.message : "Erro desconhecido",
+      });
     } finally {
       setImportando(false);
     }
@@ -359,8 +425,15 @@ export function PainelCriacao() {
   const totalPendentes = linhas.filter((l) => l.statusProcessamento === "pendente").length;
   const totalConcluidos = linhas.filter((l) => l.statusProcessamento === "concluido").length;
   const totalErros = linhas.filter((l) => l.statusProcessamento === "erro").length;
-  const totalVideosBloqueados = linhas.filter((l) => l.statusVideo === "inacessivel" && l.statusProcessamento === "pendente").length;
-  const totalDisponiveis = totalPendentes - totalVideosBloqueados;
+  const totalBloqueados = linhas.filter(
+    (l) => (l.statusProcessamento === "pendente" || l.statusProcessamento === "erro") && !l.prontoMeta
+  ).length;
+  const totalVideosBloqueados = linhas.filter(
+    (l) =>
+      l.statusVideo === "inacessivel" &&
+      (l.statusProcessamento === "pendente" || l.statusProcessamento === "erro")
+  ).length;
+  const totalDisponiveis = selecionaveis.length;
   const totalProcessando = linhas.filter((l) => l.statusProcessamento === "processando").length;
   const total = linhas.length;
 
@@ -383,7 +456,7 @@ export function PainelCriacao() {
   });
 
   const resetFiltros = () => {
-    setLinhas([]); setJaCarregou(false); setSelecionados(new Set()); setErro(null);
+    setLinhas([]); setJaCarregou(false); setSelecionados(new Set()); setErro(null); setFeedback(null); setDiagnosticoPlanilha(null);
     setFiltroStatus("todos"); setFiltroData("todas"); setFiltroCampanha("todas"); setFiltroAdSet("todos"); setBusca("");
   };
 
@@ -477,12 +550,27 @@ export function PainelCriacao() {
           <div className="flex items-center gap-4 text-sm">
             <span className="text-muted-foreground">{total} anúncio{total !== 1 ? "s" : ""}</span>
             {selecionados.size > 0 && <span className="flex items-center gap-1.5 text-primary"><span className="h-2 w-2 rounded-full bg-primary" />{selecionados.size} selecionado{selecionados.size !== 1 ? "s" : ""}</span>}
+            {totalDisponiveis > 0 && <span className="flex items-center gap-1.5 text-blue-700"><span className="h-2 w-2 rounded-full bg-blue-500" />{totalDisponiveis} pronto{totalDisponiveis !== 1 ? "s" : ""}</span>}
             {totalConcluidos > 0 && <span className="flex items-center gap-1.5 text-green-600"><span className="h-2 w-2 rounded-full bg-green-500" />{totalConcluidos} concluído{totalConcluidos !== 1 ? "s" : ""}</span>}
             {totalErros > 0 && <span className="flex items-center gap-1.5 text-destructive"><span className="h-2 w-2 rounded-full bg-destructive" />{totalErros} erro{totalErros !== 1 ? "s" : ""}</span>}
-            {totalVideosBloqueados > 0 && <span className="flex items-center gap-1.5 text-amber-600"><span className="h-2 w-2 rounded-full bg-amber-500" />{totalVideosBloqueados} sem acesso</span>}
+            {totalBloqueados > 0 && <span className="flex items-center gap-1.5 text-amber-600"><span className="h-2 w-2 rounded-full bg-amber-500" />{totalBloqueados} com bloqueio</span>}
+            {totalVideosBloqueados > 0 && <span className="flex items-center gap-1.5 text-amber-700"><span className="h-2 w-2 rounded-full bg-amber-600" />{totalVideosBloqueados} vídeo{totalVideosBloqueados !== 1 ? "s" : ""} sem acesso</span>}
           </div>
         )}
       </div>
+
+      {feedback && (
+        <BannerPainel
+          tipo={feedback.tipo}
+          titulo={feedback.titulo}
+          descricao={feedback.descricao}
+          aoFechar={() => setFeedback(null)}
+        />
+      )}
+
+      {diagnosticoPlanilha && (
+        <BannerPlanilha diagnostico={diagnosticoPlanilha} />
+      )}
 
       {erro && (
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
@@ -569,44 +657,184 @@ export function PainelCriacao() {
       ) : null}
 
       {/* Dialog: Criar Novo Anúncio */}
-      <DialogCriarAnuncio aberto={dialogCriar} aoFechar={() => setDialogCriar(false)} brandId={brandSelecionado?.id ?? ""} aoSalvar={carregarDados} />
+      <DialogCriarAnuncio
+        aberto={dialogCriar}
+        aoFechar={() => setDialogCriar(false)}
+        brandId={brandSelecionado?.id ?? ""}
+        aoSalvar={carregarDados}
+        aoNotificar={setFeedback}
+      />
+    </div>
+  );
+}
+
+function BannerPainel({
+  tipo,
+  titulo,
+  descricao,
+  aoFechar,
+}: {
+  tipo: NonNullable<FeedbackPainel>["tipo"];
+  titulo: string;
+  descricao?: string;
+  aoFechar: () => void;
+}) {
+  const estilos = {
+    sucesso: "border-green-300 bg-green-50 text-green-900",
+    erro: "border-destructive/40 bg-destructive/10 text-destructive",
+    aviso: "border-amber-300 bg-amber-50 text-amber-900",
+    info: "border-blue-300 bg-blue-50 text-blue-900",
+  } as const;
+
+  return (
+    <div className={`rounded-lg border px-4 py-3 ${estilos[tipo]}`}>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium">{titulo}</p>
+          {descricao && <p className="mt-1 text-sm opacity-90">{descricao}</p>}
+        </div>
+        <button onClick={aoFechar} className="text-sm opacity-70 transition-opacity hover:opacity-100">
+          Fechar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function BannerPlanilha({ diagnostico }: { diagnostico: DiagnosticoPlanilha }) {
+  const temProblema =
+    diagnostico.colunasObrigatoriasAusentes.length > 0 || diagnostico.cabecalhosDuplicados.length > 0;
+
+  return (
+    <div
+      className={`rounded-lg border px-4 py-3 ${
+        temProblema
+          ? "border-amber-300 bg-amber-50 text-amber-900"
+          : "border-blue-300 bg-blue-50 text-blue-900"
+      }`}
+    >
+      <p className="text-sm font-medium">
+        {temProblema ? "Atenção ao mapeamento da planilha" : "Mapeamento da planilha validado"}
+      </p>
+      <div className="mt-1 flex flex-col gap-1 text-sm">
+        {diagnostico.colunasObrigatoriasAusentes.length > 0 && (
+          <p>
+            Cabeçalhos não encontrados:{" "}
+            {diagnostico.colunasObrigatoriasAusentes.map(formatarColunaPlanilha).join(", ")}.
+          </p>
+        )}
+        {diagnostico.colunasEmFallback.length > 0 && (
+          <p>
+            Colunas lidas por fallback/posição:{" "}
+            {diagnostico.colunasEmFallback.map(formatarColunaPlanilha).join(", ")}.
+          </p>
+        )}
+        {diagnostico.cabecalhosDuplicados.length > 0 && (
+          <p>
+            Cabeçalhos duplicados:{" "}
+            {diagnostico.cabecalhosDuplicados.map(formatarColunaPlanilha).join(", ")}.
+          </p>
+        )}
+        {!temProblema && diagnostico.usandoCabecalho && (
+          <p>O fluxo está lendo a planilha pelos nomes de coluna, não pela posição.</p>
+        )}
+      </div>
     </div>
   );
 }
 
 // ─── Dialog de criação ───────────────────────────────────────
 
-function DialogCriarAnuncio({ aberto, aoFechar, brandId, aoSalvar }: { aberto: boolean; aoFechar: () => void; brandId: string; aoSalvar: () => void }) {
+function DialogCriarAnuncio({
+  aberto,
+  aoFechar,
+  brandId,
+  aoSalvar,
+  aoNotificar,
+}: {
+  aberto: boolean;
+  aoFechar: () => void;
+  brandId: string;
+  aoSalvar: () => Promise<void> | void;
+  aoNotificar: (feedback: FeedbackPainel) => void;
+}) {
   const [tipo, setTipo] = useState<"video" | "image">("video");
   const [salvando, setSalvando] = useState(false);
   const [form, setForm] = useState({ campaign_name: "", campaign_id: "", ad_set_name: "", ad_set_id: "", ad_name: "", texto_principal: "", titulo: "", descricao: "", cta: "SHOP_NOW", link_campanha: "", link_aux: "", videoUrl: "", imageFeed: "", imageStories: "", imageHorizontal: "" });
+  const [erroFormulario, setErroFormulario] = useState<string | null>(null);
 
   const set = (campo: string, valor: string) => setForm((p) => ({ ...p, [campo]: valor }));
+  const assetsFormulario = tipo === "image"
+    ? [
+        { placement: "feed", url: form.imageFeed },
+        { placement: "stories", url: form.imageStories },
+        { placement: "horizontal", url: form.imageHorizontal },
+      ].filter((asset) => asset.url.trim())
+    : [];
+  const formIniciado = Object.values(form).some((valor) => valor.trim().length > 0);
+  const diagnosticoFormulario = analisarProntidaoAnuncio({
+    tipo,
+    adSetId: form.ad_set_id,
+    adName: form.ad_name,
+    linkVideo: tipo === "video" ? form.videoUrl : "",
+    linkAnuncio: form.link_campanha,
+    imageAssets: assetsFormulario,
+  });
 
   const salvar = async () => {
-    if (!form.campaign_name || !form.ad_set_name || !form.ad_name) { alert("Preencha: Campanha, Ad Set e Nome"); return; }
+    setErroFormulario(null);
+
+    if (!form.campaign_name || !form.ad_set_name || !form.ad_name) {
+      setErroFormulario("Preencha Campanha, Ad Set e Nome do anúncio.");
+      return;
+    }
+
+    if (!brandId) {
+      setErroFormulario("Selecione uma brand antes de criar o anúncio.");
+      return;
+    }
+
+    if (diagnosticoFormulario.bloqueios.length > 0) {
+      setErroFormulario(diagnosticoFormulario.bloqueios.map((item) => item.mensagem).join(" "));
+      return;
+    }
+
     setSalvando(true);
     try {
       const assets: { placement: string; asset_url: string; asset_type: "image" | "video" }[] = [];
       if (tipo === "video") {
-        if (!form.videoUrl) { alert("Informe a URL do vídeo"); setSalvando(false); return; }
         assets.push({ placement: "video_principal", asset_url: form.videoUrl, asset_type: "video" });
       } else {
         if (form.imageFeed) assets.push({ placement: "feed", asset_url: form.imageFeed, asset_type: "image" });
         if (form.imageStories) assets.push({ placement: "stories", asset_url: form.imageStories, asset_type: "image" });
         if (form.imageHorizontal) assets.push({ placement: "horizontal", asset_url: form.imageHorizontal, asset_type: "image" });
-        if (assets.length === 0) { alert("Informe pelo menos 1 URL de imagem"); setSalvando(false); return; }
       }
       const res = await fetch("/api/ads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brand_id: brandId, type: tipo, ...form, assets }) });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.erro);
-      aoFechar(); aoSalvar();
+      if (!res.ok) throw new Error(json.erro ?? "Erro ao salvar anúncio");
+      await aoSalvar();
+      aoNotificar({
+        tipo: diagnosticoFormulario.avisos.length > 0 ? "aviso" : "sucesso",
+        titulo: diagnosticoFormulario.avisos.length > 0 ? "Anúncio salvo com avisos" : "Anúncio salvo",
+        descricao: diagnosticoFormulario.avisos.length > 0
+          ? diagnosticoFormulario.avisos.map((item) => item.mensagem).join(" ")
+          : "O anúncio já aparece no painel de criação.",
+      });
       setForm({ campaign_name: "", campaign_id: "", ad_set_name: "", ad_set_id: "", ad_name: "", texto_principal: "", titulo: "", descricao: "", cta: "SHOP_NOW", link_campanha: "", link_aux: "", videoUrl: "", imageFeed: "", imageStories: "", imageHorizontal: "" });
-    } catch (e) { alert(e instanceof Error ? e.message : "Erro"); } finally { setSalvando(false); }
+      setErroFormulario(null);
+      aoFechar();
+    } catch (e) {
+      setErroFormulario(e instanceof Error ? e.message : "Erro desconhecido");
+    } finally { setSalvando(false); }
   };
 
   return (
-    <Dialog open={aberto} onOpenChange={(open) => !open && aoFechar()}>
+    <Dialog open={aberto} onOpenChange={(open) => {
+      if (!open) {
+        setErroFormulario(null);
+        aoFechar();
+      }
+    }}>
       <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader><DialogTitle>Novo Anúncio</DialogTitle></DialogHeader>
         <div className="flex flex-col gap-5 pt-2">
@@ -621,8 +849,16 @@ function DialogCriarAnuncio({ aberto, aoFechar, brandId, aoSalvar }: { aberto: b
             <Campo rotulo="Campanha *" valor={form.campaign_name} aoMudar={(v) => set("campaign_name", v)} />
             <Campo rotulo="Campaign ID" valor={form.campaign_id} aoMudar={(v) => set("campaign_id", v)} placeholder="Opcional" />
             <Campo rotulo="Ad Set *" valor={form.ad_set_name} aoMudar={(v) => set("ad_set_name", v)} />
-            <Campo rotulo="Ad Set ID" valor={form.ad_set_id} aoMudar={(v) => set("ad_set_id", v)} placeholder="Opcional" />
+            <Campo rotulo="Ad Set ID" valor={form.ad_set_id} aoMudar={(v) => set("ad_set_id", v)} placeholder="Obrigatório para subir na Meta" />
           </div>
+          <p className="-mt-2 text-xs text-muted-foreground">
+            O anúncio pode ser salvo sem `Ad Set ID`, mas o upload para a Meta fica bloqueado até ele ser preenchido.
+          </p>
+          {erroFormulario && (
+            <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {erroFormulario}
+            </div>
+          )}
           <Campo rotulo="Nome do Anúncio *" valor={form.ad_name} aoMudar={(v) => set("ad_name", v)} />
           <div className="col-span-2">
             <label className="text-sm font-medium">Texto Principal</label>
@@ -652,6 +888,11 @@ function DialogCriarAnuncio({ aberto, aoFechar, brandId, aoSalvar }: { aberto: b
           )}
           <div className="border-t pt-4">
             <h4 className="text-sm font-medium mb-3">{tipo === "video" ? "Vídeo" : "Imagens por Placement"}</h4>
+            <div className="mb-3 rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              {tipo === "video"
+                ? "Use um link público do Google Drive. Sem acesso ao arquivo, o upload será bloqueado."
+                : "Recomendado: enviar os três cortes. Quadrado 1080x1080, Vertical 1080x1920 e Horizontal 1200x628."}
+            </div>
             {tipo === "video" ? (
               <Campo rotulo="URL do Vídeo (Google Drive)" valor={form.videoUrl} aoMudar={(v) => set("videoUrl", v)} placeholder="https://drive.google.com/file/d/..." />
             ) : (
@@ -673,8 +914,18 @@ function DialogCriarAnuncio({ aberto, aoFechar, brandId, aoSalvar }: { aberto: b
               </div>
             )}
           </div>
+          {formIniciado && diagnosticoFormulario.avisos.length > 0 && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <p className="font-medium">Avisos</p>
+              <div className="mt-1 flex flex-col gap-1">
+                {diagnosticoFormulario.avisos.map((item) => (
+                  <p key={item.codigo}>{item.mensagem}</p>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="flex justify-end gap-3 border-t pt-4">
-            <button onClick={aoFechar} className="inline-flex h-10 items-center rounded-lg border border-input bg-background px-5 text-sm font-medium shadow-sm hover:bg-accent hover:text-accent-foreground">Cancelar</button>
+            <button onClick={() => { setErroFormulario(null); aoFechar(); }} className="inline-flex h-10 items-center rounded-lg border border-input bg-background px-5 text-sm font-medium shadow-sm hover:bg-accent hover:text-accent-foreground">Cancelar</button>
             <button onClick={salvar} disabled={salvando} className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50">
               {salvando ? (<><span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />Salvando...</>) : "Salvar Anúncio"}
             </button>

@@ -22,6 +22,14 @@ function filtrarComInvestimento(anuncios: AnuncioMeta[]): AnuncioMeta[] {
   });
 }
 
+function ordenarPorInvestimento(anuncios: AnuncioMeta[]): AnuncioMeta[] {
+  return [...anuncios].sort((a, b) => {
+    const spendA = Number.parseFloat(a.insights?.data?.[0]?.spend ?? "0");
+    const spendB = Number.parseFloat(b.insights?.data?.[0]?.spend ?? "0");
+    return spendB - spendA;
+  });
+}
+
 function filtrarPorCanal(anuncios: AnuncioMeta[], canal: Canal): AnuncioMeta[] {
   if (canal === "todos") return anuncios;
 
@@ -78,7 +86,9 @@ export async function GET(request: NextRequest) {
     timestamp = Date.now();
   }
 
-  const filtrados = filtrarPorCanal(filtrarComInvestimento(anuncios), canal);
+  const filtrados = ordenarPorInvestimento(
+    filtrarPorCanal(filtrarComInvestimento(anuncios), canal)
+  );
 
   return NextResponse.json({
     data: filtrados,

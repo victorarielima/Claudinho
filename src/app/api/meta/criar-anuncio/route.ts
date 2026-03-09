@@ -16,6 +16,7 @@ import {
   extrairImageAssets,
   normalizarPlacementImagem,
 } from "@/lib/ad-media";
+import { analisarProntidaoAnuncio } from "@/lib/ad-readiness";
 
 // Fallback para compatibilidade: se o ad veio da planilha e ainda não tem brand no banco
 import { atualizarLinha, marcarErro, reservarLinha, ABAS, type ChaveAba } from "@/lib/sheets";
@@ -108,6 +109,20 @@ async function processarFluxoNovo(body: CorpoNovoFluxo) {
 
     const assets = ad.ad_assets ?? [];
     let creativeId: string;
+    const diagnostico = analisarProntidaoAnuncio({
+      tipo: ad.type,
+      adSetId: ad.ad_set_id,
+      adName: ad.ad_name,
+      linkVideo: assets.find((asset) => asset.asset_type === "video")?.asset_url,
+      linkAnuncio: ad.link_anuncio,
+      imageAssets: assets
+        .filter((asset) => asset.asset_type === "image")
+        .map((asset) => ({ placement: asset.placement, url: asset.asset_url })),
+    });
+
+    if (diagnostico.bloqueios.length > 0) {
+      throw new Error(diagnostico.bloqueios.map((item) => item.mensagem).join(" "));
+    }
 
     if (ad.type === "video") {
       // ── Fluxo vídeo ──
@@ -235,6 +250,19 @@ async function processarFluxoLegado(body: CorpoLegado) {
     }
 
     const tipoCriativo = body.tipo ?? detectarTipoCriativo(body.tipoPlanilha, body.linkVideo);
+    const diagnostico = analisarProntidaoAnuncio({
+      tipo: tipoCriativo,
+      adSetId: body.adSetId,
+      adName: body.adName,
+      linkVideo: body.linkVideo,
+      linkAnuncio: body.linkAnuncio,
+      imageAssets: body.imageAssets,
+    });
+
+    if (diagnostico.bloqueios.length > 0) {
+      throw new Error(diagnostico.bloqueios.map((item) => item.mensagem).join(" "));
+    }
+
     let creativeId: string;
 
     if (tipoCriativo === "image") {

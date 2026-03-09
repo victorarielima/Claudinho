@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { lerLinhas, ABAS, type ChaveAba } from "@/lib/sheets";
+import { lerLinhasComDiagnostico, ABAS, type ChaveAba } from "@/lib/sheets";
 import { getSupabase } from "@/lib/supabase";
 import { gerarLinkAnuncio } from "@/lib/utm";
 import { detectarTipoCriativo, extrairImageAssets } from "@/lib/ad-media";
@@ -36,9 +36,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Ler linhas da planilha
-    const linhas = await lerLinhas(nomeAba);
+    const { linhas, diagnostico } = await lerLinhasComDiagnostico(nomeAba);
     if (linhas.length === 0) {
-      return NextResponse.json({ data: { importados: 0, ignorados: 0 } });
+      return NextResponse.json({
+        data: { importados: 0, ignorados: 0 },
+        meta: { diagnosticoPlanilha: diagnostico },
+      });
     }
 
     let importados = 0;
@@ -142,6 +145,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       data: { importados, ignorados, total: linhas.length },
+      meta: { diagnosticoPlanilha: diagnostico },
     });
   } catch (error) {
     const mensagem = error instanceof Error ? error.message : "Erro desconhecido";

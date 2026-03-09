@@ -41,6 +41,9 @@ export interface LinhaComStatus extends LinhaAnuncio {
   imageAssets?: { placement: string; url: string }[];
   linkCampanha?: string;
   linkAux?: string;
+  prontoMeta?: boolean;
+  bloqueiosMeta?: string[];
+  avisosMeta?: string[];
 }
 
 interface TabelaPendentesProps {
@@ -272,8 +275,9 @@ function TabelaCompacta({
               const processandoLinha = linha.statusProcessamento === "processando";
               const isImage = linha.tipo === "image";
               const videoInacessivel = !isImage && linha.statusVideo === "inacessivel";
+              const bloqueada = linha.prontoMeta === false;
               const selecionada = selecionados.has(linha.indiceLinha);
-              const podeSelecionar = !concluido && !processandoLinha && !videoInacessivel;
+              const podeSelecionar = !concluido && !processandoLinha && !videoInacessivel && !bloqueada;
 
               return (
                 <tr
@@ -300,9 +304,14 @@ function TabelaCompacta({
                     <StatusDot status={linha.statusProcessamento} />
                   </td>
                   <td className="px-3 py-2">
-                    <span className="text-xs text-muted-foreground">
-                      {linha.tipo === "image" ? "Imagem" : "Vídeo"}
-                    </span>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-xs text-muted-foreground">
+                        {linha.tipo === "image" ? "Imagem" : "Vídeo"}
+                      </span>
+                      {bloqueada && (
+                        <span className="text-[10px] text-amber-700">Ajuste necessário</span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-3 py-2">
                     <span className="font-medium truncate block max-w-xs" title={linha.adName}>
@@ -367,7 +376,7 @@ function TabelaCompacta({
                     ) : (
                       <button
                         onClick={() => aoSubir(linha)}
-                        disabled={processando || processandoLinha || videoInacessivel}
+                        disabled={processando || processandoLinha || videoInacessivel || bloqueada}
                         className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
                       >
                         {processandoLinha ? (
@@ -375,6 +384,8 @@ function TabelaCompacta({
                             <span className="h-3 w-3 animate-spin rounded-full border-[1.5px] border-primary-foreground/30 border-t-primary-foreground" />
                             Subindo
                           </>
+                        ) : bloqueada ? (
+                          "Corrigir"
                         ) : temErro ? (
                           "Tentar"
                         ) : (
@@ -440,7 +451,7 @@ export function TabelaPendentes({
   if (linhas.length === 0) {
     return (
       <div className="flex h-40 items-center justify-center rounded-lg border border-dashed text-muted-foreground">
-        Nenhum anúncio pendente na planilha.
+        Nenhum anúncio encontrado com os filtros atuais.
       </div>
     );
   }
@@ -476,10 +487,11 @@ export function TabelaPendentes({
             const isImage = linha.tipo === "image";
             const videoInacessivel = !isImage && linha.statusVideo === "inacessivel";
             const videoAcessivel = !isImage && linha.statusVideo === "acessivel";
+            const bloqueada = linha.prontoMeta === false;
 
             const selecionada = selecionados.has(linha.indiceLinha);
             const podeSelecionar =
-              !concluido && !processandoLinha && !videoInacessivel;
+              !concluido && !processandoLinha && !videoInacessivel && !bloqueada;
 
             return (
               <Card
@@ -553,6 +565,11 @@ export function TabelaPendentes({
                             <Badge variant="outline" className="gap-1 text-xs">
                               {isImage ? "Imagem" : "Vídeo"}
                             </Badge>
+                            {bloqueada && (
+                              <Badge className="border-amber-300 bg-amber-50 text-amber-800" variant="outline">
+                                Revisar antes de subir
+                              </Badge>
+                            )}
                             {!isImage && (
                               concluido ? (
                                 linha.linkVideo && (
@@ -623,7 +640,8 @@ export function TabelaPendentes({
                                 processando ||
                                 processandoLinha ||
                                 concluido ||
-                                videoInacessivel
+                                videoInacessivel ||
+                                bloqueada
                               }
                               className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
                             >
@@ -632,6 +650,8 @@ export function TabelaPendentes({
                                   <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />
                                   Subindo...
                                 </>
+                              ) : bloqueada ? (
+                                "Corrigir pendências"
                               ) : temErro ? (
                                 "Tentar Novamente"
                               ) : (
@@ -703,6 +723,28 @@ export function TabelaPendentes({
                               </div>
                             </div>
                           ))}
+                        </div>
+                      )}
+
+                      {bloqueada && (linha.bloqueiosMeta?.length ?? 0) > 0 && (
+                        <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                          <p className="font-medium">Bloqueios para subir</p>
+                          <div className="mt-1 flex flex-col gap-1">
+                            {linha.bloqueiosMeta?.map((item) => (
+                              <p key={item}>{item}</p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {!bloqueada && (linha.avisosMeta?.length ?? 0) > 0 && (
+                        <div className="rounded-md border border-amber-300 bg-amber-50/70 px-4 py-3 text-sm text-amber-900">
+                          <p className="font-medium">Avisos</p>
+                          <div className="mt-1 flex flex-col gap-1">
+                            {linha.avisosMeta?.map((item) => (
+                              <p key={item}>{item}</p>
+                            ))}
+                          </div>
                         </div>
                       )}
 

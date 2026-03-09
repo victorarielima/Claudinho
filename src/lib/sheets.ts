@@ -24,6 +24,16 @@ type CampoPlanilha =
   | "accountId"
   | "data";
 
+const CAMPOS_ESSENCIAIS_PLANILHA: CampoPlanilha[] = [
+  "campaign",
+  "adSet",
+  "adSetId",
+  "tipoPlanilha",
+  "adName",
+  "linkVideo",
+  "statusAutomacao",
+];
+
 const HEADER_ALIASES: Record<CampoPlanilha, string[]> = {
   campaign: ["campaign", "campanha", "campaign name", "nome da campanha"],
   adSet: ["ad set", "adset", "conjunto", "conjunto de anuncios", "nome do ad set"],
@@ -104,6 +114,51 @@ function resolverIndicesColunas(cabecalhoBruto: string[] | undefined): Record<Ca
   );
 }
 
+export interface DiagnosticoPlanilha {
+  colunasObrigatoriasAusentes: CampoPlanilha[];
+  colunasEmFallback: CampoPlanilha[];
+  cabecalhosDuplicados: string[];
+  usandoCabecalho: boolean;
+}
+
+function diagnosticarCabecalho(cabecalhoBruto: string[] | undefined): DiagnosticoPlanilha {
+  const cabecalhos = (cabecalhoBruto ?? []).map((valor) => normalizarCabecalho(valor));
+  const usandoCabecalho = cabecalhos.some((valor) => valor.length > 0);
+  const frequencias = new Map<string, number>();
+
+  for (const cabecalho of cabecalhos) {
+    if (!cabecalho) continue;
+    frequencias.set(cabecalho, (frequencias.get(cabecalho) ?? 0) + 1);
+  }
+
+  const cabecalhosDuplicados = Array.from(frequencias.entries())
+    .filter(([, total]) => total > 1)
+    .map(([cabecalho]) => cabecalho);
+
+  const colunasObrigatoriasAusentes: CampoPlanilha[] = [];
+  const colunasEmFallback: CampoPlanilha[] = [];
+
+  for (const campo of CAMPOS_ESSENCIAIS_PLANILHA) {
+    const indiceCabecalho = usandoCabecalho
+      ? encontrarIndiceCabecalho(cabecalhos, HEADER_ALIASES[campo])
+      : -1;
+
+    if (indiceCabecalho === -1) {
+      colunasEmFallback.push(campo);
+      if (usandoCabecalho) {
+        colunasObrigatoriasAusentes.push(campo);
+      }
+    }
+  }
+
+  return {
+    colunasObrigatoriasAusentes,
+    colunasEmFallback,
+    cabecalhosDuplicados,
+    usandoCabecalho,
+  };
+}
+
 function obterCelula(row: string[], colunas: Record<CampoPlanilha, number>, campo: CampoPlanilha): string {
   return (row[colunas[campo]] ?? "").trim();
 }
@@ -135,7 +190,10 @@ async function obterSpreadsheetId(): Promise<string> {
   return spreadsheetId;
 }
 
-async function lerCabecalho(nomeAba: string): Promise<Record<CampoPlanilha, number>> {
+async function lerCabecalhoComDiagnostico(nomeAba: string): Promise<{
+  colunas: Record<CampoPlanilha, number>;
+  diagnostico: DiagnosticoPlanilha;
+}> {
   const sheets = await obterSheetsClient();
   const spreadsheetId = await obterSpreadsheetId();
   const res = await sheets.spreadsheets.values.get({
@@ -143,7 +201,15 @@ async function lerCabecalho(nomeAba: string): Promise<Record<CampoPlanilha, numb
     range: `'${nomeAba}'!1:1`,
   });
 
-  return resolverIndicesColunas(res.data.values?.[0]);
+  return {
+    colunas: resolverIndicesColunas(res.data.values?.[0]),
+    diagnostico: diagnosticarCabecalho(res.data.values?.[0]),
+  };
+}
+
+async function lerCabecalho(nomeAba: string): Promise<Record<CampoPlanilha, number>> {
+  const { colunas } = await lerCabecalhoComDiagnostico(nomeAba);
+  return colunas;
 }
 
 export const ABAS = {
@@ -174,7 +240,10 @@ export interface LinhaAnuncio {
   data: string;
 }
 
-export async function lerLinhas(nomeAba: string): Promise<LinhaAnuncio[]> {
+export async function lerLinhasComDiagnostico(nomeAba: string): Promise<{
+  linhas: LinhaAnuncio[];
+  diagnostico: DiagnosticoPlanilha;
+}> {
   const sheets = await obterSheetsClient();
   const spreadsheetId = await obterSpreadsheetId();
   const res = await sheets.spreadsheets.values.get({
@@ -184,10 +253,14 @@ export async function lerLinhas(nomeAba: string): Promise<LinhaAnuncio[]> {
 
   const linhas = res.data.values;
   if (!linhas || linhas.length <= 1) {
-    return [];
+    return {
+      linhas: [],
+      diagnostico: diagnosticarCabecalho(linhas?.[0]),
+    };
   }
 
   const colunas = resolverIndicesColunas(linhas[0]);
+  const diagnostico = diagnosticarCabecalho(linhas[0]);
   const todas: LinhaAnuncio[] = [];
 
   for (let i = 1; i < linhas.length; i++) {
@@ -219,7 +292,15 @@ export async function lerLinhas(nomeAba: string): Promise<LinhaAnuncio[]> {
     });
   }
 
-  return todas;
+  return {
+    linhas: todas,
+    diagnostico,
+  };
+}
+
+export async function lerLinhas(nomeAba: string): Promise<LinhaAnuncio[]> {
+  const { linhas } = await lerLinhasComDiagnostico(nomeAba);
+  return linhas;
 }
 
 export async function atualizarLinha(
@@ -267,7 +348,7 @@ export async function atualizarLinha(
 }
 
 /**
- * Lê o status atual da coluna N direto da planilha (sem cache).
+ * Lê o status atual diretamente da coluna mapeada por cabeçalho (sem cache).
  * Retorna o valor raw da célula (ex: "Pendente", "Processando", "Concluído", "Erro: ...").
  */
 export async function lerStatusLinha(nomeAba: string, indiceLinha: number): Promise<string> {
