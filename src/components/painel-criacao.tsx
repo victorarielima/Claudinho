@@ -3,22 +3,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   TabelaPendentes,
   type LinhaComStatus,
 } from "@/components/tabela-pendentes";
+import { DialogCriarAnuncio } from "@/components/dialog-criar-anuncio";
 import type { Ad, AdAsset, Brand } from "@/lib/db";
 import type { LinhaAnuncio, ChaveAba, DiagnosticoPlanilha } from "@/lib/sheets";
 import {
   detectarTipoCriativo,
   extrairImageAssets,
   normalizarPlacementImagem,
-  rotuloPlacementImagem,
 } from "@/lib/ad-media";
 import { analisarProntidaoAnuncio } from "@/lib/ad-readiness";
 
@@ -497,7 +491,7 @@ export function PainelCriacao() {
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
               </svg>
-              Novo Anúncio
+              Novo Criativo
             </button>
           )}
           <a href={`https://docs.google.com/spreadsheets/d/${process.env.NEXT_PUBLIC_GOOGLE_SHEETS_ID}/edit`} target="_blank" rel="noopener noreferrer"
@@ -661,6 +655,7 @@ export function PainelCriacao() {
         aberto={dialogCriar}
         aoFechar={() => setDialogCriar(false)}
         brandId={brandSelecionado?.id ?? ""}
+        brandNome={brandSelecionado?.name}
         aoSalvar={carregarDados}
         aoNotificar={setFeedback}
       />
@@ -739,209 +734,6 @@ function BannerPlanilha({ diagnostico }: { diagnostico: DiagnosticoPlanilha }) {
           <p>O fluxo está lendo a planilha pelos nomes de coluna, não pela posição.</p>
         )}
       </div>
-    </div>
-  );
-}
-
-// ─── Dialog de criação ───────────────────────────────────────
-
-function DialogCriarAnuncio({
-  aberto,
-  aoFechar,
-  brandId,
-  aoSalvar,
-  aoNotificar,
-}: {
-  aberto: boolean;
-  aoFechar: () => void;
-  brandId: string;
-  aoSalvar: () => Promise<void> | void;
-  aoNotificar: (feedback: FeedbackPainel) => void;
-}) {
-  const [tipo, setTipo] = useState<"video" | "image">("video");
-  const [salvando, setSalvando] = useState(false);
-  const [form, setForm] = useState({ campaign_name: "", campaign_id: "", ad_set_name: "", ad_set_id: "", ad_name: "", texto_principal: "", titulo: "", descricao: "", cta: "SHOP_NOW", link_campanha: "", link_aux: "", videoUrl: "", imageFeed: "", imageStories: "", imageHorizontal: "" });
-  const [erroFormulario, setErroFormulario] = useState<string | null>(null);
-
-  const set = (campo: string, valor: string) => setForm((p) => ({ ...p, [campo]: valor }));
-  const assetsFormulario = tipo === "image"
-    ? [
-        { placement: "feed", url: form.imageFeed },
-        { placement: "stories", url: form.imageStories },
-        { placement: "horizontal", url: form.imageHorizontal },
-      ].filter((asset) => asset.url.trim())
-    : [];
-  const formIniciado = Object.values(form).some((valor) => valor.trim().length > 0);
-  const diagnosticoFormulario = analisarProntidaoAnuncio({
-    tipo,
-    adSetId: form.ad_set_id,
-    adName: form.ad_name,
-    linkVideo: tipo === "video" ? form.videoUrl : "",
-    linkAnuncio: form.link_campanha,
-    imageAssets: assetsFormulario,
-  });
-
-  const salvar = async () => {
-    setErroFormulario(null);
-
-    if (!form.campaign_name || !form.ad_set_name || !form.ad_name) {
-      setErroFormulario("Preencha Campanha, Ad Set e Nome do anúncio.");
-      return;
-    }
-
-    if (!brandId) {
-      setErroFormulario("Selecione uma brand antes de criar o anúncio.");
-      return;
-    }
-
-    if (diagnosticoFormulario.bloqueios.length > 0) {
-      setErroFormulario(diagnosticoFormulario.bloqueios.map((item) => item.mensagem).join(" "));
-      return;
-    }
-
-    setSalvando(true);
-    try {
-      const assets: { placement: string; asset_url: string; asset_type: "image" | "video" }[] = [];
-      if (tipo === "video") {
-        assets.push({ placement: "video_principal", asset_url: form.videoUrl, asset_type: "video" });
-      } else {
-        if (form.imageFeed) assets.push({ placement: "feed", asset_url: form.imageFeed, asset_type: "image" });
-        if (form.imageStories) assets.push({ placement: "stories", asset_url: form.imageStories, asset_type: "image" });
-        if (form.imageHorizontal) assets.push({ placement: "horizontal", asset_url: form.imageHorizontal, asset_type: "image" });
-      }
-      const res = await fetch("/api/ads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brand_id: brandId, type: tipo, ...form, assets }) });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.erro ?? "Erro ao salvar anúncio");
-      await aoSalvar();
-      aoNotificar({
-        tipo: diagnosticoFormulario.avisos.length > 0 ? "aviso" : "sucesso",
-        titulo: diagnosticoFormulario.avisos.length > 0 ? "Anúncio salvo com avisos" : "Anúncio salvo",
-        descricao: diagnosticoFormulario.avisos.length > 0
-          ? diagnosticoFormulario.avisos.map((item) => item.mensagem).join(" ")
-          : "O anúncio já aparece no painel de criação.",
-      });
-      setForm({ campaign_name: "", campaign_id: "", ad_set_name: "", ad_set_id: "", ad_name: "", texto_principal: "", titulo: "", descricao: "", cta: "SHOP_NOW", link_campanha: "", link_aux: "", videoUrl: "", imageFeed: "", imageStories: "", imageHorizontal: "" });
-      setErroFormulario(null);
-      aoFechar();
-    } catch (e) {
-      setErroFormulario(e instanceof Error ? e.message : "Erro desconhecido");
-    } finally { setSalvando(false); }
-  };
-
-  return (
-    <Dialog open={aberto} onOpenChange={(open) => {
-      if (!open) {
-        setErroFormulario(null);
-        aoFechar();
-      }
-    }}>
-      <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>Novo Anúncio</DialogTitle></DialogHeader>
-        <div className="flex flex-col gap-5 pt-2">
-          <div>
-            <label className="text-sm font-medium">Tipo</label>
-            <div className="mt-1.5 flex items-center gap-1 rounded-lg border bg-muted/40 p-1 w-fit">
-              <button onClick={() => setTipo("video")} className={`rounded-md px-4 py-1.5 text-sm font-medium transition-all ${tipo === "video" ? "bg-background shadow-sm" : "text-muted-foreground"}`}>Vídeo</button>
-              <button onClick={() => setTipo("image")} className={`rounded-md px-4 py-1.5 text-sm font-medium transition-all ${tipo === "image" ? "bg-background shadow-sm" : "text-muted-foreground"}`}>Imagem</button>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Campo rotulo="Campanha *" valor={form.campaign_name} aoMudar={(v) => set("campaign_name", v)} />
-            <Campo rotulo="Campaign ID" valor={form.campaign_id} aoMudar={(v) => set("campaign_id", v)} placeholder="Opcional" />
-            <Campo rotulo="Ad Set *" valor={form.ad_set_name} aoMudar={(v) => set("ad_set_name", v)} />
-            <Campo rotulo="Ad Set ID" valor={form.ad_set_id} aoMudar={(v) => set("ad_set_id", v)} placeholder="Obrigatório para subir na Meta" />
-          </div>
-          <p className="-mt-2 text-xs text-muted-foreground">
-            O anúncio pode ser salvo sem `Ad Set ID`, mas o upload para a Meta fica bloqueado até ele ser preenchido.
-          </p>
-          {erroFormulario && (
-            <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-              {erroFormulario}
-            </div>
-          )}
-          <Campo rotulo="Nome do Anúncio *" valor={form.ad_name} aoMudar={(v) => set("ad_name", v)} />
-          <div className="col-span-2">
-            <label className="text-sm font-medium">Texto Principal</label>
-            <textarea value={form.texto_principal} onChange={(e) => set("texto_principal", e.target.value)} rows={3}
-              className="mt-1.5 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2" />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Campo rotulo="Título" valor={form.titulo} aoMudar={(v) => set("titulo", v)} />
-            <Campo rotulo="Descrição" valor={form.descricao} aoMudar={(v) => set("descricao", v)} />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-sm font-medium">CTA</label>
-              <select value={form.cta} onChange={(e) => set("cta", e.target.value)}
-                className="mt-1.5 h-10 w-full rounded-lg border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
-                <option value="SHOP_NOW">Shop Now</option><option value="LEARN_MORE">Learn More</option><option value="SIGN_UP">Sign Up</option><option value="SUBSCRIBE">Subscribe</option>
-              </select>
-            </div>
-            <Campo rotulo="Link Aux (referência)" valor={form.link_aux} aoMudar={(v) => set("link_aux", v)} placeholder="Link interno" />
-          </div>
-          <Campo rotulo="Link da Campanha" valor={form.link_campanha} aoMudar={(v) => set("link_campanha", v)} placeholder="https://..." />
-          {form.link_campanha && form.campaign_name && form.ad_name && (
-            <div className="rounded-md border bg-muted/30 px-3 py-2">
-              <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1">Link UTM (auto-gerado)</p>
-              <p className="text-xs text-muted-foreground break-all font-mono">{form.link_campanha}?utm_source=Facebook&utm_medium=Ads&utm_campaign={encodeURIComponent(form.campaign_name)}&utm_content={encodeURIComponent(form.ad_name)}&openShop=true</p>
-            </div>
-          )}
-          <div className="border-t pt-4">
-            <h4 className="text-sm font-medium mb-3">{tipo === "video" ? "Vídeo" : "Imagens por Placement"}</h4>
-            <div className="mb-3 rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-              {tipo === "video"
-                ? "Use um link público do Google Drive. Sem acesso ao arquivo, o upload será bloqueado."
-                : "Recomendado: enviar os três cortes. Quadrado 1080x1080, Vertical 1080x1920 e Horizontal 1200x628."}
-            </div>
-            {tipo === "video" ? (
-              <Campo rotulo="URL do Vídeo (Google Drive)" valor={form.videoUrl} aoMudar={(v) => set("videoUrl", v)} placeholder="https://drive.google.com/file/d/..." />
-            ) : (
-              <div className="flex flex-col gap-3">
-                <Campo rotulo="Imagem Feed (1080x1080)" valor={form.imageFeed} aoMudar={(v) => set("imageFeed", v)} placeholder="URL pública (Cloudinary)" />
-                <Campo rotulo="Imagem Stories (1080x1920)" valor={form.imageStories} aoMudar={(v) => set("imageStories", v)} placeholder="URL pública (Cloudinary)" />
-                <Campo rotulo="Imagem Horizontal (1200x628)" valor={form.imageHorizontal} aoMudar={(v) => set("imageHorizontal", v)} placeholder="URL pública (Cloudinary)" />
-                {(form.imageFeed || form.imageStories || form.imageHorizontal) && (
-                  <div className="grid grid-cols-3 gap-3 mt-2">
-                    {[{ url: form.imageFeed, label: rotuloPlacementImagem("feed") }, { url: form.imageStories, label: rotuloPlacementImagem("stories") }, { url: form.imageHorizontal, label: rotuloPlacementImagem("horizontal") }].map(({ url, label }) => (
-                      <div key={label} className="flex flex-col gap-1">
-                        <span className="text-[10px] text-muted-foreground uppercase tracking-wider">{label}</span>
-                        {url ? <div className="aspect-square rounded-md border overflow-hidden bg-muted"><img src={url} alt={label} className="w-full h-full object-cover" /></div>
-                          : <div className="aspect-square rounded-md border border-dashed flex items-center justify-center text-xs text-muted-foreground">Sem imagem</div>}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-          {formIniciado && diagnosticoFormulario.avisos.length > 0 && (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              <p className="font-medium">Avisos</p>
-              <div className="mt-1 flex flex-col gap-1">
-                {diagnosticoFormulario.avisos.map((item) => (
-                  <p key={item.codigo}>{item.mensagem}</p>
-                ))}
-              </div>
-            </div>
-          )}
-          <div className="flex justify-end gap-3 border-t pt-4">
-            <button onClick={() => { setErroFormulario(null); aoFechar(); }} className="inline-flex h-10 items-center rounded-lg border border-input bg-background px-5 text-sm font-medium shadow-sm hover:bg-accent hover:text-accent-foreground">Cancelar</button>
-            <button onClick={salvar} disabled={salvando} className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50">
-              {salvando ? (<><span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />Salvando...</>) : "Salvar Anúncio"}
-            </button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function Campo({ rotulo, valor, aoMudar, placeholder }: { rotulo: string; valor: string; aoMudar: (v: string) => void; placeholder?: string }) {
-  return (
-    <div>
-      <label className="text-sm font-medium">{rotulo}</label>
-      <input type="text" value={valor} onChange={(e) => aoMudar(e.target.value)} placeholder={placeholder}
-        className="mt-1.5 h-10 w-full rounded-lg border border-input bg-background px-3 text-sm shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2" />
     </div>
   );
 }
