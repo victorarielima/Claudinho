@@ -36,7 +36,7 @@ const ROTULOS_COLUNA_PLANILHA: Record<string, string> = {
   adSetId: "Ad Set ID",
   tipoPlanilha: "Tipo",
   adName: "Ad Name",
-  linkVideo: "Mídia",
+  linkVideo: "Link Vídeo (Drive)",
   statusAutomacao: "Status",
 };
 
