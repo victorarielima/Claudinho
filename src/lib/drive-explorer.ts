@@ -100,11 +100,6 @@ export async function carregarIndiceCompleto(): Promise<IndiceCompleto> {
   return indice;
 }
 
-/** Invalidate the cache (e.g. when user wants fresh data) */
-export function invalidarCache(): void {
-  cacheIndice = null;
-}
-
 // ---------------------------------------------------------------------------
 // Internals
 // ---------------------------------------------------------------------------

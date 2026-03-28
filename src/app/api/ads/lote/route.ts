@@ -5,8 +5,10 @@ import { criarAd, type CriarAdInput } from "@/lib/db";
 interface AnuncioItem {
   adName: string;
   titulo: string;
-  driveFileId: string;
   driveUrl: string;
+  videoId?: string;
+  thumbnailLink?: string;
+  nomeArquivo?: string;
 }
 
 interface LoteBody {
@@ -59,34 +61,35 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const adIds: string[] = [];
+    const results = await Promise.all(
+      body.anuncios.map(async (item) => {
+        const input: CriarAdInput = {
+          brand_id: body.brandId,
+          type: "video",
+          campaign_name: body.campaignName,
+          campaign_id: body.campaignId,
+          ad_set_name: body.adSetName,
+          ad_set_id: body.adSetId,
+          ad_name: item.adName,
+          titulo: item.titulo,
+          texto_principal: body.textoPrincipal,
+          descricao: body.descricao,
+          cta: body.cta,
+          link_campanha: body.linkCampanha,
+          assets: [
+            {
+              placement: "video_principal",
+              asset_url: item.driveUrl,
+              asset_type: "video",
+            },
+          ],
+        };
 
-    for (const item of body.anuncios) {
-      const input: CriarAdInput = {
-        brand_id: body.brandId,
-        type: "video",
-        campaign_name: body.campaignName,
-        campaign_id: body.campaignId,
-        ad_set_name: body.adSetName,
-        ad_set_id: body.adSetId,
-        ad_name: item.adName,
-        titulo: item.titulo,
-        texto_principal: body.textoPrincipal,
-        descricao: body.descricao,
-        cta: body.cta,
-        link_campanha: body.linkCampanha,
-        assets: [
-          {
-            placement: "video_principal",
-            asset_url: item.driveUrl,
-            asset_type: "video",
-          },
-        ],
-      };
-
-      const ad = await criarAd(input, userId);
-      adIds.push(ad.id);
-    }
+        const ad = await criarAd(input, userId);
+        return ad.id;
+      })
+    );
+    const adIds = results;
 
     return NextResponse.json({ criados: adIds.length, adIds });
   } catch (error) {

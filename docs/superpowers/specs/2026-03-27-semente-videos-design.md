@@ -56,7 +56,7 @@ Após selecionar vídeos, um novo dialog/página com:
 
 **Seção 3 — Anúncios individuais (lista editável):**
 - Um card por vídeo selecionado, mostrando thumbnail e nome do arquivo
-- Campos editáveis por vídeo: ad_name (auto-gerado do nome do arquivo, editável) e título
+- Campos editáveis por vídeo: ad_name (auto-gerado do nome do arquivo, editável inline) e título
 - Botão para remover vídeo individual do lote
 
 **Ação final:**
@@ -65,12 +65,9 @@ Após selecionar vídeos, um novo dialog/página com:
 
 ## API Endpoints Novos
 
-### `GET /api/drive/pastas`
+### `GET /api/drive/indice`
 
-Lista a árvore de pastas do Drive recursivamente.
-
-**Query params:**
-- `parentId` (opcional) — ID da pasta pai. Default: pasta raiz configurada
+Endpoint unificado que retorna a árvore de pastas e todos os vídeos de uma vez. Substitui os antigos `/api/drive/pastas` e `/api/drive/videos`. Cache server-side de 10 minutos. Filtragem (por pasta, data, etc.) é feita client-side.
 
 **Response:**
 ```json
@@ -89,23 +86,7 @@ Lista a árvore de pastas do Drive recursivamente.
         }
       ]
     }
-  ]
-}
-```
-
-### `GET /api/drive/videos`
-
-Lista vídeos de uma pasta (opcionalmente recursivo).
-
-**Query params:**
-- `pastaId` — ID da pasta do Drive
-- `recursivo` (boolean, default: false) — incluir subpastas
-- `dias` (number, opcional) — filtrar vídeos dos últimos N dias
-- `pageToken` (opcional) — para paginação
-
-**Response:**
-```json
-{
+  ],
   "videos": [
     {
       "id": "file123",
@@ -113,15 +94,26 @@ Lista vídeos de uma pasta (opcionalmente recursivo).
       "mimeType": "video/mp4",
       "tamanho": 176947200,
       "duracao": 74,
+      "largura": 1080,
+      "altura": 1920,
+      "formato": "portrait",
       "modifiedTime": "2026-03-27T17:37:36Z",
       "thumbnailLink": "https://...",
+      "pastaId": "def456",
       "pastaOrigem": "27_MAR_GC_Zé Delivery",
       "driveUrl": "https://drive.google.com/file/d/file123/view"
     }
-  ],
-  "nextPageToken": null
+  ]
 }
 ```
+
+Campos de formato de vídeo:
+- `largura` / `altura` — dimensões em pixels (extraídas dos metadados do Drive)
+- `formato` — classificação automática: `portrait` (altura > largura), `landscape` (largura > altura), `square` (iguais)
+
+### `GET /api/drive/stream/[fileId]`
+
+Proxy de streaming para preview de vídeos do Drive. Permite reproduzir vídeos diretamente no browser sem depender do iframe do Google Drive.
 
 ### `GET /api/meta/campanhas`
 
@@ -205,7 +197,7 @@ Cria um lote de ads no Supabase (rascunhos pendentes).
 ### `dialog-explorador-videos.tsx`
 - Dialog quase fullscreen (95vh)
 - State: pasta selecionada, vídeos listados, seleção, filtros
-- Usa API `/api/drive/pastas` e `/api/drive/videos`
+- Usa API `/api/drive/indice` (busca única, filtragem client-side)
 - Chama `onConfirmar(videosSelecionados)` ao clicar "Criar Anúncios"
 
 ### `formulario-lote-videos.tsx`
@@ -222,10 +214,9 @@ Cria um lote de ads no Supabase (rascunhos pendentes).
 ## Lib Novo
 
 ### `src/lib/drive-explorer.ts`
-- `listarPastasRecursivo(parentId)` — retorna árvore de pastas
-- `listarVideos(pastaId, opts)` — lista vídeos com filtros
+- `buscarIndice()` — retorna árvore de pastas + todos os vídeos em uma chamada
 - Reutiliza `getGoogleAuth()` existente
-- Cache em memória da árvore de pastas (5 min TTL)
+- Cache server-side de 10 min (evita chamadas excessivas ao Drive API)
 
 ## Configuração
 
@@ -246,12 +237,14 @@ DRIVE_PASTA_VIDEOS=1e3i_SxkmhZBfsEzh_2TT3oO61EnsBcJ6
 
 1. **Rascunhos, não upload direto** — a semente cria ads pendentes no Supabase. O upload para a Meta usa o fluxo existente. Isso mantém a separação de responsabilidades e permite revisão antes de publicar.
 
-2. **Cache da árvore de pastas** — a estrutura de pastas muda raramente. Cache de 5 minutos evita chamadas excessivas ao Drive API.
+2. **Endpoint unificado `/api/drive/indice`** — uma única chamada retorna pastas + vídeos. Cache server-side de 10 min evita chamadas excessivas ao Drive API. Filtragem por pasta/data é feita client-side.
 
 3. **Thumbnails do Drive** — a API do Google Drive retorna `thumbnailLink` para vídeos. Usa-se diretamente nos cards, sem precisar baixar/processar.
 
-4. **Preview via iframe** — `https://drive.google.com/file/d/{id}/preview` funciona como player embutido. Sem necessidade de streaming próprio.
+4. **Preview via streaming próprio** — endpoint `/api/drive/stream/[fileId]` faz proxy do vídeo do Drive para reprodução direta no browser, sem depender do iframe do Google.
 
-5. **Ad name auto-gerado** — formato: `VID-{NomeArquivoLimpo}-{MES}{ANO}`. Editável pelo usuário.
+5. **Ad name auto-gerado com edição inline** — formato: `VID-{NomeArquivoLimpo}-{MES}{ANO}`. Editável diretamente na lista de anúncios com clique no nome.
+
+6. **Detecção de formato de vídeo** — largura, altura e classificação automática (portrait/landscape/square) extraídos dos metadados do Drive. Permite validação e exibição contextual no grid.
 
 6. **Seletor de campanha/adset busca da Meta API** — busca apenas ACTIVE. Permite criar novo ad set inline.
