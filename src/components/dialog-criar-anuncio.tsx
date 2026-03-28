@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useState } from "react";
 import {
   AlertTriangle,
@@ -26,6 +27,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { FolderOpen } from "lucide-react";
+import { DialogExploradorVideos, type VideoDrive } from "@/components/dialog-explorador-videos";
 import { analisarProntidaoAnuncio } from "@/lib/ad-readiness";
 import { extrairImageAssets, rotuloPlacementImagem } from "@/lib/ad-media";
 import { gerarLinkAnuncio } from "@/lib/utm";
@@ -275,6 +278,7 @@ export function DialogCriarAnuncio({
   const [mensagemColagem, setMensagemColagem] = useState<string | null>(null);
   const [salvandoAtual, setSalvandoAtual] = useState(false);
   const [salvandoFila, setSalvandoFila] = useState(false);
+  const [exploradorAberto, setExploradorAberto] = useState(false);
 
   useEffect(() => {
     if (!aberto) {
@@ -489,6 +493,7 @@ export function DialogCriarAnuncio({
   }
 
   return (
+    <>
     <Dialog open={aberto} onOpenChange={(open) => !open && aoFechar()}>
       <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-[min(1240px,calc(100vw-3rem))]">
         <div className="max-h-[88vh] overflow-y-auto bg-slate-50">
@@ -678,15 +683,27 @@ export function DialogCriarAnuncio({
                   {tipo === "video" ? (
                     <div className="space-y-4">
                       <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                        Use um link publico do Google Drive. Se o arquivo nao estiver acessivel, o
-                        envio posterior para a Meta fica bloqueado.
+                        Importe um vídeo da pasta do Drive ou cole o link manualmente.
                       </div>
-                      <CampoTexto
-                        rotulo="URL do video"
-                        placeholder="https://drive.google.com/file/d/..."
-                        valor={form.videoUrl}
-                        onChange={(valor) => atualizarCampo("videoUrl", valor)}
-                      />
+                      <div className="flex gap-3 items-end">
+                        <div className="flex-1">
+                          <CampoTexto
+                            rotulo="URL do video"
+                            placeholder="https://drive.google.com/file/d/..."
+                            valor={form.videoUrl}
+                            onChange={(valor) => atualizarCampo("videoUrl", valor)}
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="shrink-0 mb-0.5"
+                          onClick={() => setExploradorAberto(true)}
+                        >
+                          <FolderOpen className="size-4" />
+                          Importar do Drive
+                        </Button>
+                      </div>
                     </div>
                   ) : (
                     <div className="space-y-4">
@@ -821,11 +838,16 @@ export function DialogCriarAnuncio({
                           )}
                         </div>
                       ) : assets.length > 0 ? (
-                        <img
-                          src={assets[0].asset_url}
-                          alt="Preview do criativo"
-                          className="aspect-square w-full object-cover"
-                        />
+                        <div className="relative aspect-square w-full">
+                          <Image
+                            src={assets[0].asset_url}
+                            alt="Preview do criativo"
+                            fill
+                            unoptimized
+                            sizes="(min-width: 1280px) 420px, (min-width: 1024px) 380px, 100vw"
+                            className="object-cover"
+                          />
+                        </div>
                       ) : (
                         <div className="flex aspect-square items-center justify-center bg-slate-100 text-slate-400">
                           <div className="flex flex-col items-center gap-2 text-center">
@@ -872,11 +894,16 @@ export function DialogCriarAnuncio({
                           <div className="border-b border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
                             {rotuloPlacementImagem(asset.placement, asset.asset_url)}
                           </div>
-                          <img
-                            src={asset.asset_url}
-                            alt={rotuloPlacementImagem(asset.placement, asset.asset_url)}
-                            className="aspect-square w-full object-cover"
-                          />
+                          <div className="relative aspect-square w-full">
+                            <Image
+                              src={asset.asset_url}
+                              alt={rotuloPlacementImagem(asset.placement, asset.asset_url)}
+                              fill
+                              unoptimized
+                              sizes="96px"
+                              className="object-cover"
+                            />
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -1094,6 +1121,28 @@ export function DialogCriarAnuncio({
         </div>
       </DialogContent>
     </Dialog>
+
+    <DialogExploradorVideos
+      aberto={exploradorAberto}
+      aoFechar={() => setExploradorAberto(false)}
+      aoConfirmar={(videos: VideoDrive[]) => {
+        setExploradorAberto(false);
+        if (videos.length > 0) {
+          const video = videos[0];
+          atualizarCampo("videoUrl", video.driveUrl);
+          // Auto-fill ad name from video name if empty
+          if (!form.ad_name.trim()) {
+            const nomeBase = video.nome.replace(/\.[^.]+$/, "");
+            atualizarCampo("ad_name", nomeBase);
+          }
+          // Auto-fill titulo if empty
+          if (!form.titulo.trim()) {
+            atualizarCampo("titulo", video.nome.replace(/\.[^.]+$/, ""));
+          }
+        }
+      }}
+    />
+    </>
   );
 }
 

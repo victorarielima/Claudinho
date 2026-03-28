@@ -7,7 +7,11 @@ import {
   type LinhaComStatus,
 } from "@/components/tabela-pendentes";
 import { DialogCriarAnuncio } from "@/components/dialog-criar-anuncio";
+import { DialogExploradorVideos } from "@/components/dialog-explorador-videos";
+import { FormularioLoteVideos } from "@/components/formulario-lote-videos";
+import { DialogEditarAnuncio } from "@/components/dialog-editar-anuncio";
 import type { Ad, AdAsset, Brand } from "@/lib/db";
+import type { VideoDrive } from "@/lib/drive-explorer";
 import type { LinhaAnuncio, ChaveAba, DiagnosticoPlanilha } from "@/lib/sheets";
 import {
   detectarTipoCriativo,
@@ -80,9 +84,19 @@ export function PainelCriacao() {
   const [filtroCampanha, setFiltroCampanha] = useState<string>("todas");
   const [filtroAdSet, setFiltroAdSet] = useState<string>("todos");
   const [busca, setBusca] = useState<string>("");
-  const [compacto, setCompacto] = useState(false);
+  const [compacto, setCompacto] = useState(true);
 
   const [dialogCriar, setDialogCriar] = useState(false);
+  const [dialogExplorador, setDialogExplorador] = useState(false);
+  const [dialogLote, setDialogLote] = useState(false);
+  const [videosSelecionados, setVideosSelecionados] = useState<VideoDrive[]>([]);
+  const [dialogEditar, setDialogEditar] = useState(false);
+  const [editarAdId, setEditarAdId] = useState<string | null>(null);
+  const [editarDados, setEditarDados] = useState<{
+    ad_name: string; texto_principal: string; titulo: string; descricao: string;
+    cta: string; campaign_name: string; campaign_id: string;
+    ad_set_name: string; ad_set_id: string; link_campanha: string;
+  } | null>(null);
   const [importando, setImportando] = useState(false);
   const [abaLegada, setAbaLegada] = useState<ChaveAba>("evino");
 
@@ -486,13 +500,22 @@ export function PainelCriacao() {
         </div>
         <div className="flex items-center gap-2">
           {fonteDados === "supabase" && (
-            <button onClick={() => setDialogCriar(true)}
-              className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98]">
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-              </svg>
-              Novo Criativo
-            </button>
+            <>
+              <button onClick={() => setDialogExplorador(true)}
+                className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border border-input bg-background px-4 text-sm font-medium shadow-sm transition-all hover:bg-accent hover:text-accent-foreground active:scale-[0.98]">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
+                </svg>
+                Importar Vídeos
+              </button>
+              <button onClick={() => setDialogCriar(true)}
+                className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98]">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+                Novo Criativo
+              </button>
+            </>
           )}
           <a href={`https://docs.google.com/spreadsheets/d/${process.env.NEXT_PUBLIC_GOOGLE_SHEETS_ID}/edit`} target="_blank" rel="noopener noreferrer"
             className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border border-input bg-background px-4 text-sm font-medium shadow-sm transition-all hover:bg-accent hover:text-accent-foreground active:scale-[0.98]">
@@ -634,6 +657,38 @@ export function PainelCriacao() {
             </button>
           </div>
           <TabelaPendentes linhas={linhasFiltradas} carregando={carregando} aoSubir={subirAnuncio} processando={processando}
+            aoEditar={(linha) => {
+              if (!linha.adId) return;
+              setEditarAdId(linha.adId);
+              setEditarDados({
+                ad_name: linha.adName ?? "",
+                texto_principal: linha.textoPrincipal ?? "",
+                titulo: linha.titulo ?? "",
+                descricao: linha.descricao ?? "",
+                cta: linha.cta ?? "SHOP_NOW",
+                campaign_name: linha.campaign ?? "",
+                campaign_id: linha.campaignId ?? "",
+                ad_set_name: linha.adSet ?? "",
+                ad_set_id: linha.adSetId ?? "",
+                link_campanha: linha.linkCampanha ?? "",
+              });
+              setDialogEditar(true);
+            }}
+            aoRenomear={async (adId, novoNome) => {
+              try {
+                const res = await fetch(`/api/ads/${adId}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ ad_name: novoNome }),
+                });
+                if (!res.ok) throw new Error("Erro ao renomear");
+                setLinhas((prev) =>
+                  prev.map((l) => l.adId === adId ? { ...l, adName: novoNome } : l)
+                );
+              } catch {
+                // silently fail — user can try again
+              }
+            }}
             aoRevalidarVideo={revalidarVideo} serviceAccountEmail={serviceAccountEmail} selecionados={selecionados} aoAlternarSelecao={alternarSelecao} compacto={compacto} />
         </section>
       ) : !erro ? (
@@ -658,6 +713,37 @@ export function PainelCriacao() {
         brandNome={brandSelecionado?.name}
         aoSalvar={carregarDados}
         aoNotificar={setFeedback}
+      />
+
+      {/* Dialog: Explorador de Vídeos (Nova Semente) */}
+      <DialogExploradorVideos
+        aberto={dialogExplorador}
+        aoFechar={() => setDialogExplorador(false)}
+        aoConfirmar={(videos: VideoDrive[]) => {
+          setDialogExplorador(false);
+          setVideosSelecionados(videos);
+          setDialogLote(true);
+        }}
+      />
+
+      {/* Dialog: Formulário de Lote */}
+      <FormularioLoteVideos
+        aberto={dialogLote}
+        aoFechar={() => setDialogLote(false)}
+        videos={videosSelecionados}
+        aoSalvar={carregarDados}
+      />
+
+      <DialogEditarAnuncio
+        aberto={dialogEditar}
+        aoFechar={() => {
+          setDialogEditar(false);
+          setEditarAdId(null);
+          setEditarDados(null);
+        }}
+        adId={editarAdId}
+        dadosIniciais={editarDados}
+        aoSalvar={carregarDados}
       />
     </div>
   );

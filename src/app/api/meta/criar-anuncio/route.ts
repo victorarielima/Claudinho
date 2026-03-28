@@ -79,11 +79,23 @@ async function processarFluxoNovo(body: CorpoNovoFluxo) {
       return NextResponse.json({ erro: "Ad não encontrado" }, { status: 404 });
     }
 
-    if (ad.status !== "pendente" && ad.status !== "erro") {
+    if (ad.status === "concluido") {
       return NextResponse.json(
-        { erro: "Este anúncio já está sendo processado ou já foi criado." },
+        { erro: "Este anúncio já foi criado na Meta." },
         { status: 409 }
       );
+    }
+
+    // Se está "processando" há mais de 5 minutos, considerar como travado e permitir retry
+    if (ad.status === "processando") {
+      const atualizadoEm = new Date(ad.updated_at).getTime();
+      const cincoMinutos = 5 * 60 * 1000;
+      if (Date.now() - atualizadoEm < cincoMinutos) {
+        return NextResponse.json(
+          { erro: "Este anúncio está sendo processado. Aguarde alguns minutos." },
+          { status: 409 }
+        );
+      }
     }
 
     // Marcar como processando

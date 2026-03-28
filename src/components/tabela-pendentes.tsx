@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import Image from "next/image";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -50,6 +51,8 @@ interface TabelaPendentesProps {
   linhas: LinhaComStatus[];
   carregando: boolean;
   aoSubir: (linha: LinhaComStatus) => void;
+  aoEditar?: (linha: LinhaComStatus) => void;
+  aoRenomear?: (adId: string, novoNome: string) => void;
   processando: boolean;
   aoRevalidarVideo?: (linha: LinhaComStatus) => void;
   serviceAccountEmail?: string;
@@ -235,9 +238,80 @@ function StatusDot({ status }: { status: StatusProcessamento }) {
   );
 }
 
+function NomeEditavel({
+  valor,
+  aoSalvar,
+  className = "",
+}: {
+  valor: string;
+  aoSalvar: (novoValor: string) => void;
+  className?: string;
+}) {
+  const [editando, setEditando] = useState(false);
+  const [texto, setTexto] = useState(valor);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setTexto(valor);
+  }, [valor]);
+
+  useEffect(() => {
+    if (editando) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [editando]);
+
+  const confirmar = useCallback(() => {
+    const trimmed = texto.trim();
+    if (trimmed && trimmed !== valor) {
+      aoSalvar(trimmed);
+    } else {
+      setTexto(valor);
+    }
+    setEditando(false);
+  }, [texto, valor, aoSalvar]);
+
+  if (editando) {
+    return (
+      <input
+        ref={inputRef}
+        value={texto}
+        onChange={(e) => setTexto(e.target.value)}
+        onBlur={confirmar}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") confirmar();
+          if (e.key === "Escape") {
+            setTexto(valor);
+            setEditando(false);
+          }
+        }}
+        className={`w-full rounded border border-primary/40 bg-background px-1.5 py-0.5 text-sm font-medium outline-none ring-1 ring-primary/20 ${className}`}
+      />
+    );
+  }
+
+  return (
+    <span
+      className={`font-medium truncate cursor-text hover:bg-muted/50 rounded px-1 -mx-1 transition-colors ${className}`}
+      title={`${valor} (clique para editar)`}
+      onClick={() => setEditando(true)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === "F2") setEditando(true);
+      }}
+    >
+      {valor}
+    </span>
+  );
+}
+
 function TabelaCompacta({
   linhas,
   aoSubir,
+  aoEditar,
+  aoRenomear,
   processando,
   selecionados,
   aoAlternarSelecao,
@@ -245,6 +319,8 @@ function TabelaCompacta({
 }: {
   linhas: LinhaComStatus[];
   aoSubir: (linha: LinhaComStatus) => void;
+  aoEditar?: (linha: LinhaComStatus) => void;
+  aoRenomear?: (adId: string, novoNome: string) => void;
   processando: boolean;
   selecionados: Set<number>;
   aoAlternarSelecao: (indiceLinha: number) => void;
@@ -252,111 +328,82 @@ function TabelaCompacta({
 }) {
   return (
     <div className="rounded-lg border overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b bg-muted/50">
-              <th className="w-10 px-3 py-2.5" />
-              <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Status</th>
-              <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Tipo</th>
-              <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Nome do Anúncio</th>
-              <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Campanha</th>
-              <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Ad Set</th>
-              <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Legenda</th>
-              <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">CTA</th>
-              <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">Mídia</th>
-              <th className="px-3 py-2.5 text-right font-medium text-muted-foreground">Ação</th>
-            </tr>
-          </thead>
-          <tbody>
-            {linhas.map((linha) => {
-              const concluido = linha.statusProcessamento === "concluido";
-              const temErro = linha.statusProcessamento === "erro";
-              const processandoLinha = linha.statusProcessamento === "processando";
-              const isImage = linha.tipo === "image";
-              const videoInacessivel = !isImage && linha.statusVideo === "inacessivel";
-              const bloqueada = linha.prontoMeta === false;
-              const selecionada = selecionados.has(linha.indiceLinha);
-              const podeSelecionar = !concluido && !processandoLinha && !videoInacessivel && !bloqueada;
+      <table className="w-full text-sm table-fixed">
+        <thead>
+          <tr className="border-b bg-muted/50">
+            <th className="w-9 px-2 py-2.5" />
+            <th className="w-20 px-2 py-2.5 text-left font-medium text-muted-foreground">Status</th>
+            <th className="px-2 py-2.5 text-left font-medium text-muted-foreground">Nome do Anúncio</th>
+            <th className="w-[15%] px-2 py-2.5 text-left font-medium text-muted-foreground">Campanha</th>
+            <th className="w-[15%] px-2 py-2.5 text-left font-medium text-muted-foreground">Ad Set</th>
+            <th className="w-16 px-2 py-2.5 text-left font-medium text-muted-foreground">CTA</th>
+            <th className="w-28 px-2 py-2.5 text-right font-medium text-muted-foreground">Ação</th>
+          </tr>
+        </thead>
+        <tbody>
+          {linhas.map((linha) => {
+            const concluido = linha.statusProcessamento === "concluido";
+            const temErro = linha.statusProcessamento === "erro";
+            const processandoLinha = linha.statusProcessamento === "processando";
+            const isImage = linha.tipo === "image";
+            const videoInacessivel = !isImage && linha.statusVideo === "inacessivel";
+            const bloqueada = linha.prontoMeta === false;
+            const selecionada = selecionados.has(linha.indiceLinha);
+            const podeSelecionar = !concluido && !processandoLinha && !videoInacessivel && !bloqueada;
+            const podeEditar = (linha.statusProcessamento === "pendente" || linha.statusProcessamento === "erro") && linha.adId;
 
-              return (
-                <tr
-                  key={linha.indiceLinha}
-                  className={`border-b last:border-b-0 transition-colors ${concluido
-                    ? "bg-green-50/30"
-                    : temErro
-                      ? "bg-destructive/5"
-                      : selecionada
-                        ? "bg-primary/5"
-                        : "hover:bg-muted/30"
-                    }`}
-                >
-                  <td className="px-3 py-2">
-                    {podeSelecionar && (
-                      <Checkbox
-                        checked={selecionada}
-                        onCheckedChange={() => aoAlternarSelecao(linha.indiceLinha)}
-                        aria-label={`Selecionar ${linha.adName}`}
-                      />
-                    )}
-                  </td>
-                  <td className="px-3 py-2">
-                    <StatusDot status={linha.statusProcessamento} />
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-xs text-muted-foreground">
-                        {linha.tipo === "image" ? "Imagem" : "Vídeo"}
-                      </span>
-                      {bloqueada && (
-                        <span className="text-[10px] text-amber-700">Ajuste necessário</span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className="font-medium truncate block max-w-xs" title={linha.adName}>
-                      {linha.adName}
+            return (
+              <tr
+                key={linha.indiceLinha}
+                className={`border-b last:border-b-0 transition-colors ${concluido
+                  ? "bg-green-50/30"
+                  : temErro
+                    ? "bg-destructive/5"
+                    : selecionada
+                      ? "bg-primary/5"
+                      : "hover:bg-muted/30"
+                  }`}
+              >
+                <td className="px-2 py-2">
+                  {podeSelecionar && (
+                    <Checkbox
+                      checked={selecionada}
+                      onCheckedChange={() => aoAlternarSelecao(linha.indiceLinha)}
+                      aria-label={`Selecionar ${linha.adName}`}
+                    />
+                  )}
+                </td>
+                <td className="px-2 py-2">
+                  <StatusDot status={linha.statusProcessamento} />
+                </td>
+                <td className="px-2 py-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-[10px] text-muted-foreground/60 shrink-0">
+                      {isImage ? "IMG" : "VID"}
                     </span>
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex flex-col gap-0.5 max-w-[10rem]">
-                      <span className="truncate text-muted-foreground" title={linha.campaign}>{linha.campaign}</span>
-                      <span className="truncate text-[10px] text-muted-foreground/70" title={linha.campaignId}>{linha.campaignId}</span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex flex-col gap-0.5 max-w-[10rem]">
-                      <span className="truncate text-muted-foreground" title={linha.adSet}>{linha.adSet}</span>
-                      <span className="truncate text-[10px] text-muted-foreground/70" title={linha.adSetId}>{linha.adSetId}</span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2 text-muted-foreground truncate max-w-[15rem]" title={linha.textoPrincipal}>
-                    {linha.textoPrincipal}
-                  </td>
-                  <td className="px-3 py-2 text-muted-foreground">
-                    {linha.cta}
-                  </td>
-                  <td className="px-3 py-2">
-                    {isImage && linha.imageAssets && linha.imageAssets.length > 0 ? (
-                      <span className="text-xs text-muted-foreground">
-                        {linha.imageAssets.length} img
-                      </span>
-                    ) : linha.linkVideo && !isImage ? (
-                      <button
-                        onClick={() => setPreviewAberto(linha.indiceLinha)}
-                        className="inline-flex items-center gap-1 text-xs text-green-700 hover:text-green-900 transition-colors"
-                        title="Ver vídeo"
-                      >
-                        <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M8 5v14l11-7z" />
-                        </svg>
-                        Ver
-                      </button>
+                    {aoRenomear && podeEditar ? (
+                      <NomeEditavel
+                        valor={linha.adName}
+                        aoSalvar={(novoNome) => aoRenomear(linha.adId!, novoNome)}
+                      />
                     ) : (
-                      <span className="text-xs text-muted-foreground">-</span>
+                      <span className="font-medium truncate" title={linha.adName}>
+                        {linha.adName}
+                      </span>
                     )}
-                  </td>
-                  <td className="px-3 py-2 text-right">
+                  </div>
+                </td>
+                <td className="px-2 py-2">
+                  <span className="truncate block text-muted-foreground text-xs" title={linha.campaign}>{linha.campaign}</span>
+                </td>
+                <td className="px-2 py-2">
+                  <span className="truncate block text-muted-foreground text-xs" title={linha.adSet}>{linha.adSet}</span>
+                </td>
+                <td className="px-2 py-2 text-xs text-muted-foreground">
+                  {linha.cta}
+                </td>
+                <td className="px-2 py-2 text-right">
+                  <div className="flex items-center justify-end gap-1">
                     {concluido ? (
                       <a
                         href={
@@ -371,35 +418,48 @@ function TabelaCompacta({
                         <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
                         </svg>
-                        Ads Manager
+                        Ads
                       </a>
                     ) : (
-                      <button
-                        onClick={() => aoSubir(linha)}
-                        disabled={processando || processandoLinha || videoInacessivel || bloqueada}
-                        className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
-                      >
-                        {processandoLinha ? (
-                          <>
-                            <span className="h-3 w-3 animate-spin rounded-full border-[1.5px] border-primary-foreground/30 border-t-primary-foreground" />
-                            Subindo
-                          </>
-                        ) : bloqueada ? (
-                          "Corrigir"
-                        ) : temErro ? (
-                          "Tentar"
-                        ) : (
-                          "Subir"
+                      <>
+                        {podeEditar && aoEditar && (
+                          <button
+                            onClick={() => aoEditar(linha)}
+                            className="inline-flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs font-medium transition-all hover:bg-accent active:scale-[0.98]"
+                            title="Editar rascunho"
+                          >
+                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z" />
+                            </svg>
+                          </button>
                         )}
-                      </button>
+                        <button
+                          onClick={() => aoSubir(linha)}
+                          disabled={processando || processandoLinha || videoInacessivel || bloqueada}
+                          className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
+                        >
+                          {processandoLinha ? (
+                            <>
+                              <span className="h-3 w-3 animate-spin rounded-full border-[1.5px] border-primary-foreground/30 border-t-primary-foreground" />
+                              ...
+                            </>
+                          ) : temErro ? (
+                            "Tentar"
+                          ) : bloqueada ? (
+                            "Corrigir"
+                          ) : (
+                            "Subir"
+                          )}
+                        </button>
+                      </>
                     )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -408,6 +468,8 @@ export function TabelaPendentes({
   linhas,
   carregando,
   aoSubir,
+  aoEditar,
+  aoRenomear,
   processando,
   aoRevalidarVideo,
   serviceAccountEmail,
@@ -473,6 +535,8 @@ export function TabelaPendentes({
         <TabelaCompacta
           linhas={linhas}
           aoSubir={aoSubir}
+          aoEditar={aoEditar}
+          aoRenomear={aoRenomear}
           processando={processando}
           selecionados={selecionados}
           aoAlternarSelecao={aoAlternarSelecao}
@@ -524,16 +588,22 @@ export function TabelaPendentes({
                     {/* Thumbnail */}
                     <div className="relative shrink-0 w-24 h-24 overflow-hidden rounded-md border border-border bg-black/5 flex items-center justify-center">
                       {isImage && linha.imageAssets && linha.imageAssets.length > 0 ? (
-                        <img
+                        <Image
                           src={linha.imageAssets[0].url}
                           alt="Preview"
-                          className="w-full h-full object-cover"
+                          fill
+                          unoptimized
+                          sizes="96px"
+                          className="object-cover"
                         />
                       ) : linha.thumbnailLink ? (
-                        <img
+                        <Image
                           src={linha.thumbnailLink}
                           alt="Thumbnail"
-                          className="w-full h-full object-cover"
+                          fill
+                          unoptimized
+                          sizes="96px"
+                          className="object-cover"
                           referrerPolicy="no-referrer"
                         />
                       ) : (
@@ -558,8 +628,16 @@ export function TabelaPendentes({
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex flex-col gap-1.5 min-w-0 flex-1">
                           <div className="flex items-center gap-3 flex-wrap">
-                            <h3 className="text-base font-semibold leading-tight">
-                              {linha.adName}
+                            <h3 className="text-base leading-tight">
+                              {aoRenomear && (linha.statusProcessamento === "pendente" || linha.statusProcessamento === "erro") && linha.adId ? (
+                                <NomeEditavel
+                                  valor={linha.adName}
+                                  aoSalvar={(novoNome) => aoRenomear(linha.adId!, novoNome)}
+                                  className="text-base font-semibold"
+                                />
+                              ) : (
+                                <span className="font-semibold">{linha.adName}</span>
+                              )}
                             </h3>
                             <StatusBadge status={linha.statusProcessamento} />
                             <Badge variant="outline" className="gap-1 text-xs">
@@ -634,30 +712,43 @@ export function TabelaPendentes({
                               Ver no Ads Manager
                             </a>
                           ) : (
-                            <button
-                              onClick={() => aoSubir(linha)}
-                              disabled={
-                                processando ||
-                                processandoLinha ||
-                                concluido ||
-                                videoInacessivel ||
-                                bloqueada
-                              }
-                              className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
-                            >
-                              {processandoLinha ? (
-                                <>
-                                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />
-                                  Subindo...
-                                </>
-                              ) : bloqueada ? (
-                                "Corrigir pendências"
-                              ) : temErro ? (
-                                "Tentar Novamente"
-                              ) : (
-                                "Subir Anúncio"
+                            <div className="flex items-center gap-2">
+                              {aoEditar && (linha.statusProcessamento === "pendente" || linha.statusProcessamento === "erro") && linha.adId && (
+                                <button
+                                  onClick={() => aoEditar(linha)}
+                                  className="inline-flex h-10 items-center gap-2 rounded-lg border border-input bg-background px-4 text-sm font-medium shadow-sm transition-all hover:bg-accent hover:text-accent-foreground active:scale-[0.98]"
+                                >
+                                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z" />
+                                  </svg>
+                                  Editar
+                                </button>
                               )}
-                            </button>
+                              <button
+                                onClick={() => aoSubir(linha)}
+                                disabled={
+                                  processando ||
+                                  processandoLinha ||
+                                  concluido ||
+                                  videoInacessivel ||
+                                  bloqueada
+                                }
+                                className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
+                              >
+                                {processandoLinha ? (
+                                  <>
+                                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />
+                                    Subindo...
+                                  </>
+                                ) : bloqueada ? (
+                                  "Corrigir pendências"
+                                ) : temErro ? (
+                                  "Tentar Novamente"
+                                ) : (
+                                  "Subir Anúncio"
+                                )}
+                              </button>
+                            </div>
                           )}
                         </div>
                       </div>
@@ -713,13 +804,20 @@ export function TabelaPendentes({
                       {/* Preview de imagens (somente para image ads) */}
                       {isImage && linha.imageAssets && linha.imageAssets.length > 0 && !concluido && (
                         <div className="flex gap-3">
-                          {linha.imageAssets.map((asset) => (
-                            <div key={asset.placement} className="flex flex-col gap-1">
+                          {linha.imageAssets.map((asset, idx) => (
+                            <div key={`${asset.placement}-${idx}`} className="flex flex-col gap-1">
                               <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                                 {rotuloPlacementImagem(asset.placement, asset.url)}
                               </span>
-                              <div className="h-16 w-16 rounded-md border overflow-hidden bg-muted">
-                                <img src={asset.url} alt={rotuloPlacementImagem(asset.placement, asset.url)} className="w-full h-full object-cover" />
+                              <div className="relative h-16 w-16 rounded-md border overflow-hidden bg-muted">
+                                <Image
+                                  src={asset.url}
+                                  alt={rotuloPlacementImagem(asset.placement, asset.url)}
+                                  fill
+                                  unoptimized
+                                  sizes="64px"
+                                  className="object-cover"
+                                />
                               </div>
                             </div>
                           ))}
