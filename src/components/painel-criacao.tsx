@@ -20,6 +20,9 @@ import {
 } from "@/lib/ad-media";
 import { analisarProntidaoAnuncio } from "@/lib/ad-readiness";
 
+const SHEETS_ENABLED = process.env.NEXT_PUBLIC_ENABLE_SHEETS === "true";
+const STALE_PROCESSING_MS = 5 * 60 * 1000; // 5 minutos
+
 type FonteDados = "supabase" | "sheets";
 
 type FeedbackPainel = {
@@ -109,12 +112,12 @@ export function PainelCriacao() {
           setBrands(json.data);
           setBrandSelecionado(json.data[0]);
           setFonteDados("supabase");
-        } else {
+        } else if (SHEETS_ENABLED) {
           setFonteDados("sheets");
         }
       })
       .catch(() => {
-        setFonteDados("sheets");
+        if (SHEETS_ENABLED) setFonteDados("sheets");
       });
   }, []);
 
@@ -198,11 +201,15 @@ export function PainelCriacao() {
       accountId: ad.meta_account_id ?? "",
       data: new Date(ad.created_at).toLocaleDateString("pt-BR"),
       statusProcessamento: ad.status === "concluido" ? "concluido"
+        : ad.status === "processando" && (Date.now() - new Date(ad.updated_at).getTime() > STALE_PROCESSING_MS)
+          ? "erro"
         : ad.status === "processando" ? "processando"
         : ad.status === "erro" ? "erro"
         : "pendente",
       adIdCriado: ad.meta_ad_id ?? undefined,
-      mensagemErro: ad.error_message ?? undefined,
+      mensagemErro: ad.status === "processando" && (Date.now() - new Date(ad.updated_at).getTime() > STALE_PROCESSING_MS)
+        ? "Processamento travou. Tente novamente."
+        : ad.error_message ?? undefined,
       statusVideo: videoAsset ? "nao_verificado" : "acessivel",
       adId: ad.id,
       tipo: ad.type as "video" | "image",
@@ -236,7 +243,7 @@ export function PainelCriacao() {
           (l) => l.tipo === "video" && l.statusProcessamento !== "concluido" && l.linkVideo
         );
         if (paraValidar.length > 0) await validarVideos(paraValidar);
-      } else {
+      } else if (SHEETS_ENABLED) {
         const res = await fetch(`/api/sheets/pendentes?aba=${abaLegada}`);
         const json = await res.json();
         if (!res.ok) throw new Error(json.erro ?? "Erro ao carregar planilha");
@@ -277,7 +284,7 @@ export function PainelCriacao() {
   }, [fonteDados, brandSelecionado, abaLegada, validarVideos]);
 
   useEffect(() => {
-    if ((fonteDados === "supabase" && brandSelecionado) || fonteDados === "sheets") {
+    if ((fonteDados === "supabase" && brandSelecionado) || (fonteDados === "sheets" && SHEETS_ENABLED)) {
       carregarDados();
     }
   }, [fonteDados, brandSelecionado, abaLegada, carregarDados]);
@@ -476,7 +483,7 @@ export function PainelCriacao() {
           <h1 className="text-2xl font-bold tracking-tight">Criação de Anúncios</h1>
           <p className="mt-1 text-sm text-muted-foreground max-w-2xl">
             Gerencie e suba anúncios para o Meta Ads.
-            {fonteDados === "supabase" ? " Dados salvos no banco." : " Dados da planilha Google Sheets."}
+            {fonteDados === "supabase" ? " Dados salvos no banco." : SHEETS_ENABLED ? " Dados da planilha Google Sheets." : ""}
           </p>
           <div className="mt-3 flex items-center gap-1 rounded-lg border bg-muted/40 p-1 w-fit">
             {fonteDados === "supabase" ? (
@@ -487,7 +494,7 @@ export function PainelCriacao() {
                   {b.name}
                 </button>
               ))
-            ) : (
+            ) : SHEETS_ENABLED ? (
               (["evino", "grandcru"] as ChaveAba[]).map((chave) => (
                 <button key={chave} onClick={() => { if (chave !== abaLegada) { setAbaLegada(chave); resetFiltros(); } }}
                   disabled={carregando || processando}
@@ -495,7 +502,7 @@ export function PainelCriacao() {
                   {chave === "evino" ? "Evino" : "GrandCru"}
                 </button>
               ))
-            )}
+            ) : null}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -517,11 +524,13 @@ export function PainelCriacao() {
               </button>
             </>
           )}
-          <a href={`https://docs.google.com/spreadsheets/d/${process.env.NEXT_PUBLIC_GOOGLE_SHEETS_ID}/edit`} target="_blank" rel="noopener noreferrer"
-            className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border border-input bg-background px-4 text-sm font-medium shadow-sm transition-all hover:bg-accent hover:text-accent-foreground active:scale-[0.98]">
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M19.385 2H4.615A2.615 2.615 0 0 0 2 4.615v14.77A2.615 2.615 0 0 0 4.615 22h14.77A2.615 2.615 0 0 0 22 19.385V4.615A2.615 2.615 0 0 0 19.385 2zM7 18V6h4v12H7zm6 0V6h4v12h-4z" /></svg>
-            Planilha
-          </a>
+          {SHEETS_ENABLED && (
+            <a href={`https://docs.google.com/spreadsheets/d/${process.env.NEXT_PUBLIC_GOOGLE_SHEETS_ID}/edit`} target="_blank" rel="noopener noreferrer"
+              className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border border-input bg-background px-4 text-sm font-medium shadow-sm transition-all hover:bg-accent hover:text-accent-foreground active:scale-[0.98]">
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M19.385 2H4.615A2.615 2.615 0 0 0 2 4.615v14.77A2.615 2.615 0 0 0 4.615 22h14.77A2.615 2.615 0 0 0 22 19.385V4.615A2.615 2.615 0 0 0 19.385 2zM7 18V6h4v12H7zm6 0V6h4v12h-4z" /></svg>
+              Planilha
+            </a>
+          )}
         </div>
       </div>
 
@@ -533,7 +542,7 @@ export function PainelCriacao() {
             {carregando ? (<><span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />Carregando...</>) : jaCarregou ? "Recarregar" : "Carregar"}
           </button>
 
-          {fonteDados === "supabase" && (
+          {fonteDados === "supabase" && SHEETS_ENABLED && (
             <button onClick={importarDaPlanilha} disabled={importando || carregando}
               className="inline-flex h-10 items-center gap-2 rounded-lg border border-input bg-background px-5 text-sm font-medium shadow-sm transition-all hover:bg-accent hover:text-accent-foreground active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50">
               {importando ? (<><span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />Importando...</>) : (<><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" /></svg>Importar da Planilha</>)}
@@ -585,7 +594,7 @@ export function PainelCriacao() {
         />
       )}
 
-      {diagnosticoPlanilha && (
+      {SHEETS_ENABLED && diagnosticoPlanilha && (
         <BannerPlanilha diagnostico={diagnosticoPlanilha} />
       )}
 
@@ -657,6 +666,22 @@ export function PainelCriacao() {
             </button>
           </div>
           <TabelaPendentes linhas={linhasFiltradas} carregando={carregando} aoSubir={subirAnuncio} processando={processando}
+            aoExcluir={async (linha) => {
+              if (!linha.adId) return;
+              if (!confirm(`Excluir "${linha.adName}"?`)) return;
+              try {
+                const res = await fetch(`/api/ads/${linha.adId}`, { method: "DELETE" });
+                if (!res.ok) {
+                  const json = await res.json();
+                  throw new Error(json.erro ?? "Erro ao excluir");
+                }
+                setLinhas((prev) => prev.filter((l) => l.adId !== linha.adId));
+                setSelecionados((prev) => { const novo = new Set(prev); novo.delete(linha.indiceLinha); return novo; });
+                setFeedback({ tipo: "sucesso", titulo: "Anúncio excluído" });
+              } catch (e) {
+                setFeedback({ tipo: "erro", titulo: "Falha ao excluir", descricao: e instanceof Error ? e.message : "Erro desconhecido" });
+              }
+            }}
             aoEditar={(linha) => {
               if (!linha.adId) return;
               setEditarAdId(linha.adId);

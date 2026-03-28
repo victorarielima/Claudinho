@@ -344,6 +344,36 @@ export async function atualizarMetaAssetId(
   if (error) throw new Error(`Erro ao atualizar meta_asset_id: ${error.message}`);
 }
 
+// ─── Excluir Ad (apenas drafts não subidos) ────────────────
+
+export async function excluirAd(
+  id: string,
+  userId?: string,
+  userName?: string
+): Promise<void> {
+  const sb = getSupabase();
+
+  const ad = await buscarAd(id);
+  if (!ad) throw new Error("Ad não encontrado");
+  if (ad.status === "concluido") throw new Error("Não é possível excluir um anúncio já subido para a Meta.");
+  if (ad.status === "processando") throw new Error("Não é possível excluir um anúncio em processamento.");
+
+  const { error: assetsError } = await sb.from("ad_assets").delete().eq("ad_id", id);
+  if (assetsError) throw new Error(`Erro ao excluir assets: ${assetsError.message}`);
+
+  const { error } = await sb.from("ads").delete().eq("id", id);
+  if (error) throw new Error(`Erro ao excluir anúncio: ${error.message}`);
+
+  await registrarAudit({
+    entity_type: "ad",
+    entity_id: id,
+    action: "deleted",
+    changes: { ad_name: ad.ad_name, status: ad.status },
+    user_id: userId ?? "system",
+    user_name: userName,
+  });
+}
+
 // ─── Audit Log ──────────────────────────────────────────────
 
 interface RegistrarAuditInput {
