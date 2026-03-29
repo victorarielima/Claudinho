@@ -83,6 +83,10 @@ CREATE INDEX idx_ads_created ON ads(created_at DESC);
 CREATE INDEX idx_ad_assets_ad ON ad_assets(ad_id);
 CREATE INDEX idx_audit_entity ON audit_log(entity_type, entity_id);
 CREATE INDEX idx_audit_created ON audit_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ads_meta_ad_id ON ads(meta_ad_id);
+CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ads_unique_name ON ads(brand_id, ad_name, campaign_name);
 
 -- Trigger para updated_at automático
 CREATE OR REPLACE FUNCTION update_updated_at()

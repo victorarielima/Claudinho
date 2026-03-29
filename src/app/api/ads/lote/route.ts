@@ -59,9 +59,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const adIds: string[] = [];
-
-    for (const item of body.anuncios) {
+    const promises = body.anuncios.map((item) => {
       const input: CriarAdInput = {
         brand_id: body.brandId,
         type: "video",
@@ -84,11 +82,27 @@ export async function POST(request: NextRequest) {
         ],
       };
 
-      const ad = await criarAd(input, userId);
-      adIds.push(ad.id);
-    }
+      return criarAd(input, userId);
+    });
 
-    return NextResponse.json({ criados: adIds.length, adIds });
+    const results = await Promise.allSettled(promises);
+
+    const detalhes = results.map((result, i) => {
+      const adName = body.anuncios[i].adName;
+      if (result.status === "fulfilled") {
+        return { ad_name: adName, status: "criado" as const };
+      }
+      return {
+        ad_name: adName,
+        status: "erro" as const,
+        error: result.reason instanceof Error ? result.reason.message : "Erro desconhecido",
+      };
+    });
+
+    const criados = detalhes.filter((d) => d.status === "criado").length;
+    const erros = detalhes.filter((d) => d.status === "erro").length;
+
+    return NextResponse.json({ criados, erros, detalhes });
   } catch (error) {
     const mensagem =
       error instanceof Error ? error.message : "Erro desconhecido";
