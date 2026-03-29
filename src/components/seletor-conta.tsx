@@ -7,16 +7,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useBrand } from "@/components/brand-provider";
 
 export interface ContaOpcao {
   id: string;
   nome: string;
 }
-
-const CONTAS: ContaOpcao[] = [
-  { id: "act_775254035944122", nome: "Evino" },
-  { id: "act_1020013451372159", nome: "GrandCru" },
-];
 
 interface SeletorContaProps {
   valor: string;
@@ -24,17 +20,24 @@ interface SeletorContaProps {
 }
 
 export function SeletorConta({ valor, aoMudar }: SeletorContaProps) {
+  const { brands, loading } = useBrand();
+
+  const contas: ContaOpcao[] = brands.map((b) => ({
+    id: b.meta_account_id,
+    nome: b.name,
+  }));
+
   return (
     <div className="flex flex-col gap-1">
       <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
         Conta
       </label>
-      <Select value={valor} onValueChange={aoMudar}>
+      <Select value={valor} onValueChange={aoMudar} disabled={loading}>
         <SelectTrigger className="w-[180px] h-9">
-          <SelectValue placeholder="Selecione a conta" />
+          <SelectValue placeholder={loading ? "Carregando..." : "Selecione a conta"} />
         </SelectTrigger>
         <SelectContent>
-          {CONTAS.map((conta) => (
+          {contas.map((conta) => (
             <SelectItem key={conta.id} value={conta.id}>
               {conta.nome}
             </SelectItem>

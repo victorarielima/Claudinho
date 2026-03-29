@@ -80,14 +80,7 @@ function gerarAdName(nomeArquivo: string): string {
   return `VID-${limpo}-${mes}${ano}`;
 }
 
-const CTA_OPTIONS = [
-  { value: "SHOP_NOW", label: "Comprar Agora" },
-  { value: "LEARN_MORE", label: "Saiba Mais" },
-  { value: "SIGN_UP", label: "Cadastre-se" },
-  { value: "SUBSCRIBE", label: "Assinar" },
-  { value: "ORDER_NOW", label: "Pedir Agora" },
-  { value: "GET_OFFER", label: "Obter Oferta" },
-] as const;
+import { CTA_OPTIONS } from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
 // Component

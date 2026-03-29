@@ -33,14 +33,12 @@ interface DialogEditarAnuncioProps {
   aoSalvar: () => void;
 }
 
-const OPCOES_CTA = [
-  { valor: "SHOP_NOW", rotulo: "Shop Now" },
-  { valor: "LEARN_MORE", rotulo: "Learn More" },
-  { valor: "SIGN_UP", rotulo: "Sign Up" },
-  { valor: "SUBSCRIBE", rotulo: "Subscribe" },
-  { valor: "ORDER_NOW", rotulo: "Order Now" },
-  { valor: "GET_OFFER", rotulo: "Get Offer" },
-];
+import { CTA_OPTIONS } from "@/lib/constants";
+
+const OPCOES_CTA = CTA_OPTIONS.map((opt) => ({
+  valor: opt.value,
+  rotulo: opt.label,
+}));
 
 export function DialogEditarAnuncio({
   aberto,

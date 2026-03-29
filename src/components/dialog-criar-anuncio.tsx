@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
   Check,
@@ -28,6 +28,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { FolderOpen } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { DialogExploradorVideos, type VideoDrive } from "@/components/dialog-explorador-videos";
 import { analisarProntidaoAnuncio } from "@/lib/ad-readiness";
 import { extrairImageAssets, rotuloPlacementImagem } from "@/lib/ad-media";
@@ -87,12 +94,12 @@ const FORM_INICIAL: FormularioCriativo = {
   imagePaste: "",
 };
 
-const OPCOES_CTA = [
-  { valor: "SHOP_NOW", rotulo: "Shop Now" },
-  { valor: "LEARN_MORE", rotulo: "Learn More" },
-  { valor: "SIGN_UP", rotulo: "Sign Up" },
-  { valor: "SUBSCRIBE", rotulo: "Subscribe" },
-];
+import { CTA_OPTIONS } from "@/lib/constants";
+
+const OPCOES_CTA = CTA_OPTIONS.map((opt) => ({
+  valor: opt.value,
+  rotulo: opt.label,
+}));
 
 function novoFormulario(): FormularioCriativo {
   return { ...FORM_INICIAL };
@@ -261,6 +268,7 @@ export function DialogCriarAnuncio({
   aoFechar,
   brandId,
   brandNome,
+  metaAccountId,
   aoSalvar,
   aoNotificar,
 }: {
@@ -268,6 +276,7 @@ export function DialogCriarAnuncio({
   aoFechar: () => void;
   brandId: string;
   brandNome?: string;
+  metaAccountId?: string;
   aoSalvar: () => Promise<void> | void;
   aoNotificar: (feedback: FeedbackPainel) => void;
 }) {
@@ -280,6 +289,15 @@ export function DialogCriarAnuncio({
   const [salvandoFila, setSalvandoFila] = useState(false);
   const [exploradorAberto, setExploradorAberto] = useState(false);
 
+  // MT-5: Cascading Campaign/AdSet selectors
+  const [modoManual, setModoManual] = useState(false);
+  const [campanhas, setCampanhas] = useState<{id: string; nome: string; status: string; objetivo: string}[]>([]);
+  const [adsets, setAdsets] = useState<{id: string; nome: string; status: string; dailyBudget: string}[]>([]);
+  const [carregandoCampanhas, setCarregandoCampanhas] = useState(false);
+  const [carregandoAdsets, setCarregandoAdsets] = useState(false);
+  const [campanhaIdSelecionado, setCampanhaIdSelecionado] = useState("");
+  const [adsetIdSelecionado, setAdsetIdSelecionado] = useState("");
+
   useEffect(() => {
     if (!aberto) {
       setTipo("video");
@@ -289,8 +307,70 @@ export function DialogCriarAnuncio({
       setMensagemColagem(null);
       setSalvandoAtual(false);
       setSalvandoFila(false);
+      setModoManual(false);
+      setCampanhas([]);
+      setAdsets([]);
+      setCampanhaIdSelecionado("");
+      setAdsetIdSelecionado("");
     }
   }, [aberto]);
+
+  // MT-5: Load campaigns when brandId changes and dialog is open
+  const carregarCampanhas = useCallback(async (accountId: string) => {
+    setCampanhas([]);
+    setAdsets([]);
+    setCampanhaIdSelecionado("");
+    setAdsetIdSelecionado("");
+    if (!accountId) return;
+
+    setCarregandoCampanhas(true);
+    try {
+      const res = await fetch(`/api/meta/campanhas?accountId=${accountId}`);
+      const json = await res.json();
+      setCampanhas(json.campanhas ?? []);
+    } catch {
+      setCampanhas([]);
+    } finally {
+      setCarregandoCampanhas(false);
+    }
+  }, []);
+
+  const handleCampanhaChange = useCallback((campaignId: string) => {
+    setCampanhaIdSelecionado(campaignId);
+    const campanha = campanhas.find((c) => c.id === campaignId);
+    if (campanha) {
+      atualizarCampo("campaign_name", campanha.nome);
+      atualizarCampo("campaign_id", campaignId);
+    }
+    setAdsets([]);
+    setAdsetIdSelecionado("");
+    atualizarCampo("ad_set_name", "");
+    atualizarCampo("ad_set_id", "");
+
+    if (!campaignId) return;
+    setCarregandoAdsets(true);
+    fetch(`/api/meta/adsets?campaignId=${campaignId}`)
+      .then((r) => r.json())
+      .then((json) => setAdsets(json.adsets ?? []))
+      .catch(() => setAdsets([]))
+      .finally(() => setCarregandoAdsets(false));
+  }, [campanhas]);
+
+  const handleAdsetChange = useCallback((adsetId: string) => {
+    setAdsetIdSelecionado(adsetId);
+    const adset = adsets.find((a) => a.id === adsetId);
+    if (adset) {
+      atualizarCampo("ad_set_name", adset.nome);
+      atualizarCampo("ad_set_id", adsetId);
+    }
+  }, [adsets]);
+
+  // Load campaigns when dialog opens and we have a meta account
+  useEffect(() => {
+    if (aberto && metaAccountId && !modoManual) {
+      carregarCampanhas(metaAccountId);
+    }
+  }, [aberto, metaAccountId, modoManual, carregarCampanhas]);
 
   const { assets, linkAnuncio, diagnostico } = montarDiagnostico(form, tipo);
   const fileIdVideo = tipo === "video" ? extrairDriveFileId(form.videoUrl) : null;
@@ -565,32 +645,113 @@ export function DialogCriarAnuncio({
                       </div>
                     </div>
 
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <CampoTexto
-                        rotulo="Campanha"
-                        valor={form.campaign_name}
-                        obrigatorio
-                        onChange={(valor) => atualizarCampo("campaign_name", valor)}
-                      />
-                      <CampoTexto
-                        rotulo="Campaign ID"
-                        placeholder="Opcional"
-                        valor={form.campaign_id}
-                        onChange={(valor) => atualizarCampo("campaign_id", valor)}
-                      />
-                      <CampoTexto
-                        rotulo="Ad Set"
-                        valor={form.ad_set_name}
-                        obrigatorio
-                        onChange={(valor) => atualizarCampo("ad_set_name", valor)}
-                      />
-                      <CampoTexto
-                        rotulo="Ad Set ID"
-                        placeholder="Obrigatorio para subir na Meta"
-                        valor={form.ad_set_id}
-                        onChange={(valor) => atualizarCampo("ad_set_id", valor)}
-                      />
-                    </div>
+                    {!modoManual && metaAccountId ? (
+                      <div className="grid gap-4">
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div>
+                            <label className="text-sm font-medium text-slate-900">
+                              Campanha <span className="text-slate-400"> *</span>
+                            </label>
+                            <Select
+                              value={campanhaIdSelecionado}
+                              onValueChange={handleCampanhaChange}
+                              disabled={carregandoCampanhas}
+                            >
+                              <SelectTrigger className="mt-1.5 h-11 w-full rounded-2xl border-slate-200">
+                                <SelectValue
+                                  placeholder={
+                                    carregandoCampanhas
+                                      ? "Carregando campanhas..."
+                                      : "Selecione a campanha"
+                                  }
+                                />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {campanhas.map((c) => (
+                                  <SelectItem key={c.id} value={c.id}>
+                                    {c.nome} ({c.status})
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium text-slate-900">
+                              Conjunto de Anuncios <span className="text-slate-400"> *</span>
+                            </label>
+                            <Select
+                              value={adsetIdSelecionado}
+                              onValueChange={handleAdsetChange}
+                              disabled={!campanhaIdSelecionado || carregandoAdsets}
+                            >
+                              <SelectTrigger className="mt-1.5 h-11 w-full rounded-2xl border-slate-200">
+                                <SelectValue
+                                  placeholder={
+                                    carregandoAdsets
+                                      ? "Carregando..."
+                                      : !campanhaIdSelecionado
+                                        ? "Selecione a campanha primeiro"
+                                        : "Selecione o conjunto"
+                                  }
+                                />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {adsets.map((a) => (
+                                  <SelectItem key={a.id} value={a.id}>
+                                    {a.nome} ({a.status})
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setModoManual(true)}
+                          className="text-xs text-slate-500 hover:text-slate-700 underline w-fit"
+                        >
+                          Preencher manualmente
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="grid gap-4">
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <CampoTexto
+                            rotulo="Campanha"
+                            valor={form.campaign_name}
+                            obrigatorio
+                            onChange={(valor) => atualizarCampo("campaign_name", valor)}
+                          />
+                          <CampoTexto
+                            rotulo="Campaign ID"
+                            placeholder="Opcional"
+                            valor={form.campaign_id}
+                            onChange={(valor) => atualizarCampo("campaign_id", valor)}
+                          />
+                          <CampoTexto
+                            rotulo="Ad Set"
+                            valor={form.ad_set_name}
+                            obrigatorio
+                            onChange={(valor) => atualizarCampo("ad_set_name", valor)}
+                          />
+                          <CampoTexto
+                            rotulo="Ad Set ID"
+                            placeholder="Obrigatorio para subir na Meta"
+                            valor={form.ad_set_id}
+                            onChange={(valor) => atualizarCampo("ad_set_id", valor)}
+                          />
+                        </div>
+                        {metaAccountId && (
+                          <button
+                            type="button"
+                            onClick={() => setModoManual(false)}
+                            className="text-xs text-slate-500 hover:text-slate-700 underline w-fit"
+                          >
+                            Usar seletores
+                          </button>
+                        )}
+                      </div>
+                    )}
 
                     <CampoTexto
                       rotulo="Nome do anuncio"
