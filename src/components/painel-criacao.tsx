@@ -3,6 +3,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   TabelaPendentes,
   type LinhaComStatus,
 } from "@/components/tabela-pendentes";
@@ -10,6 +20,7 @@ import { DialogCriarAnuncio } from "@/components/dialog-criar-anuncio";
 import { DialogExploradorVideos } from "@/components/dialog-explorador-videos";
 import { FormularioLoteVideos } from "@/components/formulario-lote-videos";
 import { DialogEditarAnuncio } from "@/components/dialog-editar-anuncio";
+import { useBrand } from "@/components/brand-provider";
 import type { Ad, AdAsset, Brand } from "@/lib/db";
 import type { VideoDrive } from "@/lib/drive-explorer";
 import type { LinhaAnuncio, ChaveAba, DiagnosticoPlanilha } from "@/lib/sheets";
@@ -68,9 +79,17 @@ function enriquecerLinha(linha: LinhaComStatus): LinhaComStatus {
 }
 
 export function PainelCriacao() {
+  const { brands: brandsCtx, selectedBrand: brandCtx, setSelectedBrand: setBrandCtx, loading: brandLoading } = useBrand();
   const [brands, setBrands] = useState<Brand[]>([]);
   const [brandSelecionado, setBrandSelecionado] = useState<Brand | null>(null);
   const [fonteDados, setFonteDados] = useState<FonteDados>("supabase");
+
+  // QW-1: Confirmation dialog before bulk upload
+  const [confirmUpload, setConfirmUpload] = useState<{show: boolean, linhas: LinhaComStatus[]}>({show: false, linhas: []});
+  // QW-2: Per-ad progress counter during batch upload
+  const [progressoUpload, setProgressoUpload] = useState<{atual: number, total: number} | null>(null);
+  // QW-12: AlertDialog for delete confirmation
+  const [confirmExcluir, setConfirmExcluir] = useState<{show: boolean, linha: LinhaComStatus | null}>({show: false, linha: null});
 
   const [linhas, setLinhas] = useState<LinhaComStatus[]>([]);
   const [carregando, setCarregando] = useState(false);
@@ -103,23 +122,17 @@ export function PainelCriacao() {
   const [importando, setImportando] = useState(false);
   const [abaLegada, setAbaLegada] = useState<ChaveAba>("evino");
 
-  // ─── Carregar brands ───────────────────────────────────────
+  // ─── Sincronizar brands do contexto ─────────────────────────
   useEffect(() => {
-    fetch("/api/brands")
-      .then((r) => r.json())
-      .then((json) => {
-        if (json.data?.length > 0) {
-          setBrands(json.data);
-          setBrandSelecionado(json.data[0]);
-          setFonteDados("supabase");
-        } else if (SHEETS_ENABLED) {
-          setFonteDados("sheets");
-        }
-      })
-      .catch(() => {
-        if (SHEETS_ENABLED) setFonteDados("sheets");
-      });
-  }, []);
+    if (brandLoading) return;
+    if (brandsCtx.length > 0) {
+      setBrands(brandsCtx as Brand[]);
+      setBrandSelecionado(brandCtx as Brand | null);
+      setFonteDados("supabase");
+    } else if (SHEETS_ENABLED) {
+      setFonteDados("sheets");
+    }
+  }, [brandLoading, brandsCtx, brandCtx]);
 
   // ─── Validação de vídeos ───────────────────────────────────
   const validarVideos = useCallback(
@@ -385,7 +398,8 @@ export function PainelCriacao() {
     }
   }, [abaLegada]);
 
-  const subirSelecionados = useCallback(async () => {
+  // QW-1: Collect target lines and show confirmation dialog
+  const pedirConfirmacaoUpload = useCallback(() => {
     const podeSubir = (l: LinhaComStatus) =>
       (l.statusProcessamento === "pendente" || l.statusProcessamento === "erro") && l.prontoMeta;
 
@@ -393,9 +407,26 @@ export function PainelCriacao() {
       ? linhas.filter((l) => selecionados.has(l.indiceLinha) && podeSubir(l))
       : linhas.filter(podeSubir);
 
-    for (const linha of alvo) await subirAnuncio(linha);
+    if (alvo.length === 0) return;
+    setConfirmUpload({ show: true, linhas: alvo });
+  }, [linhas, selecionados]);
+
+  // QW-1 + QW-2: Execute bulk upload after confirmation
+  const subirSelecionados = useCallback(async () => {
+    const alvo = confirmUpload.linhas;
+    setConfirmUpload({ show: false, linhas: [] });
+    if (alvo.length === 0) return;
+
+    setProgressoUpload({ atual: 0, total: alvo.length });
+    let contador = 0;
+    for (const linha of alvo) {
+      contador += 1;
+      setProgressoUpload({ atual: contador, total: alvo.length });
+      await subirAnuncio(linha);
+    }
+    setProgressoUpload(null);
     setSelecionados(new Set());
-  }, [linhas, selecionados, subirAnuncio]);
+  }, [confirmUpload.linhas, subirAnuncio]);
 
   // ─── Importar da planilha ──────────────────────────────────
   const importarDaPlanilha = useCallback(async () => {
@@ -488,7 +519,7 @@ export function PainelCriacao() {
           <div className="mt-3 flex items-center gap-1 rounded-lg border bg-muted/40 p-1 w-fit">
             {fonteDados === "supabase" ? (
               brands.map((b) => (
-                <button key={b.id} onClick={() => { if (b.id !== brandSelecionado?.id) { setBrandSelecionado(b); resetFiltros(); } }}
+                <button key={b.id} onClick={() => { if (b.id !== brandSelecionado?.id) { setBrandSelecionado(b); setBrandCtx(b); resetFiltros(); } }}
                   disabled={carregando || processando}
                   className={`inline-flex items-center gap-1.5 rounded-md px-4 py-1.5 text-sm font-medium transition-all disabled:opacity-50 ${brandSelecionado?.id === b.id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
                   {b.name}
@@ -550,9 +581,9 @@ export function PainelCriacao() {
           )}
 
           {jaCarregou && totalDisponiveis > 0 && (
-            <button onClick={subirSelecionados} disabled={processando}
+            <button onClick={pedirConfirmacaoUpload} disabled={processando || progressoUpload !== null}
               className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50">
-              {processando ? (<><span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />Processando...</>) : selecionados.size > 0 ? `Subir Selecionados (${selecionados.size})` : `Subir Todos (${totalDisponiveis})`}
+              {progressoUpload ? (<><span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />Subindo {progressoUpload.atual}/{progressoUpload.total}...</>) : processando ? (<><span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />Processando...</>) : selecionados.size > 0 ? `Subir Selecionados (${selecionados.size})` : `Subir Todos (${totalDisponiveis})`}
             </button>
           )}
 
@@ -666,21 +697,9 @@ export function PainelCriacao() {
             </button>
           </div>
           <TabelaPendentes linhas={linhasFiltradas} carregando={carregando} aoSubir={subirAnuncio} processando={processando}
-            aoExcluir={async (linha) => {
+            aoExcluir={(linha) => {
               if (!linha.adId) return;
-              if (!confirm(`Excluir "${linha.adName}"?`)) return;
-              try {
-                const res = await fetch(`/api/ads/${linha.adId}`, { method: "DELETE" });
-                if (!res.ok) {
-                  const json = await res.json();
-                  throw new Error(json.erro ?? "Erro ao excluir");
-                }
-                setLinhas((prev) => prev.filter((l) => l.adId !== linha.adId));
-                setSelecionados((prev) => { const novo = new Set(prev); novo.delete(linha.indiceLinha); return novo; });
-                setFeedback({ tipo: "sucesso", titulo: "Anúncio excluído" });
-              } catch (e) {
-                setFeedback({ tipo: "erro", titulo: "Falha ao excluir", descricao: e instanceof Error ? e.message : "Erro desconhecido" });
-              }
+              setConfirmExcluir({ show: true, linha });
             }}
             aoEditar={(linha) => {
               if (!linha.adId) return;
@@ -736,6 +755,7 @@ export function PainelCriacao() {
         aoFechar={() => setDialogCriar(false)}
         brandId={brandSelecionado?.id ?? ""}
         brandNome={brandSelecionado?.name}
+        metaAccountId={brandSelecionado?.meta_account_id}
         aoSalvar={carregarDados}
         aoNotificar={setFeedback}
       />
@@ -770,6 +790,73 @@ export function PainelCriacao() {
         dadosIniciais={editarDados}
         aoSalvar={carregarDados}
       />
+
+      {/* QW-1: Confirmation dialog before bulk upload */}
+      <AlertDialog open={confirmUpload.show} onOpenChange={(open) => { if (!open) setConfirmUpload({ show: false, linhas: [] }); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar upload</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div>
+                <p>
+                  Deseja subir {confirmUpload.linhas.length} anuncio{confirmUpload.linhas.length !== 1 ? "s" : ""} para o Meta Ads?
+                </p>
+                <ul className="mt-2 list-disc pl-5 text-sm text-muted-foreground">
+                  {confirmUpload.linhas.slice(0, 5).map((l) => (
+                    <li key={l.indiceLinha}>{l.adName || "Sem nome"}</li>
+                  ))}
+                  {confirmUpload.linhas.length > 5 && (
+                    <li>e mais {confirmUpload.linhas.length - 5}...</li>
+                  )}
+                </ul>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={subirSelecionados}>
+              Confirmar Upload
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* QW-12: Delete confirmation dialog */}
+      <AlertDialog open={confirmExcluir.show} onOpenChange={(open) => { if (!open) setConfirmExcluir({ show: false, linha: null }); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir anuncio</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja excluir &ldquo;{confirmExcluir.linha?.adName ?? ""}&rdquo;? Essa acao nao pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={async () => {
+                const linha = confirmExcluir.linha;
+                if (!linha?.adId) return;
+                setConfirmExcluir({ show: false, linha: null });
+                try {
+                  const res = await fetch(`/api/ads/${linha.adId}`, { method: "DELETE" });
+                  if (!res.ok) {
+                    const json = await res.json();
+                    throw new Error(json.erro ?? "Erro ao excluir");
+                  }
+                  setLinhas((prev) => prev.filter((l) => l.adId !== linha.adId));
+                  setSelecionados((prev) => { const novo = new Set(prev); novo.delete(linha.indiceLinha); return novo; });
+                  setFeedback({ tipo: "sucesso", titulo: "Anuncio excluido" });
+                } catch (e) {
+                  setFeedback({ tipo: "erro", titulo: "Falha ao excluir", descricao: e instanceof Error ? e.message : "Erro desconhecido" });
+                }
+              }}
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
