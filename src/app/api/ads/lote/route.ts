@@ -61,37 +61,50 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const results = await Promise.all(
-      body.anuncios.map(async (item) => {
-        const input: CriarAdInput = {
-          brand_id: body.brandId,
-          type: "video",
-          campaign_name: body.campaignName,
-          campaign_id: body.campaignId,
-          ad_set_name: body.adSetName,
-          ad_set_id: body.adSetId,
-          ad_name: item.adName,
-          titulo: item.titulo,
-          texto_principal: body.textoPrincipal,
-          descricao: body.descricao,
-          cta: body.cta,
-          link_campanha: body.linkCampanha,
-          assets: [
-            {
-              placement: "video_principal",
-              asset_url: item.driveUrl,
-              asset_type: "video",
-            },
-          ],
-        };
+    const promises = body.anuncios.map((item) => {
+      const input: CriarAdInput = {
+        brand_id: body.brandId,
+        type: "video",
+        campaign_name: body.campaignName,
+        campaign_id: body.campaignId,
+        ad_set_name: body.adSetName,
+        ad_set_id: body.adSetId,
+        ad_name: item.adName,
+        titulo: item.titulo,
+        texto_principal: body.textoPrincipal,
+        descricao: body.descricao,
+        cta: body.cta,
+        link_campanha: body.linkCampanha,
+        assets: [
+          {
+            placement: "video_principal",
+            asset_url: item.driveUrl,
+            asset_type: "video",
+          },
+        ],
+      };
 
-        const ad = await criarAd(input, userId);
-        return ad.id;
-      })
-    );
-    const adIds = results;
+      return criarAd(input, userId);
+    });
 
-    return NextResponse.json({ criados: adIds.length, adIds });
+    const results = await Promise.allSettled(promises);
+
+    const detalhes = results.map((result, i) => {
+      const adName = body.anuncios[i].adName;
+      if (result.status === "fulfilled") {
+        return { ad_name: adName, status: "criado" as const };
+      }
+      return {
+        ad_name: adName,
+        status: "erro" as const,
+        error: result.reason instanceof Error ? result.reason.message : "Erro desconhecido",
+      };
+    });
+
+    const criados = detalhes.filter((d) => d.status === "criado").length;
+    const erros = detalhes.filter((d) => d.status === "erro").length;
+
+    return NextResponse.json({ criados, erros, detalhes });
   } catch (error) {
     const mensagem =
       error instanceof Error ? error.message : "Erro desconhecido";

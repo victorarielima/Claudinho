@@ -186,6 +186,21 @@ export async function buscarAd(id: string): Promise<Ad | null> {
 export async function criarAd(input: CriarAdInput, userId: string, userName?: string): Promise<Ad> {
   const sb = getSupabase();
 
+  // Verificar duplicata antes de inserir
+  const { data: existente } = await sb
+    .from("ads")
+    .select("id")
+    .eq("brand_id", input.brand_id)
+    .eq("ad_name", input.ad_name)
+    .eq("campaign_name", input.campaign_name)
+    .maybeSingle();
+
+  if (existente) {
+    throw new Error(
+      `Ja existe um anuncio com o nome '${input.ad_name}' na campanha '${input.campaign_name}'`
+    );
+  }
+
   // Gerar UTM automaticamente
   const linkAnuncio = input.link_campanha
     ? gerarLinkAnuncio(input.link_campanha, input.campaign_name, input.ad_name)
@@ -325,7 +340,13 @@ export async function atualizarStatusAd(
     entity_type: "ad",
     entity_id: id,
     action: actionMap[status],
-    changes: { status: { old: undefined, new: status }, ...meta },
+    changes: {
+      status: { old: undefined, new: status },
+      ...(meta?.meta_ad_id ? { meta_ad_id: { old: null, new: meta.meta_ad_id } } : {}),
+      ...(meta?.meta_creative_id ? { meta_creative_id: { old: null, new: meta.meta_creative_id } } : {}),
+      ...(meta?.meta_account_id ? { meta_account_id: { old: null, new: meta.meta_account_id } } : {}),
+      ...(meta?.error_message !== undefined ? { error_message: { old: null, new: meta.error_message } } : {}),
+    },
     user_id: userId ?? "system",
     user_name: userName,
   });
@@ -358,9 +379,6 @@ export async function excluirAd(
   if (ad.status === "concluido") throw new Error("Não é possível excluir um anúncio já subido para a Meta.");
   if (ad.status === "processando") throw new Error("Não é possível excluir um anúncio em processamento.");
 
-  const { error: assetsError } = await sb.from("ad_assets").delete().eq("ad_id", id);
-  if (assetsError) throw new Error(`Erro ao excluir assets: ${assetsError.message}`);
-
   const { error } = await sb.from("ads").delete().eq("id", id);
   if (error) throw new Error(`Erro ao excluir anúncio: ${error.message}`);
 
@@ -368,7 +386,7 @@ export async function excluirAd(
     entity_type: "ad",
     entity_id: id,
     action: "deleted",
-    changes: { ad_name: ad.ad_name, status: ad.status },
+    changes: { ad_name: { old: ad.ad_name, new: null }, status: { old: ad.status, new: 'deleted' } },
     user_id: userId ?? "system",
     user_name: userName,
   });
