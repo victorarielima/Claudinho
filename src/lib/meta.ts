@@ -1,4 +1,6 @@
-const META_API_BASE = "https://graph.facebook.com/v23.0";
+import { META_API_BASE } from "./meta-config";
+import { logger } from "./logger";
+import { metaFetchWithRetry } from "./meta-retry";
 
 export interface ContaMeta {
   id: string;
@@ -94,19 +96,54 @@ export async function buscarAnunciosDoPeriodo(
 
   const todosAnuncios: AnuncioMeta[] = [];
   let nextUrl: string | null = url.toString();
+  let page = 0;
+
+  logger.info("Fetching ads from Meta API", {
+    fn: "buscarAnunciosDoPeriodo",
+    accountId,
+    datePreset,
+  });
+  const startMs = Date.now();
 
   while (nextUrl) {
-    const res = await fetch(nextUrl);
+    page++;
+    const res = await metaFetchWithRetry(nextUrl);
     if (!res.ok) {
       const erro = await res.json();
+      logger.error("Failed to fetch ads from Meta API", {
+        fn: "buscarAnunciosDoPeriodo",
+        accountId,
+        datePreset,
+        page,
+        error: erro.error?.message ?? res.statusText,
+      });
       throw new Error(
         `Erro na API Meta: ${erro.error?.message ?? res.statusText}`
       );
     }
     const json: MetaApiResponse = await res.json();
     todosAnuncios.push(...json.data);
+
+    logger.debug("Fetched page of ads", {
+      fn: "buscarAnunciosDoPeriodo",
+      accountId,
+      page,
+      itemsInPage: json.data.length,
+      totalSoFar: todosAnuncios.length,
+    });
+
     nextUrl = json.paging?.next ?? null;
   }
+
+  const elapsedMs = Date.now() - startMs;
+  logger.info("Finished fetching ads from Meta API", {
+    fn: "buscarAnunciosDoPeriodo",
+    accountId,
+    datePreset,
+    totalAds: todosAnuncios.length,
+    pages: page,
+    elapsedMs,
+  });
 
   return todosAnuncios;
 }

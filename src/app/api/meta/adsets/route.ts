@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-
-const META_API_BASE = "https://graph.facebook.com/v23.0";
+import { META_API_BASE } from "@/lib/meta-config";
+import { logger } from "@/lib/logger";
+import { metaFetchWithRetry } from "@/lib/meta-retry";
 
 export async function GET(request: NextRequest) {
+  const startMs = Date.now();
   try {
     const { userId } = await auth();
     if (!userId) {
@@ -28,16 +30,26 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    logger.info("Fetching adsets", {
+      fn: "GET /api/meta/adsets",
+      campaignId,
+    });
+
     const filtering = JSON.stringify([
       { field: "effective_status", operator: "IN", value: ["ACTIVE", "PAUSED"] },
     ]);
 
     const url = `${META_API_BASE}/${campaignId}/adsets?fields=id,name,status,daily_budget&filtering=${encodeURIComponent(filtering)}&limit=100&access_token=${accessToken}`;
 
-    const response = await fetch(url);
+    const response = await metaFetchWithRetry(url);
     const data = await response.json();
 
     if (data.error) {
+      logger.error("Meta API error fetching adsets", {
+        fn: "GET /api/meta/adsets",
+        campaignId,
+        error: data.error.message,
+      });
       return NextResponse.json(
         { erro: data.error.message ?? "Erro na API do Meta" },
         { status: response.status }
@@ -58,10 +70,23 @@ export async function GET(request: NextRequest) {
       })
     );
 
+    const elapsedMs = Date.now() - startMs;
+    logger.info("Adsets fetched successfully", {
+      fn: "GET /api/meta/adsets",
+      campaignId,
+      count: adsets.length,
+      elapsedMs,
+    });
+
     return NextResponse.json({ adsets });
   } catch (error) {
     const mensagem =
       error instanceof Error ? error.message : "Erro desconhecido";
+    logger.error("Unexpected error fetching adsets", {
+      fn: "GET /api/meta/adsets",
+      error: mensagem,
+      elapsedMs: Date.now() - startMs,
+    });
     return NextResponse.json({ erro: mensagem }, { status: 500 });
   }
 }
