@@ -3,6 +3,7 @@ import {
   normalizarPlacementImagem,
   rotuloPlacementImagem,
 } from "./ad-media";
+import { VALID_CTA_VALUES } from "./constants";
 
 export interface AssetImagemValidavel {
   placement: string;
@@ -16,6 +17,10 @@ export interface AnuncioValidavel {
   linkVideo?: string | null;
   linkAnuncio?: string | null;
   imageAssets?: AssetImagemValidavel[];
+  texto_principal?: string | null;
+  titulo?: string | null;
+  descricao?: string | null;
+  cta?: string | null;
 }
 
 export interface AvisoAnuncio {
@@ -128,6 +133,65 @@ export function analisarProntidaoAnuncio(input: AnuncioValidavel): DiagnosticoAn
           .join(", ")}.`,
       });
     }
+  }
+
+  // ── QW-6: Missing copy warnings ──────────────────────────────
+  if (!input.texto_principal?.trim()) {
+    avisos.push({
+      nivel: "aviso",
+      codigo: "texto_principal_vazio",
+      mensagem: "Texto principal esta vazio",
+    });
+  }
+
+  if (!input.titulo?.trim()) {
+    avisos.push({
+      nivel: "aviso",
+      codigo: "titulo_vazio",
+      mensagem: "Titulo esta vazio",
+    });
+  }
+
+  if (!input.descricao?.trim()) {
+    avisos.push({
+      nivel: "aviso",
+      codigo: "descricao_vazia",
+      mensagem: "Descricao esta vazia",
+    });
+  }
+
+  // ── QW-5: Text length warnings ─────────────────────────────
+  if (input.texto_principal && input.texto_principal.trim().length > 125) {
+    avisos.push({
+      nivel: "aviso",
+      codigo: "texto_principal_longo",
+      mensagem: "Texto principal excede 125 caracteres (recomendado pelo Meta)",
+    });
+  }
+
+  if (input.titulo && input.titulo.trim().length > 40) {
+    avisos.push({
+      nivel: "aviso",
+      codigo: "titulo_longo",
+      mensagem: "Titulo excede 40 caracteres (recomendado pelo Meta)",
+    });
+  }
+
+  if (input.descricao && input.descricao.trim().length > 30) {
+    avisos.push({
+      nivel: "aviso",
+      codigo: "descricao_longa",
+      mensagem: "Descricao excede 30 caracteres (recomendado pelo Meta)",
+    });
+  }
+
+  // ── QW-7: CTA validation ───────────────────────────────────
+  if (input.cta && input.cta.trim() && !VALID_CTA_VALUES.includes(input.cta.trim())) {
+    bloqueios.push({
+      nivel: "erro",
+      codigo: "cta_invalido",
+      mensagem: `CTA invalido: '${input.cta.trim()}'. Valores aceitos: SHOP_NOW, LEARN_MORE, etc.`,
+    });
   }
 
   return {
