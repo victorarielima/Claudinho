@@ -1,6 +1,7 @@
 import { normalizarPlacementImagem } from "./ad-media";
-
-const META_API_BASE = "https://graph.facebook.com/v23.0";
+import { META_API_BASE } from "./meta-config";
+import { logger } from "./logger";
+import { metaFetchWithRetry } from "./meta-retry";
 
 function getAccessToken(): string {
   const token = process.env.META_ACCESS_TOKEN;
@@ -51,17 +52,39 @@ export async function uploadVideo(
   formData.append("title", fileName);
   formData.append("access_token", token);
 
-  const res = await fetch(url, {
+  logger.info("Uploading video to Meta", {
+    fn: "uploadVideo",
+    accountId,
+    fileName,
+    sizeBytes: videoBuffer.byteLength,
+  });
+  const startMs = Date.now();
+
+  const res = await metaFetchWithRetry(url, {
     method: "POST",
     body: formData,
   });
 
   const json = await res.json();
   if (!res.ok || json.error) {
+    logger.error("Video upload failed", {
+      fn: "uploadVideo",
+      accountId,
+      fileName,
+      error: extrairErroMeta(json),
+    });
     throw new Error(`Erro ao fazer upload do vídeo: ${extrairErroMeta(json)}`);
   }
 
   const videoId = json.id;
+  const elapsedMs = Date.now() - startMs;
+  logger.info("Video uploaded successfully", {
+    fn: "uploadVideo",
+    accountId,
+    fileName,
+    videoId,
+    elapsedMs,
+  });
 
   // Aguardar o Meta processar o vídeo antes de prosseguir
   await aguardarProcessamentoVideo(videoId);
@@ -77,10 +100,17 @@ async function aguardarProcessamentoVideo(videoId: string): Promise<void> {
 
   for (let tentativa = 0; tentativa < maxTentativas; tentativa++) {
     const url = `${META_API_BASE}/${videoId}?fields=status&access_token=${token}`;
+    // Polling uses plain fetch — it has its own retry logic
     const res = await fetch(url);
     const json = await res.json();
 
     if (json.error) {
+      logger.error("Error checking video processing status", {
+        fn: "aguardarProcessamentoVideo",
+        videoId,
+        attempt: tentativa + 1,
+        error: extrairErroMeta(json),
+      });
       throw new Error(
         `Erro ao verificar status do vídeo: ${extrairErroMeta(json)}`
       );
@@ -88,11 +118,29 @@ async function aguardarProcessamentoVideo(videoId: string): Promise<void> {
 
     const status = json.status?.video_status;
 
+    logger.debug("Video processing poll", {
+      fn: "aguardarProcessamentoVideo",
+      videoId,
+      attempt: tentativa + 1,
+      maxAttempts: maxTentativas,
+      status,
+    });
+
     if (status === "ready") {
+      logger.info("Video processing complete", {
+        fn: "aguardarProcessamentoVideo",
+        videoId,
+        attempts: tentativa + 1,
+      });
       return;
     }
 
     if (status === "error") {
+      logger.error("Video processing failed on Meta side", {
+        fn: "aguardarProcessamentoVideo",
+        videoId,
+        attempt: tentativa + 1,
+      });
       throw new Error(
         "O Meta não conseguiu processar o vídeo. Verifique o formato e tente novamente."
       );
@@ -105,6 +153,11 @@ async function aguardarProcessamentoVideo(videoId: string): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, espera));
   }
 
+  logger.error("Video processing timeout", {
+    fn: "aguardarProcessamentoVideo",
+    videoId,
+    maxAttempts: maxTentativas,
+  });
   throw new Error(
     "Timeout: o vídeo não ficou pronto após 5 minutos. Tente novamente mais tarde."
   );
@@ -114,10 +167,15 @@ async function buscarThumbnailVideo(videoId: string): Promise<string> {
   const token = getAccessToken();
   const url = `${META_API_BASE}/${videoId}?fields=picture,thumbnails&access_token=${token}`;
 
-  const res = await fetch(url);
+  const res = await metaFetchWithRetry(url);
   const json = await res.json();
 
   if (json.error) {
+    logger.error("Failed to fetch video thumbnail", {
+      fn: "buscarThumbnailVideo",
+      videoId,
+      error: extrairErroMeta(json),
+    });
     throw new Error(
       `Erro ao buscar thumbnail do vídeo: ${extrairErroMeta(json)}`
     );
@@ -161,13 +219,26 @@ export async function uploadImage(
   formData.append("filename", new Blob([imgBuffer]), filename);
   formData.append("access_token", token);
 
-  const res = await fetch(endpoint, {
+  logger.info("Uploading image to Meta", {
+    fn: "uploadImage",
+    accountId,
+    filename,
+    sizeBytes: imgBuffer.byteLength,
+  });
+
+  const res = await metaFetchWithRetry(endpoint, {
     method: "POST",
     body: formData,
   });
 
   const json = await res.json();
   if (!res.ok || json.error) {
+    logger.error("Image upload failed", {
+      fn: "uploadImage",
+      accountId,
+      filename,
+      error: extrairErroMeta(json),
+    });
     throw new Error(`Erro ao fazer upload da imagem: ${extrairErroMeta(json)}`);
   }
 
@@ -182,6 +253,13 @@ export async function uploadImage(
   if (!hash) {
     throw new Error("Image hash não encontrado na resposta do Meta");
   }
+
+  logger.info("Image uploaded successfully", {
+    fn: "uploadImage",
+    accountId,
+    filename,
+    imageHash: hash,
+  });
 
   return hash;
 }
@@ -234,15 +312,27 @@ export async function criarCreativeVideo(
   formData.append("object_story_spec", JSON.stringify(objectStorySpec));
   formData.append("access_token", token);
 
-  const res = await fetch(url, {
+  const res = await metaFetchWithRetry(url, {
     method: "POST",
     body: formData,
   });
 
   const json = await res.json();
   if (!res.ok || json.error) {
+    logger.error("Failed to create video creative", {
+      fn: "criarCreativeVideo",
+      accountId,
+      videoId: params.videoId,
+      error: extrairErroMeta(json),
+    });
     throw new Error(`Erro ao criar creative de vídeo: ${extrairErroMeta(json)}`);
   }
+
+  logger.info("Video creative created", {
+    fn: "criarCreativeVideo",
+    accountId,
+    creativeId: json.id,
+  });
 
   return json.id;
 }
@@ -368,15 +458,28 @@ export async function criarCreativeImagem(
   );
   formData.append("access_token", token);
 
-  const res = await fetch(url, {
+  const res = await metaFetchWithRetry(url, {
     method: "POST",
     body: formData,
   });
 
   const json = await res.json();
   if (!res.ok || json.error) {
+    logger.error("Failed to create image creative (multi-placement)", {
+      fn: "criarCreativeImagem",
+      accountId,
+      placementCount: imagensPorPlacement.size,
+      error: extrairErroMeta(json),
+    });
     throw new Error(`Erro ao criar creative de imagem: ${extrairErroMeta(json)}`);
   }
+
+  logger.info("Image creative created (multi-placement)", {
+    fn: "criarCreativeImagem",
+    accountId,
+    creativeId: json.id,
+    placementCount: imagensPorPlacement.size,
+  });
 
   return json.id;
 }
@@ -414,15 +517,26 @@ async function criarCreativeImagemSimples(
   formData.append("object_story_spec", JSON.stringify(objectStorySpec));
   formData.append("access_token", token);
 
-  const res = await fetch(url, {
+  const res = await metaFetchWithRetry(url, {
     method: "POST",
     body: formData,
   });
 
   const json = await res.json();
   if (!res.ok || json.error) {
+    logger.error("Failed to create image creative (simple)", {
+      fn: "criarCreativeImagemSimples",
+      accountId,
+      error: extrairErroMeta(json),
+    });
     throw new Error(`Erro ao criar creative de imagem: ${extrairErroMeta(json)}`);
   }
+
+  logger.info("Image creative created (simple)", {
+    fn: "criarCreativeImagemSimples",
+    accountId,
+    creativeId: json.id,
+  });
 
   return json.id;
 }
@@ -446,7 +560,7 @@ export async function criarAnuncio(
     access_token: token,
   });
 
-  const res = await fetch(url, {
+  const res = await metaFetchWithRetry(url, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: params.toString(),
@@ -454,8 +568,23 @@ export async function criarAnuncio(
 
   const json = await res.json();
   if (!res.ok || json.error) {
+    logger.error("Failed to create ad", {
+      fn: "criarAnuncio",
+      accountId,
+      adsetId,
+      creativeId,
+      error: extrairErroMeta(json),
+    });
     throw new Error(`Erro ao criar anúncio: ${extrairErroMeta(json)}`);
   }
+
+  logger.info("Ad created", {
+    fn: "criarAnuncio",
+    accountId,
+    adsetId,
+    adId: json.id,
+    creativeId,
+  });
 
   return json.id;
 }
@@ -468,10 +597,15 @@ export async function buscarAccountIdDoAdSet(
   const token = getAccessToken();
   const url = `${META_API_BASE}/${adsetId}?fields=account_id&access_token=${token}`;
 
-  const res = await fetch(url);
+  const res = await metaFetchWithRetry(url);
   const json = await res.json();
 
   if (!res.ok || json.error) {
+    logger.error("Failed to fetch account ID from adset", {
+      fn: "buscarAccountIdDoAdSet",
+      adsetId,
+      error: extrairErroMeta(json),
+    });
     throw new Error(
       `Erro ao buscar account do adset: ${extrairErroMeta(json)}`
     );

@@ -5,6 +5,7 @@ import {
   type PresetPeriodo,
   type AnuncioMeta,
 } from "@/lib/meta";
+import { logger } from "@/lib/logger";
 
 // Cache em memória: chave = "accountId:datePreset", valor = { data, timestamp }
 const cache = new Map<
@@ -41,11 +42,20 @@ function filtrarPorCanal(anuncios: AnuncioMeta[], canal: Canal): AnuncioMeta[] {
 }
 
 export async function GET(request: NextRequest) {
+  const startMs = Date.now();
   const { searchParams } = request.nextUrl;
   const accountId = searchParams.get("accountId");
   const datePreset = (searchParams.get("datePreset") ?? "last_30d") as PresetPeriodo;
   const canal = (searchParams.get("canal") ?? "todos") as Canal;
   const forcarAtualizacao = searchParams.get("fresh") === "1";
+
+  logger.info("Request received for anuncios", {
+    fn: "GET /api/meta/anuncios",
+    accountId,
+    datePreset,
+    canal,
+    fresh: forcarAtualizacao,
+  });
 
   if (!accountId) {
     return NextResponse.json(
@@ -90,6 +100,17 @@ export async function GET(request: NextRequest) {
     filtrarPorCanal(filtrarComInvestimento(anuncios), canal)
   );
 
+  const elapsedMs = Date.now() - startMs;
+  logger.info("Anuncios response ready", {
+    fn: "GET /api/meta/anuncios",
+    accountId,
+    datePreset,
+    canal,
+    totalResult: filtrados.length,
+    fromCache,
+    elapsedMs,
+  });
+
   return NextResponse.json({
     data: filtrados,
     total: filtrados.length,
@@ -110,6 +131,12 @@ async function buscarAnunciosDoPeriodoComCache(
     return anuncios;
   } catch (error) {
     const mensagem = error instanceof Error ? error.message : "Erro desconhecido";
+    logger.error("Failed to fetch anuncios for cache", {
+      fn: "buscarAnunciosDoPeriodoComCache",
+      accountId,
+      datePreset,
+      error: mensagem,
+    });
     throw new Error(mensagem);
   }
 }
