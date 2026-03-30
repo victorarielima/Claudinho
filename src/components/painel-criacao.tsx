@@ -79,7 +79,14 @@ function enriquecerLinha(linha: LinhaComStatus): LinhaComStatus {
 }
 
 export function PainelCriacao() {
-  const { brands: brandsCtx, selectedBrand: brandCtx, setSelectedBrand: setBrandCtx, loading: brandLoading } = useBrand();
+  const {
+    brands: brandsCtx,
+    selectedBrand: brandCtx,
+    setSelectedBrand: setBrandCtx,
+    loading: brandLoading,
+    error: brandError,
+    reloadBrands,
+  } = useBrand();
   const [brands, setBrands] = useState<Brand[]>([]);
   const [brandSelecionado, setBrandSelecionado] = useState<Brand | null>(null);
   const [fonteDados, setFonteDados] = useState<FonteDados>("supabase");
@@ -636,6 +643,30 @@ export function PainelCriacao() {
         </div>
       )}
 
+      {!brandLoading && fonteDados === "supabase" && brands.length === 0 && brandError && (
+        <Card className="border-destructive/40 bg-destructive/5">
+          <CardContent className="flex flex-col gap-3 py-6 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-destructive">
+                Falha ao carregar as marcas
+              </p>
+              <p className="text-sm text-muted-foreground">{brandError}</p>
+              <p className="text-xs text-muted-foreground">
+                Em produção, isso normalmente aponta para erro em
+                <span className="mx-1 font-mono">/api/brands</span>
+                ou nas variáveis do Supabase.
+              </p>
+            </div>
+            <button
+              onClick={() => void reloadBrands()}
+              className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-input bg-background px-4 text-sm font-medium shadow-sm transition-all hover:bg-accent hover:text-accent-foreground active:scale-[0.98]"
+            >
+              Tentar novamente
+            </button>
+          </CardContent>
+        </Card>
+      )}
+
       {jaCarregou ? (
         <section>
           <div className="mb-4 flex items-center gap-3 flex-wrap">
@@ -735,7 +766,7 @@ export function PainelCriacao() {
             }}
             aoRevalidarVideo={revalidarVideo} serviceAccountEmail={serviceAccountEmail} selecionados={selecionados} aoAlternarSelecao={alternarSelecao} compacto={compacto} />
         </section>
-      ) : !erro ? (
+      ) : !erro && !(fonteDados === "supabase" && brands.length === 0 && brandError) ? (
         <Card className="border-dashed">
           <CardContent className="flex h-44 flex-col items-center justify-center gap-3 text-center">
             <div className="rounded-full bg-muted p-3">
@@ -744,7 +775,9 @@ export function PainelCriacao() {
               </svg>
             </div>
             <p className="text-sm font-medium">Pronto para começar</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">Carregando anúncios...</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {brandLoading ? "Carregando marcas..." : "Carregando anúncios..."}
+            </p>
           </CardContent>
         </Card>
       ) : null}
