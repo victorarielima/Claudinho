@@ -82,6 +82,9 @@ function gerarAdName(nomeArquivo: string): string {
 
 import { CTA_OPTIONS } from "@/lib/constants";
 
+const DESCRICAO_PADRAO_VINHO = "Beba com Moderação!";
+const CTA_PADRAO_VINHO = "SHOP_NOW";
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -108,8 +111,8 @@ export function FormularioLoteVideos({
 
   // ─── Form: shared fields ───────────────────────────────────
   const [textoPrincipal, setTextoPrincipal] = useState("");
-  const [descricao, setDescricao] = useState("");
-  const [cta, setCta] = useState("");
+  const [descricao, setDescricao] = useState(DESCRICAO_PADRAO_VINHO);
+  const [cta, setCta] = useState(CTA_PADRAO_VINHO);
   const [linkCampanha, setLinkCampanha] = useState("");
 
   // ─── Form: individual ads ──────────────────────────────────
@@ -151,8 +154,8 @@ export function FormularioLoteVideos({
     setCampanhaId("");
     setAdSetId("");
     setTextoPrincipal("");
-    setDescricao("");
-    setCta("");
+    setDescricao(DESCRICAO_PADRAO_VINHO);
+    setCta(CTA_PADRAO_VINHO);
     setLinkCampanha("");
     setCampanhas([]);
     setAdsets([]);

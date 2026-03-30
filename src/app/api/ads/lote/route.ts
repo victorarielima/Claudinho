@@ -32,6 +32,8 @@ export async function POST(request: NextRequest) {
     }
 
     const body: LoteBody = await request.json();
+    const descricaoPadrao = body.descricao?.trim() || "Beba com Moderação!";
+    const ctaPadrao = body.cta?.trim() || "SHOP_NOW";
 
     if (!body.brandId) {
       return NextResponse.json(
@@ -72,8 +74,8 @@ export async function POST(request: NextRequest) {
         ad_name: item.adName,
         titulo: item.titulo,
         texto_principal: body.textoPrincipal,
-        descricao: body.descricao,
-        cta: body.cta,
+        descricao: descricaoPadrao,
+        cta: ctaPadrao,
         link_campanha: body.linkCampanha,
         assets: [
           {

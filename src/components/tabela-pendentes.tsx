@@ -60,6 +60,7 @@ interface TabelaPendentesProps {
   selecionados: Set<number>;
   aoAlternarSelecao: (indiceLinha: number) => void;
   compacto?: boolean;
+  aoMostrarDetalhes?: () => void;
 }
 
 function extrairFileIdCliente(driveUrl: string): string | null {
@@ -318,6 +319,7 @@ function TabelaCompacta({
   selecionados,
   aoAlternarSelecao,
   setPreviewAberto,
+  aoMostrarDetalhes,
 }: {
   linhas: LinhaComStatus[];
   aoSubir: (linha: LinhaComStatus) => void;
@@ -328,6 +330,7 @@ function TabelaCompacta({
   selecionados: Set<number>;
   aoAlternarSelecao: (indiceLinha: number) => void;
   setPreviewAberto: (indiceLinha: number) => void;
+  aoMostrarDetalhes: () => void;
 }) {
   return (
     <div className="rounded-lg border overflow-hidden">
@@ -351,6 +354,9 @@ function TabelaCompacta({
             const isImage = linha.tipo === "image";
             const videoInacessivel = !isImage && linha.statusVideo === "inacessivel";
             const bloqueada = linha.prontoMeta === false;
+            const totalAvisos = linha.avisosMeta?.length ?? 0;
+            const totalBloqueios = linha.bloqueiosMeta?.length ?? 0;
+            const temAlertas = videoInacessivel || bloqueada || totalAvisos > 0 || totalBloqueios > 0;
             const selecionada = selecionados.has(linha.indiceLinha);
             const podeSelecionar = !concluido && !processandoLinha && !videoInacessivel && !bloqueada;
             const podeEditar = (linha.statusProcessamento === "pendente" || linha.statusProcessamento === "erro") && linha.adId;
@@ -362,6 +368,8 @@ function TabelaCompacta({
                   ? "bg-green-50/30"
                   : temErro
                     ? "bg-destructive/5"
+                    : temAlertas
+                      ? "bg-amber-50/40"
                     : selecionada
                       ? "bg-primary/5"
                       : "hover:bg-muted/30"
@@ -393,6 +401,21 @@ function TabelaCompacta({
                       <span className="font-medium truncate" title={linha.adName}>
                         {linha.adName}
                       </span>
+                    )}
+                    {temAlertas && (
+                      <button
+                        type="button"
+                        onClick={aoMostrarDetalhes}
+                        className="shrink-0 inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-800 transition-colors hover:bg-amber-100"
+                        title="Abrir modo detalhado para ver alertas"
+                      >
+                        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                        {videoInacessivel
+                          ? "Video sem acesso"
+                          : totalBloqueios > 0
+                            ? `${totalBloqueios} bloqueio${totalBloqueios > 1 ? "s" : ""}`
+                            : `${totalAvisos} aviso${totalAvisos > 1 ? "s" : ""}`}
+                      </button>
                     )}
                   </div>
                 </td>
@@ -448,6 +471,16 @@ function TabelaCompacta({
                             </svg>
                           </button>
                         )}
+                        {temAlertas && (
+                          <button
+                            type="button"
+                            onClick={aoMostrarDetalhes}
+                            className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800 transition-all hover:bg-amber-100 active:scale-[0.98]"
+                            title="Expandir para ver alertas"
+                          >
+                            Ver
+                          </button>
+                        )}
                         <button
                           onClick={() => aoSubir(linha)}
                           disabled={processando || processandoLinha || videoInacessivel || bloqueada}
@@ -492,6 +525,7 @@ export function TabelaPendentes({
   selecionados,
   aoAlternarSelecao,
   compacto = false,
+  aoMostrarDetalhes,
 }: TabelaPendentesProps) {
   const [previewAberto, setPreviewAberto] = useState<number | null>(null);
 
@@ -558,6 +592,7 @@ export function TabelaPendentes({
           selecionados={selecionados}
           aoAlternarSelecao={aoAlternarSelecao}
           setPreviewAberto={setPreviewAberto}
+          aoMostrarDetalhes={aoMostrarDetalhes ?? (() => {})}
         />
       ) : (
         <div className="flex flex-col gap-4">

@@ -768,7 +768,13 @@ export function PainelCriacao() {
                 // silently fail — user can try again
               }
             }}
-            aoRevalidarVideo={revalidarVideo} serviceAccountEmail={serviceAccountEmail} selecionados={selecionados} aoAlternarSelecao={alternarSelecao} compacto={compacto} />
+            aoRevalidarVideo={revalidarVideo}
+            serviceAccountEmail={serviceAccountEmail}
+            selecionados={selecionados}
+            aoAlternarSelecao={alternarSelecao}
+            compacto={compacto}
+            aoMostrarDetalhes={() => setCompacto(false)}
+          />
         </section>
       ) : !erro && !(fonteDados === "supabase" && brands.length === 0 && brandError) ? (
         <Card className="border-dashed">
