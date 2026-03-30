@@ -64,6 +64,10 @@ function enriquecerLinha(linha: LinhaComStatus): LinhaComStatus {
     linkVideo: linha.linkVideo,
     linkAnuncio: linha.linkAnuncio,
     imageAssets: linha.imageAssets,
+    texto_principal: linha.textoPrincipal,
+    titulo: linha.titulo,
+    descricao: linha.descricao,
+    cta: linha.cta,
   });
 
   return {
