@@ -264,7 +264,7 @@ function CardVideo({
       }`}
     >
       {/* Thumbnail — uniform 4:5 cards, object-cover for all. Badge shows format. */}
-      <div className="relative w-full aspect-[4/5] bg-muted overflow-hidden">
+      <div className="relative w-full aspect-square bg-muted overflow-hidden">
         {/* Fallback always behind */}
         <div className="absolute inset-0 flex items-center justify-center">
           <Video className="size-8 text-muted-foreground/20" />
@@ -341,7 +341,7 @@ function CardVideo({
 
 function GradeEsqueleto() {
   return (
-    <div className="grid auto-rows-max grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3">
+    <div className="grid auto-rows-max grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
       {Array.from({ length: 12 }).map((_, i) => (
         <div key={i} className="overflow-hidden rounded-lg border">
           <Skeleton className="aspect-video w-full" />
@@ -375,6 +375,7 @@ export function DialogExploradorVideos({
   const [incluirSubpastas, setIncluirSubpastas] = useState(true);
   const [atalhoNovos, setAtalhoNovos] = useState(false);
   const [busca, setBusca] = useState("");
+  const [filtroMarca, setFiltroMarca] = useState<"todos" | "evino" | "grandcru">("todos");
 
   // Selection
   const [selecionados, setSelecionados] = useState<Map<string, VideoDrive>>(new Map());
@@ -450,6 +451,15 @@ export function DialogExploradorVideos({
       lista = lista.filter((v) => new Date(v.modifiedTime) >= corte);
     }
 
+    // Filter by brand tag
+    if (filtroMarca !== "todos") {
+      lista = lista.filter((v) => {
+        const texto = [v.nome, v.pastaOrigem].join(" ").toUpperCase();
+        if (filtroMarca === "evino") return texto.includes("_EV_") || texto.includes("EVINO");
+        return texto.includes("_GC_") || texto.includes("GRANDCRU") || texto.includes("GRAND CRU");
+      });
+    }
+
     // Filter by search
     if (busca.trim()) {
       const termo = busca.trim().toLowerCase();
@@ -461,7 +471,7 @@ export function DialogExploradorVideos({
     }
 
     return lista;
-  }, [indice, pastaSelecionada, filtroData, incluirSubpastas, atalhoNovos, busca]);
+  }, [indice, pastaSelecionada, filtroData, incluirSubpastas, atalhoNovos, busca, filtroMarca]);
 
   // Video count per folder (for sidebar badges)
   const contagensPorPasta = useMemo(() => {
@@ -509,7 +519,7 @@ export function DialogExploradorVideos({
     <>
       <Dialog open={aberto} onOpenChange={(open) => !open && aoFechar()}>
         <DialogContent
-          className="flex max-h-[90vh] h-[90vh] w-[95vw] max-w-[95vw] sm:max-w-[95vw] flex-col gap-0 p-0"
+          className="flex max-h-[90vh] h-[min(90vh,620px)] w-[min(95vw,1300px)] max-w-[min(95vw,1300px)] sm:max-w-[min(95vw,1300px)] flex-col gap-0 p-0"
           showCloseButton={false}
         >
           {/* ── Top bar ───────────────────────────────────────────────── */}
@@ -585,6 +595,27 @@ export function DialogExploradorVideos({
                     <span className="text-muted-foreground">Selecione uma pasta</span>
                   )}
                 </nav>
+
+                <div className="flex items-center gap-0.5 rounded-md border bg-muted/40 p-0.5">
+                  {([
+                    { valor: "todos", rotulo: "Todos" },
+                    { valor: "evino", rotulo: "Evino" },
+                    { valor: "grandcru", rotulo: "Grand Cru" },
+                  ] as const).map((opt) => (
+                    <button
+                      key={opt.valor}
+                      type="button"
+                      onClick={() => setFiltroMarca(opt.valor)}
+                      className={`rounded px-2.5 py-1 text-xs font-medium transition-all ${
+                        filtroMarca === opt.valor
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {opt.rotulo}
+                    </button>
+                  ))}
+                </div>
 
                 <div className="relative">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
@@ -666,7 +697,7 @@ export function DialogExploradorVideos({
                       </p>
                     </div>
                   ) : (
-                    <div className="grid auto-rows-max grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3">
+                    <div className="grid auto-rows-max grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
                       {videosFiltrados.map((video) => (
                         <CardVideo
                           key={video.id}

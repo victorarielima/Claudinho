@@ -222,7 +222,7 @@ export function PainelCriacao() {
       statusAutomacao: ad.status,
       adIdGerado: ad.meta_ad_id ?? "",
       pageId: "",
-      accountId: ad.meta_account_id ?? "",
+      accountId: (ad.meta_account_id ?? "").replace("act_", ""),
       data: new Date(ad.created_at).toLocaleDateString("pt-BR"),
       statusProcessamento: ad.status === "concluido" ? "concluido"
         : ad.status === "processando" && (Date.now() - new Date(ad.updated_at).getTime() > STALE_PROCESSING_MS)
@@ -284,7 +284,7 @@ export function PainelCriacao() {
               : l.statusAutomacao.startsWith("Erro") ? "erro" as const
               : "pendente" as const,
             adIdCriado: l.statusAutomacao === "Concluído" ? l.adIdGerado : undefined,
-            accountId: l.accountId || "",
+            accountId: (l.accountId || "").replace("act_", ""),
             mensagemErro: l.statusAutomacao.startsWith("Erro") ? l.statusAutomacao.replace("Erro: ", "") : undefined,
             statusVideo: tipo === "image" ? "acessivel" as const : "nao_verificado" as const,
             tipo,
@@ -351,59 +351,113 @@ export function PainelCriacao() {
 
     setProcessando(true);
 
-    setLinhas((prev) =>
-      prev.map((l) =>
-        l.indiceLinha === linha.indiceLinha
-          ? { ...l, statusProcessamento: "processando" as const }
-          : l
-      )
-    );
+    const atualizarLinha = (update: Partial<LinhaComStatus>) =>
+      setLinhas((prev) =>
+        prev.map((l) =>
+          l.indiceLinha === linha.indiceLinha ? { ...l, ...update } : l
+        )
+      );
+
+    atualizarLinha({ statusProcessamento: "processando" });
 
     try {
-      const payload = linha.adId
-        ? { adId: linha.adId }
-        : {
-            indiceLinha: linha.indiceLinha,
-            aba: abaLegada,
-            adSetId: linha.adSetId,
-            adName: linha.adName,
-            textoPrincipal: linha.textoPrincipal,
-            titulo: linha.titulo,
-            descricao: linha.descricao,
-            cta: linha.cta,
-            linkAnuncio: linha.linkAnuncio,
-            linkVideo: linha.linkVideo,
-            pageId: linha.pageId,
-            tipo: linha.tipo,
-            tipoPlanilha: linha.tipoPlanilha,
-            imageAssets: linha.imageAssets,
-          };
+      // --- Fluxo legado (planilha): síncrono, sem polling ---
+      if (!linha.adId) {
+        const payload = {
+          indiceLinha: linha.indiceLinha,
+          aba: abaLegada,
+          adSetId: linha.adSetId,
+          adName: linha.adName,
+          textoPrincipal: linha.textoPrincipal,
+          titulo: linha.titulo,
+          descricao: linha.descricao,
+          cta: linha.cta,
+          linkAnuncio: linha.linkAnuncio,
+          linkVideo: linha.linkVideo,
+          pageId: linha.pageId,
+          tipo: linha.tipo,
+          tipoPlanilha: linha.tipoPlanilha,
+          imageAssets: linha.imageAssets,
+        };
 
-      const res = await fetch("/api/meta/criar-anuncio", {
+        const res = await fetch("/api/meta/criar-anuncio", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.erro ?? "Erro ao criar anúncio");
+
+        atualizarLinha({
+          statusProcessamento: "concluido",
+          adIdCriado: json.adId,
+          accountId: json.accountId || "",
+        });
+        return;
+      }
+
+      // --- Fluxo novo (Supabase): iniciar + polling ---
+      const resInicio = await fetch("/api/meta/criar-anuncio", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ adId: linha.adId }),
       });
+      const jsonInicio = await resInicio.json();
+      if (!resInicio.ok) throw new Error(jsonInicio.erro ?? "Erro ao iniciar upload");
 
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.erro ?? "Erro ao criar anúncio");
+      // Se o fluxo legado retornou sucesso direto (não deveria, mas por segurança)
+      if (jsonInicio.sucesso || jsonInicio.status === "concluido") {
+        atualizarLinha({
+          statusProcessamento: "concluido",
+          adIdCriado: jsonInicio.adId ?? jsonInicio.meta_ad_id,
+          accountId: jsonInicio.accountId || "",
+        });
+        return;
+      }
 
-      setLinhas((prev) =>
-        prev.map((l) =>
-          l.indiceLinha === linha.indiceLinha
-            ? { ...l, statusProcessamento: "concluido" as const, adIdCriado: json.adId, accountId: json.accountId || "" }
-            : l
-        )
-      );
+      // Polling do /api/meta/processar até completar ou falhar
+      const MAX_POLLS = 60; // ~5 minutos com intervalo de 5s
+      const POLL_INTERVAL_MS = 5_000;
+
+      for (let poll = 0; poll < MAX_POLLS; poll++) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+
+        const resPoll = await fetch("/api/meta/processar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ adId: linha.adId }),
+        });
+        const jsonPoll = await resPoll.json();
+
+        if (jsonPoll.step === "completed" || jsonPoll.status === "concluido") {
+          atualizarLinha({
+            statusProcessamento: "concluido",
+            adIdCriado: jsonPoll.meta_ad_id ?? jsonPoll.adId,
+            accountId: jsonPoll.accountId || "",
+          });
+          return;
+        }
+
+        if (jsonPoll.step === "error" || jsonPoll.status === "erro") {
+          throw new Error(jsonPoll.message ?? jsonPoll.erro ?? "Erro ao processar anúncio na Meta");
+        }
+
+        // Still processing — update progress hint in UI
+        if (jsonPoll.progress) {
+          atualizarLinha({
+            statusProcessamento: "processando",
+            mensagemErro: `Processando: ${jsonPoll.progress}`,
+          });
+        }
+      }
+
+      throw new Error("Timeout: o anúncio não foi processado em 5 minutos. Tente novamente.");
     } catch (e) {
       const mensagem = e instanceof Error ? e.message : "Erro desconhecido";
-      setLinhas((prev) =>
-        prev.map((l) =>
-          l.indiceLinha === linha.indiceLinha
-            ? { ...l, statusProcessamento: "erro" as const, mensagemErro: mensagem }
-            : l
-        )
-      );
+      atualizarLinha({
+        statusProcessamento: "erro",
+        mensagemErro: mensagem,
+      });
     } finally {
       setProcessando(false);
     }
@@ -518,9 +572,9 @@ export function PainelCriacao() {
   };
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-6">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Criação de Anúncios</h1>
           <p className="mt-1 text-sm text-muted-foreground max-w-2xl">
@@ -615,7 +669,7 @@ export function PainelCriacao() {
         </div>
 
         {jaCarregou && total > 0 && (
-          <div className="flex items-center gap-4 text-sm">
+          <div className="flex items-center gap-x-4 gap-y-1 flex-wrap text-sm">
             <span className="text-muted-foreground">{total} anúncio{total !== 1 ? "s" : ""}</span>
             {selecionados.size > 0 && <span className="flex items-center gap-1.5 text-primary"><span className="h-2 w-2 rounded-full bg-primary" />{selecionados.size} selecionado{selecionados.size !== 1 ? "s" : ""}</span>}
             {totalDisponiveis > 0 && <span className="flex items-center gap-1.5 text-blue-700"><span className="h-2 w-2 rounded-full bg-blue-500" />{totalDisponiveis} pronto{totalDisponiveis !== 1 ? "s" : ""}</span>}

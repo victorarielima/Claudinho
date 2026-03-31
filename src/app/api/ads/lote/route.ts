@@ -5,6 +5,8 @@ import { criarAd, type CriarAdInput } from "@/lib/db";
 interface AnuncioItem {
   adName: string;
   titulo: string;
+  textoPrincipal?: string;
+  linkCampanha?: string;
   driveUrl: string;
   videoId?: string;
   thumbnailLink?: string;
@@ -73,10 +75,10 @@ export async function POST(request: NextRequest) {
         ad_set_id: body.adSetId,
         ad_name: item.adName,
         titulo: item.titulo,
-        texto_principal: body.textoPrincipal,
+        texto_principal: item.textoPrincipal || body.textoPrincipal,
         descricao: descricaoPadrao,
         cta: ctaPadrao,
-        link_campanha: body.linkCampanha,
+        link_campanha: item.linkCampanha || body.linkCampanha,
         assets: [
           {
             placement: "video_principal",

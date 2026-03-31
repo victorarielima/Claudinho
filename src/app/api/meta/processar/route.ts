@@ -19,6 +19,7 @@ import {
 } from "@/lib/db";
 import { normalizarPlacementImagem } from "@/lib/ad-media";
 import { getSupabase } from "@/lib/supabase";
+import { logger } from "@/lib/logger";
 
 // --- Meta API helpers (video upload without polling, status check) ---
 
@@ -60,7 +61,8 @@ function extrairErroMeta(json: Record<string, unknown>): string {
 async function uploadVideoSemAguardar(
   accountId: string,
   videoBuffer: Buffer,
-  fileName: string
+  fileName: string,
+  mimeType: string = "video/mp4"
 ): Promise<string> {
   const token = getAccessToken();
   const url = `${META_API_BASE}/${accountId}/advideos`;
@@ -70,7 +72,7 @@ async function uploadVideoSemAguardar(
     videoBuffer.byteOffset,
     videoBuffer.byteOffset + videoBuffer.byteLength
   ) as ArrayBuffer;
-  const blob = new Blob([arrayBuffer], { type: "video/mp4" });
+  const blob = new Blob([arrayBuffer], { type: mimeType });
   formData.append("source", blob, fileName);
   formData.append("title", fileName);
   formData.append("access_token", token);
@@ -145,6 +147,7 @@ interface ProcessarResponse {
   status: string;
   adId: string;
   meta_ad_id?: string;
+  accountId?: string;
   progress?: string;
   message?: string;
 }
@@ -257,6 +260,12 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const mensagem = error instanceof Error ? error.message : "Erro desconhecido";
 
+    logger.error("Erro no pipeline de processamento", {
+      fn: "processar",
+      adId,
+      error: mensagem,
+    });
+
     try {
       await atualizarStatusAd(
         adId,
@@ -264,8 +273,13 @@ export async function POST(request: NextRequest) {
         { error_message: mensagem },
         userId ?? "system"
       );
-    } catch {
-      // Ignora erro ao marcar no banco
+    } catch (dbError) {
+      logger.error("Falha ao gravar erro no banco — ad pode ficar preso em 'processando'", {
+        fn: "processar",
+        adId,
+        originalError: mensagem,
+        dbError: dbError instanceof Error ? dbError.message : "Erro DB desconhecido",
+      });
     }
 
     return NextResponse.json(
@@ -286,11 +300,13 @@ async function stepUploadAssets(
   ad: Ad,
   accountId: string,
   assets: AdAsset[],
-  userId: string | null
+  _userId: string | null
 ): Promise<NextResponse> {
+  logger.info("Step A: Upload assets", { fn: "stepUploadAssets", adId: ad.id, type: ad.type, accountId });
+
   if (ad.type === "video") {
     const videoAsset = assets.find((a) => a.asset_type === "video");
-    if (!videoAsset) throw new Error("Asset de video nao encontrado");
+    if (!videoAsset) throw new Error("Asset de video nao encontrado no banco. Verifique se o anuncio foi criado corretamente.");
 
     // Idempotency: skip if already uploaded
     if (videoAsset.meta_asset_id) {
@@ -301,8 +317,19 @@ async function stepUploadAssets(
       } satisfies ProcessarResponse);
     }
 
-    const arquivo = await baixarArquivoDrive(videoAsset.asset_url);
-    const videoId = await uploadVideoSemAguardar(accountId, arquivo.buffer, arquivo.fileName);
+    if (!videoAsset.asset_url || !videoAsset.asset_url.includes("drive.google.com")) {
+      throw new Error(`URL de video invalida: '${videoAsset.asset_url}'. Esperado um link do Google Drive.`);
+    }
+
+    let arquivo;
+    try {
+      arquivo = await baixarArquivoDrive(videoAsset.asset_url);
+    } catch (driveError) {
+      const msg = driveError instanceof Error ? driveError.message : "Erro desconhecido";
+      throw new Error(`Falha ao baixar video do Drive: ${msg}. Verifique se o arquivo existe e esta compartilhado.`);
+    }
+
+    const videoId = await uploadVideoSemAguardar(accountId, arquivo.buffer, arquivo.fileName, arquivo.mimeType);
     await atualizarMetaAssetId(videoAsset.id, videoId);
 
     return NextResponse.json({
@@ -313,16 +340,26 @@ async function stepUploadAssets(
   } else {
     // Image flow: upload all images that don't have meta_asset_id yet
     const imageAssets = assets.filter((a) => a.asset_type === "image");
-    if (imageAssets.length === 0) throw new Error("Nenhum asset de imagem encontrado");
+    if (imageAssets.length === 0) throw new Error("Nenhum asset de imagem encontrado no banco. Verifique se o anuncio foi criado corretamente.");
 
-    await Promise.all(
-      imageAssets
-        .filter((asset) => !asset.meta_asset_id) // Idempotency: skip already uploaded
-        .map(async (asset) => {
-          const hash = await uploadImage(accountId, asset.asset_url);
-          await atualizarMetaAssetId(asset.id, hash);
-        })
+    const pendentes = imageAssets.filter((asset) => !asset.meta_asset_id);
+    const resultados = await Promise.allSettled(
+      pendentes.map(async (asset) => {
+        const hash = await uploadImage(accountId, asset.asset_url);
+        await atualizarMetaAssetId(asset.id, hash);
+      })
     );
+
+    const falhas = resultados
+      .map((r, i) => r.status === "rejected" ? `${pendentes[i].placement}: ${r.reason instanceof Error ? r.reason.message : "erro"}` : null)
+      .filter(Boolean);
+
+    if (falhas.length > 0 && falhas.length === pendentes.length) {
+      throw new Error(`Falha ao enviar todas as imagens: ${falhas.join("; ")}`);
+    }
+    if (falhas.length > 0) {
+      logger.warn("Algumas imagens falharam no upload", { fn: "stepUploadAssets", adId: ad.id, falhas });
+    }
 
     return NextResponse.json({
       step: "uploaded",
@@ -340,6 +377,8 @@ async function stepCriarCreative(
   assets: AdAsset[],
   userId: string | null
 ): Promise<NextResponse> {
+  logger.info("Step C: Criar creative", { fn: "stepCriarCreative", adId: ad.id, type: ad.type });
+
   // Idempotency: skip if already created
   if (ad.meta_creative_id) {
     return NextResponse.json({
@@ -350,16 +389,16 @@ async function stepCriarCreative(
   }
 
   const brand = await buscarBrand(ad.brand_id);
-  if (!brand) throw new Error("Brand nao encontrado");
+  if (!brand) throw new Error(`Brand '${ad.brand_id}' nao encontrado. Verifique se a marca ainda existe.`);
 
   const pageId = resolverPageId(brand.meta_page_id, accountId);
-  if (!pageId) throw new Error("Page ID nao encontrado. Configure na brand ou no .env");
+  if (!pageId) throw new Error(`Page ID nao encontrado para a conta ${accountId}. Configure na brand ou nas variaveis de ambiente.`);
 
   let creativeId: string;
 
   if (ad.type === "video") {
     const videoAsset = assets.find((a) => a.asset_type === "video");
-    if (!videoAsset?.meta_asset_id) throw new Error("Video nao foi enviado para o Meta");
+    if (!videoAsset?.meta_asset_id) throw new Error("Video nao foi enviado para o Meta. Tente subir novamente.");
 
     creativeId = await criarCreativeVideo(accountId, {
       pageId,
@@ -372,7 +411,6 @@ async function stepCriarCreative(
       name: `Creative - ${ad.ad_name}`,
     });
   } else {
-    const imageAssets = assets.filter((a) => a.asset_type === "image");
     // Re-fetch assets from DB to get updated meta_asset_id values
     const freshAssets = await fetchFreshAssets(ad.id);
     const freshImageAssets = freshAssets.filter((a) => a.asset_type === "image");
@@ -422,6 +460,8 @@ async function stepCriarAnuncio(
   accountId: string,
   userId: string | null
 ): Promise<NextResponse> {
+  logger.info("Step D: Criar anuncio no Meta", { fn: "stepCriarAnuncio", adId: ad.id, creativeId: ad.meta_creative_id });
+
   // Idempotency: skip if already created
   if (ad.meta_ad_id) {
     return NextResponse.json({
@@ -433,11 +473,11 @@ async function stepCriarAnuncio(
   }
 
   if (!ad.meta_creative_id) {
-    throw new Error("Creative ID nao encontrado");
+    throw new Error("Creative ID nao encontrado. O passo anterior (criar creative) pode ter falhado.");
   }
 
   if (!ad.ad_set_id) {
-    throw new Error("Ad Set ID e obrigatorio");
+    throw new Error("Ad Set ID e obrigatorio para criar o anuncio na Meta.");
   }
 
   const metaAdId = await criarAnuncio(accountId, ad.ad_set_id, ad.ad_name, ad.meta_creative_id);
@@ -454,11 +494,19 @@ async function stepCriarAnuncio(
     userId ?? "system"
   );
 
+  logger.info("Anuncio criado com sucesso na Meta", {
+    fn: "stepCriarAnuncio",
+    adId: ad.id,
+    metaAdId,
+    accountId,
+  });
+
   return NextResponse.json({
     step: "completed",
     status: "concluido",
     adId: ad.id,
     meta_ad_id: metaAdId,
+    accountId: accountId.replace("act_", ""),
   } satisfies ProcessarResponse);
 }
 

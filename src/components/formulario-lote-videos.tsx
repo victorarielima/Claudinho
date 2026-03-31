@@ -50,9 +50,13 @@ interface AnuncioItem {
   videoId: string;
   adName: string;
   titulo: string;
+  textoPrincipal: string;
+  linkCampanha: string;
   driveUrl: string;
   thumbnailLink: string | null;
   nomeArquivo: string;
+  /** true se o usuário editou o adName manualmente */
+  nomeEditado?: boolean;
 }
 
 export interface FormularioLoteVideosProps {
@@ -66,18 +70,66 @@ export interface FormularioLoteVideosProps {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function gerarAdName(nomeArquivo: string): string {
-  const semExtensao = nomeArquivo.replace(/\.[^.]+$/, "");
-  const limpo = semExtensao
+/**
+ * Extrai o destino (PRODUCT, CAMPAIGN, etc.) a partir da URL de campanha.
+ * Ex: evino.com.br/product/... → PRODUCT, evino.com.br/campaign/... → CAMPAIGN
+ */
+function extrairDestinoDaUrl(url: string): string {
+  if (!url) return "";
+  try {
+    const pathname = new URL(url).pathname.toLowerCase();
+    if (pathname.includes("/product")) return "PRODUCT";
+    if (pathname.includes("/campaign")) return "CAMPAIGN";
+    if (pathname.includes("/category") || pathname.includes("/categoria")) return "CATEGORY";
+    if (pathname.includes("/landing")) return "LANDING";
+    return "LINK";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Retorna a semana ISO e o ano no formato W{NN}-{AAAA}.
+ */
+function semanaAno(): string {
+  const now = new Date();
+  const jan4 = new Date(now.getFullYear(), 0, 4);
+  const dayOfYear = Math.floor(
+    (now.getTime() - new Date(now.getFullYear(), 0, 1).getTime()) / 86400000
+  ) + 1;
+  const weekNum = Math.ceil((dayOfYear + jan4.getDay()) / 7);
+  return `W${String(weekNum).padStart(2, "0")}-${now.getFullYear()}`;
+}
+
+/**
+ * Limpa o nome do arquivo para usar como miolo do ad name.
+ * Remove extensão, caracteres especiais, e limita tamanho.
+ */
+function limparMiolo(nomeArquivo: string): string {
+  return nomeArquivo
+    .replace(/\.[^.]+$/, "")
     .replace(/[^a-zA-Z0-9_-]/g, "-")
     .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
     .substring(0, 50);
-  const mes = new Date()
-    .toLocaleString("pt-BR", { month: "short" })
-    .toUpperCase()
-    .replace(".", "");
-  const ano = new Date().getFullYear();
-  return `VID-${limpo}-${mes}${ano}`;
+}
+
+/**
+ * Gera o ad name seguindo o padrão:
+ * VIDEO-{DESTINO}-{MIOLO}-W{NN}-{AAAA}
+ *
+ * Se destino não for identificável, omite essa parte.
+ */
+function gerarAdName(nomeArquivo: string, linkCampanha?: string): string {
+  const miolo = limparMiolo(nomeArquivo);
+  const destino = linkCampanha ? extrairDestinoDaUrl(linkCampanha) : "";
+  const semana = semanaAno();
+
+  const partes = ["VIDEO"];
+  if (destino) partes.push(destino);
+  partes.push(miolo, semana);
+
+  return partes.join("-");
 }
 
 import { CTA_OPTIONS } from "@/lib/constants";
@@ -110,10 +162,8 @@ export function FormularioLoteVideos({
   const [adSetId, setAdSetId] = useState("");
 
   // ─── Form: shared fields ───────────────────────────────────
-  const [textoPrincipal, setTextoPrincipal] = useState("");
   const [descricao, setDescricao] = useState(DESCRICAO_PADRAO_VINHO);
   const [cta, setCta] = useState(CTA_PADRAO_VINHO);
-  const [linkCampanha, setLinkCampanha] = useState("");
 
   // ─── Form: individual ads ──────────────────────────────────
   const [anuncios, setAnuncios] = useState<AnuncioItem[]>([]);
@@ -144,6 +194,8 @@ export function FormularioLoteVideos({
         videoId: v.id,
         adName: gerarAdName(v.nome),
         titulo: v.nome.replace(/\.[^.]+$/, ""),
+        textoPrincipal: "",
+        linkCampanha: "",
         driveUrl: v.driveUrl,
         thumbnailLink: v.thumbnailLink,
         nomeArquivo: v.nome,
@@ -153,10 +205,8 @@ export function FormularioLoteVideos({
     setBrandId("");
     setCampanhaId("");
     setAdSetId("");
-    setTextoPrincipal("");
     setDescricao(DESCRICAO_PADRAO_VINHO);
     setCta(CTA_PADRAO_VINHO);
-    setLinkCampanha("");
     setCampanhas([]);
     setAdsets([]);
     setMensagemErro(null);
@@ -194,6 +244,31 @@ export function FormularioLoteVideos({
     [brands, carregarCampanhas]
   );
 
+  // ─── Auto-select brand from video tags (_EV_ / _GC_) ───────
+  useEffect(() => {
+    if (!aberto || brands.length === 0 || videos.length === 0 || brandId) return;
+
+    const ehEV = (t: string) => t.includes("_EV_") || t.includes("_EV ") || t.includes(" EV_") || t.includes("EVINO");
+    const ehGC = (t: string) => t.includes("_GC_") || t.includes("_GC ") || t.includes(" GC_") || t.includes("GRAND CRU") || t.includes("GRANDCRU");
+
+    // Checar tag no nome do arquivo e na pasta de origem
+    const textos = videos.map((v) =>
+      [v.nome, v.pastaOrigem].join(" ").toUpperCase()
+    );
+
+    const algumEV = textos.some(ehEV);
+    const algumGC = textos.some(ehGC);
+
+    // Só auto-seleciona se não houver conflito (não mistura EV com GC)
+    if (algumEV && !algumGC) {
+      const brand = brands.find((b) => b.name.toLowerCase().includes("evino"));
+      if (brand) handleBrandChange(brand.id);
+    } else if (algumGC && !algumEV) {
+      const brand = brands.find((b) => b.name.toLowerCase().includes("grand"));
+      if (brand) handleBrandChange(brand.id);
+    }
+  }, [aberto, brands, videos, brandId, handleBrandChange]);
+
   // ─── Load adsets when campanha changes ─────────────────────
   const carregarAdsets = useCallback(async (campaignId: string) => {
     setAdsets([]);
@@ -222,9 +297,18 @@ export function FormularioLoteVideos({
 
   // ─── Update individual ad ──────────────────────────────────
   const atualizarAnuncio = useCallback(
-    (videoId: string, campo: "adName" | "titulo", valor: string) => {
+    (videoId: string, campo: "adName" | "titulo" | "textoPrincipal" | "linkCampanha", valor: string) => {
       setAnuncios((prev) =>
-        prev.map((a) => (a.videoId === videoId ? { ...a, [campo]: valor } : a))
+        prev.map((a) => {
+          if (a.videoId !== videoId) return a;
+          const atualizado = { ...a, [campo]: valor };
+          if (campo === "adName") atualizado.nomeEditado = true;
+          // Regenerar ad name quando link individual muda (se não editado manualmente)
+          if (campo === "linkCampanha" && !a.nomeEditado) {
+            atualizado.adName = gerarAdName(a.nomeArquivo, valor);
+          }
+          return atualizado;
+        })
       );
     },
     []
@@ -233,6 +317,13 @@ export function FormularioLoteVideos({
   const removerAnuncio = useCallback((videoId: string) => {
     setAnuncios((prev) => prev.filter((a) => a.videoId !== videoId));
   }, []);
+
+  const replicarCampo = useCallback(
+    (campo: "textoPrincipal" | "linkCampanha", valor: string) => {
+      setAnuncios((prev) => prev.map((a) => ({ ...a, [campo]: valor })));
+    },
+    []
+  );
 
   // ─── Save ──────────────────────────────────────────────────
   const podeSalvar =
@@ -254,14 +345,16 @@ export function FormularioLoteVideos({
           campaignId: campanhaId,
           adSetName: adsets.find((a) => a.id === adSetId)?.nome ?? "",
           adSetId,
-          textoPrincipal,
+          textoPrincipal: "",
           descricao,
           cta,
-          linkCampanha,
+          linkCampanha: "",
           anuncios: anuncios.map((a) => ({
             videoId: a.videoId,
             adName: a.adName,
             titulo: a.titulo,
+            textoPrincipal: a.textoPrincipal || undefined,
+            linkCampanha: a.linkCampanha || undefined,
             driveUrl: a.driveUrl,
             thumbnailLink: a.thumbnailLink,
             nomeArquivo: a.nomeArquivo,
@@ -293,10 +386,8 @@ export function FormularioLoteVideos({
     campanhas,
     adSetId,
     adsets,
-    textoPrincipal,
     descricao,
     cta,
-    linkCampanha,
     anuncios,
     aoSalvar,
     aoFechar,
@@ -305,7 +396,7 @@ export function FormularioLoteVideos({
   // ─── Render ────────────────────────────────────────────────
   return (
     <Dialog open={aberto} onOpenChange={(open) => !open && aoFechar()}>
-      <DialogContent className="flex max-h-[90vh] h-[90vh] w-[80vw] max-w-[80vw] sm:max-w-[80vw] flex-col gap-0 p-0">
+      <DialogContent className="flex max-h-[90vh] h-[min(90vh,620px)] w-[min(80vw,1100px)] max-w-[min(80vw,1100px)] sm:max-w-[min(80vw,1100px)] flex-col gap-0 p-0">
         <DialogHeader className="px-6 pt-6 pb-4">
           <DialogTitle>Criar Anúncios em Lote</DialogTitle>
           <DialogDescription>
@@ -425,20 +516,7 @@ export function FormularioLoteVideos({
             <h3 className="mb-3 text-sm font-semibold text-foreground">
               Campos compartilhados
             </h3>
-            <div className="grid gap-3">
-              <div className="grid gap-1.5">
-                <label className="text-sm font-medium text-muted-foreground">
-                  Texto principal
-                </label>
-                <textarea
-                  rows={3}
-                  value={textoPrincipal}
-                  onChange={(e) => setTextoPrincipal(e.target.value)}
-                  className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                  placeholder="Texto do anúncio..."
-                />
-              </div>
-
+            <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5">
                 <label className="text-sm font-medium text-muted-foreground">
                   Descrição
@@ -452,37 +530,22 @@ export function FormularioLoteVideos({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="grid gap-1.5">
-                  <label className="text-sm font-medium text-muted-foreground">
-                    CTA
-                  </label>
-                  <Select value={cta} onValueChange={setCta}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Selecione o CTA" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {CTA_OPTIONS.map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="grid gap-1.5">
-                  <label className="text-sm font-medium text-muted-foreground">
-                    Link da campanha
-                  </label>
-                  <input
-                    type="text"
-                    value={linkCampanha}
-                    onChange={(e) => setLinkCampanha(e.target.value)}
-                    className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                    placeholder="https://www.evino.com.br/..."
-                  />
-                </div>
+              <div className="grid gap-1.5">
+                <label className="text-sm font-medium text-muted-foreground">
+                  CTA
+                </label>
+                <Select value={cta} onValueChange={setCta}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Selecione o CTA" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CTA_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </section>
@@ -563,6 +626,56 @@ export function FormularioLoteVideos({
                       className="h-8 w-full rounded-md border border-input bg-background px-2.5 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                       placeholder="Título"
                     />
+                    <div className="flex gap-1.5 items-start">
+                      <textarea
+                        value={anuncio.textoPrincipal}
+                        onChange={(e) =>
+                          atualizarAnuncio(
+                            anuncio.videoId,
+                            "textoPrincipal",
+                            e.target.value
+                          )
+                        }
+                        rows={2}
+                        className="flex-1 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                        placeholder="Texto principal (legenda)"
+                      />
+                      {anuncios.length > 1 && anuncio.textoPrincipal && (
+                        <button
+                          type="button"
+                          onClick={() => replicarCampo("textoPrincipal", anuncio.textoPrincipal)}
+                          className="shrink-0 mt-1.5 rounded-md border border-input bg-background px-2 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                          title="Aplicar este texto a todos os anúncios"
+                        >
+                          Replicar
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex gap-1.5 items-center">
+                      <input
+                        type="text"
+                        value={anuncio.linkCampanha}
+                        onChange={(e) =>
+                          atualizarAnuncio(
+                            anuncio.videoId,
+                            "linkCampanha",
+                            e.target.value
+                          )
+                        }
+                        className="h-8 flex-1 rounded-md border border-input bg-background px-2.5 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                        placeholder="Link da campanha (URL)"
+                      />
+                      {anuncios.length > 1 && anuncio.linkCampanha && (
+                        <button
+                          type="button"
+                          onClick={() => replicarCampo("linkCampanha", anuncio.linkCampanha)}
+                          className="shrink-0 rounded-md border border-input bg-background px-2 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                          title="Aplicar este link a todos os anúncios"
+                        >
+                          Replicar
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {/* Remove button */}

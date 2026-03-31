@@ -88,6 +88,12 @@ export function analisarProntidaoAnuncio(input: AnuncioValidavel): DiagnosticoAn
         codigo: "video_missing",
         mensagem: "Sem URL válida de vídeo.",
       });
+    } else if (input.linkVideo && !input.linkVideo.includes("drive.google.com")) {
+      avisos.push({
+        nivel: "aviso",
+        codigo: "video_url_nao_drive",
+        mensagem: "URL do vídeo não parece ser do Google Drive. O upload pode falhar.",
+      });
     }
   }
 

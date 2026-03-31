@@ -384,7 +384,7 @@ function TabelaCompacta({
                     />
                   )}
                 </td>
-                <td className="px-2 py-2">
+                <td className="px-2 py-2" title={temErro && linha.mensagemErro ? linha.mensagemErro : undefined}>
                   <StatusDot status={linha.statusProcessamento} />
                 </td>
                 <td className="px-2 py-2">
@@ -418,6 +418,11 @@ function TabelaCompacta({
                       </button>
                     )}
                   </div>
+                  {temErro && linha.mensagemErro && (
+                    <p className="text-[10px] text-destructive truncate max-w-[300px] mt-0.5" title={linha.mensagemErro}>
+                      {linha.mensagemErro}
+                    </p>
+                  )}
                 </td>
                 <td className="px-2 py-2">
                   <span className="truncate block text-muted-foreground text-xs" title={linha.campaign}>{linha.campaign}</span>
@@ -434,8 +439,8 @@ function TabelaCompacta({
                       <a
                         href={
                           linha.accountId
-                            ? `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${linha.accountId}&selected_ad_ids=${linha.adIdCriado}`
-                            : `https://adsmanager.facebook.com/adsmanager/manage/ads?selected_ad_ids=${linha.adIdCriado}`
+                            ? `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${linha.accountId}&selected_adset_ids=${linha.adSetId}`
+                            : `https://adsmanager.facebook.com/adsmanager/manage/ads?selected_adset_ids=${linha.adSetId}`
                         }
                         target="_blank"
                         rel="noopener noreferrer"
@@ -638,14 +643,14 @@ export function TabelaPendentes({
                     )}
 
                     {/* Thumbnail */}
-                    <div className="relative shrink-0 w-24 h-24 overflow-hidden rounded-md border border-border bg-black/5 flex items-center justify-center">
+                    <div className="relative shrink-0 w-14 h-14 overflow-hidden rounded-md border border-border bg-black/5 flex items-center justify-center">
                       {isImage && linha.imageAssets && linha.imageAssets.length > 0 ? (
                         <Image
                           src={linha.imageAssets[0].url}
                           alt="Preview"
                           fill
                           unoptimized
-                          sizes="96px"
+                          sizes="56px"
                           className="object-cover"
                         />
                       ) : linha.thumbnailLink ? (
@@ -654,7 +659,7 @@ export function TabelaPendentes({
                           alt="Thumbnail"
                           fill
                           unoptimized
-                          sizes="96px"
+                          sizes="56px"
                           className="object-cover"
                           referrerPolicy="no-referrer"
                         />

@@ -37,7 +37,8 @@ function extrairErroMeta(json: Record<string, unknown>): string {
 export async function uploadVideo(
   accountId: string,
   videoBuffer: Buffer,
-  fileName: string
+  fileName: string,
+  mimeType: string = "video/mp4"
 ): Promise<string> {
   const token = getAccessToken();
   const url = `${META_API_BASE}/${accountId}/advideos`;
@@ -47,7 +48,7 @@ export async function uploadVideo(
     videoBuffer.byteOffset,
     videoBuffer.byteOffset + videoBuffer.byteLength
   ) as ArrayBuffer;
-  const blob = new Blob([arrayBuffer], { type: "video/mp4" });
+  const blob = new Blob([arrayBuffer], { type: mimeType });
   formData.append("source", blob, fileName);
   formData.append("title", fileName);
   formData.append("access_token", token);

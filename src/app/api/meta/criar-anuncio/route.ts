@@ -10,6 +10,7 @@ import {
   type ImagemPlacement,
 } from "@/lib/meta-criar";
 import { buscarAd, buscarBrand, atualizarStatusAd } from "@/lib/db";
+import { logger } from "@/lib/logger";
 import {
   detectarTipoCriativo,
   extrairImageAssets,
@@ -147,6 +148,12 @@ async function processarFluxoNovo(body: CorpoNovoFluxo) {
   } catch (error) {
     const mensagem = error instanceof Error ? error.message : "Erro desconhecido";
 
+    logger.error("Erro no fluxo novo de criar anuncio", {
+      fn: "processarFluxoNovo",
+      adId: body.adId,
+      error: mensagem,
+    });
+
     try {
       await atualizarStatusAd(
         body.adId,
@@ -154,8 +161,13 @@ async function processarFluxoNovo(body: CorpoNovoFluxo) {
         { error_message: mensagem },
         userId ?? "system"
       );
-    } catch {
-      // Ignora erro ao marcar no banco
+    } catch (dbError) {
+      logger.error("Falha ao gravar erro no banco — ad pode ficar preso em 'processando'", {
+        fn: "processarFluxoNovo",
+        adId: body.adId,
+        originalError: mensagem,
+        dbError: dbError instanceof Error ? dbError.message : "Erro DB desconhecido",
+      });
     }
 
     return NextResponse.json({ erro: mensagem }, { status: 500 });
@@ -249,7 +261,8 @@ async function processarFluxoLegado(body: CorpoLegado) {
       const videoId = await uploadVideo(
         accountId,
         arquivo.buffer,
-        arquivo.fileName
+        arquivo.fileName,
+        arquivo.mimeType
       );
 
       creativeId = await criarCreativeVideo(accountId, {
@@ -285,11 +298,23 @@ async function processarFluxoLegado(body: CorpoLegado) {
     const mensagem =
       error instanceof Error ? error.message : "Erro desconhecido";
 
+    logger.error("Erro no fluxo legado de criar anuncio", {
+      fn: "processarFluxoLegado",
+      indiceLinha,
+      aba: nomeAba,
+      error: mensagem,
+    });
+
     if (indiceLinha) {
       try {
         await marcarErro(nomeAba, indiceLinha, mensagem);
-      } catch {
-        // Ignora erro ao marcar na planilha
+      } catch (sheetError) {
+        logger.error("Falha ao marcar erro na planilha", {
+          fn: "processarFluxoLegado",
+          indiceLinha,
+          originalError: mensagem,
+          sheetError: sheetError instanceof Error ? sheetError.message : "Erro desconhecido",
+        });
       }
     }
 
