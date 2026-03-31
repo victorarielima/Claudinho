@@ -54,13 +54,15 @@ interface TabelaPendentesProps {
   aoEditar?: (linha: LinhaComStatus) => void;
   aoExcluir?: (linha: LinhaComStatus) => void;
   aoRenomear?: (adId: string, novoNome: string) => void;
+  aoEditarCampo?: (adId: string, campo: string, valor: string) => void;
   processando: boolean;
   aoRevalidarVideo?: (linha: LinhaComStatus) => void;
   serviceAccountEmail?: string;
   selecionados: Set<number>;
   aoAlternarSelecao: (indiceLinha: number) => void;
   compacto?: boolean;
-  aoMostrarDetalhes?: () => void;
+  aoMostrarDetalhes?: (indiceLinha?: number) => void;
+  destaqueIndice?: number | null;
 }
 
 function extrairFileIdCliente(driveUrl: string): string | null {
@@ -315,6 +317,7 @@ function TabelaCompacta({
   aoEditar,
   aoExcluir,
   aoRenomear,
+  aoEditarCampo,
   processando,
   selecionados,
   aoAlternarSelecao,
@@ -326,11 +329,12 @@ function TabelaCompacta({
   aoEditar?: (linha: LinhaComStatus) => void;
   aoExcluir?: (linha: LinhaComStatus) => void;
   aoRenomear?: (adId: string, novoNome: string) => void;
+  aoEditarCampo?: (adId: string, campo: string, valor: string) => void;
   processando: boolean;
   selecionados: Set<number>;
   aoAlternarSelecao: (indiceLinha: number) => void;
   setPreviewAberto: (indiceLinha: number) => void;
-  aoMostrarDetalhes: () => void;
+  aoMostrarDetalhes: (indiceLinha?: number) => void;
 }) {
   return (
     <div className="rounded-lg border overflow-hidden">
@@ -340,9 +344,9 @@ function TabelaCompacta({
             <th className="w-9 px-2 py-2.5" />
             <th className="w-20 px-2 py-2.5 text-left font-medium text-muted-foreground">Status</th>
             <th className="px-2 py-2.5 text-left font-medium text-muted-foreground">Nome do Anúncio</th>
-            <th className="w-[15%] px-2 py-2.5 text-left font-medium text-muted-foreground">Campanha</th>
-            <th className="w-[15%] px-2 py-2.5 text-left font-medium text-muted-foreground">Ad Set</th>
-            <th className="w-24 px-2 py-2.5 text-left font-medium text-muted-foreground">CTA</th>
+            <th className="w-[20%] px-2 py-2.5 text-left font-medium text-muted-foreground">Título</th>
+            <th className="w-20 px-2 py-2.5 text-left font-medium text-muted-foreground">Data</th>
+            <th className="w-10 px-2 py-2.5 text-center font-medium text-muted-foreground" title="Link da campanha">Link</th>
             <th className="w-36 px-2 py-2.5 text-right font-medium text-muted-foreground">Ação</th>
           </tr>
         </thead>
@@ -405,9 +409,9 @@ function TabelaCompacta({
                     {temAlertas && (
                       <button
                         type="button"
-                        onClick={aoMostrarDetalhes}
+                        onClick={() => aoMostrarDetalhes(linha.indiceLinha)}
                         className="shrink-0 inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-800 transition-colors hover:bg-amber-100"
-                        title="Abrir modo detalhado para ver alertas"
+                        title="Ver detalhes deste anúncio"
                       >
                         <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
                         {videoInacessivel
@@ -425,13 +429,35 @@ function TabelaCompacta({
                   )}
                 </td>
                 <td className="px-2 py-2">
-                  <span className="truncate block text-muted-foreground text-xs" title={linha.campaign}>{linha.campaign}</span>
+                  {aoEditarCampo && podeEditar ? (
+                    <NomeEditavel
+                      valor={linha.titulo}
+                      aoSalvar={(novoTitulo) => aoEditarCampo(linha.adId!, "titulo", novoTitulo)}
+                      className="text-xs text-muted-foreground"
+                    />
+                  ) : (
+                    <span className="truncate block text-muted-foreground text-xs" title={linha.titulo}>{linha.titulo}</span>
+                  )}
                 </td>
                 <td className="px-2 py-2">
-                  <span className="truncate block text-muted-foreground text-xs" title={linha.adSet}>{linha.adSet}</span>
+                  <span className="text-[11px] text-muted-foreground">{linha.data}</span>
                 </td>
-                <td className="px-2 py-2 text-xs text-muted-foreground truncate" title={linha.cta}>
-                  {linha.cta}
+                <td className="px-2 py-2 text-center">
+                  {linha.linkAnuncio ? (
+                    <a
+                      href={linha.linkAnuncio}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center text-blue-600 hover:text-blue-800 transition-colors"
+                      title={linha.linkAnuncio}
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                      </svg>
+                    </a>
+                  ) : (
+                    <span className="text-muted-foreground/30">—</span>
+                  )}
                 </td>
                 <td className="px-2 py-2 text-right">
                   <div className="flex items-center justify-end gap-1">
@@ -476,16 +502,6 @@ function TabelaCompacta({
                             </svg>
                           </button>
                         )}
-                        {temAlertas && (
-                          <button
-                            type="button"
-                            onClick={aoMostrarDetalhes}
-                            className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800 transition-all hover:bg-amber-100 active:scale-[0.98]"
-                            title="Expandir para ver alertas"
-                          >
-                            Ver
-                          </button>
-                        )}
                         <button
                           onClick={() => aoSubir(linha)}
                           disabled={processando || processandoLinha || videoInacessivel || bloqueada}
@@ -524,6 +540,7 @@ export function TabelaPendentes({
   aoEditar,
   aoExcluir,
   aoRenomear,
+  aoEditarCampo,
   processando,
   aoRevalidarVideo,
   serviceAccountEmail,
@@ -531,8 +548,25 @@ export function TabelaPendentes({
   aoAlternarSelecao,
   compacto = false,
   aoMostrarDetalhes,
+  destaqueIndice,
 }: TabelaPendentesProps) {
   const [previewAberto, setPreviewAberto] = useState<number | null>(null);
+  const cardRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+
+  // Scroll + highlight when switching to detailed view targeting a specific ad
+  useEffect(() => {
+    if (compacto || !destaqueIndice) return;
+    // Small delay to let the detailed view render
+    const timer = setTimeout(() => {
+      const el = cardRefs.current.get(destaqueIndice);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("ring-2", "ring-primary/50");
+        setTimeout(() => el.classList.remove("ring-2", "ring-primary/50"), 2000);
+      }
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [compacto, destaqueIndice]);
 
   if (carregando) {
     return (
@@ -593,6 +627,7 @@ export function TabelaPendentes({
           aoEditar={aoEditar}
           aoExcluir={aoExcluir}
           aoRenomear={aoRenomear}
+          aoEditarCampo={aoEditarCampo}
           processando={processando}
           selecionados={selecionados}
           aoAlternarSelecao={aoAlternarSelecao}
@@ -617,7 +652,11 @@ export function TabelaPendentes({
             return (
               <Card
                 key={linha.indiceLinha}
-                className={
+                ref={(el) => {
+                  if (el) cardRefs.current.set(linha.indiceLinha, el);
+                  else cardRefs.current.delete(linha.indiceLinha);
+                }}
+                className={`transition-shadow duration-500 ${
                   concluido
                     ? "border-green-200 bg-green-50/30"
                     : temErro
@@ -625,7 +664,7 @@ export function TabelaPendentes({
                       : selecionada
                         ? "border-primary/40 bg-primary/5 ring-1 ring-primary/20"
                         : ""
-                }
+                }`}
               >
                 <CardContent className="p-6">
                   <div className="flex gap-4">
@@ -927,6 +966,7 @@ export function TabelaPendentes({
 
                       {/* Detalhes em grid */}
                       <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 lg:grid-cols-6">
+                        <DetalheItem rotulo="Data" valor={linha.data} />
                         <DetalheItem rotulo="Campanha" valor={linha.campaign} subValor={linha.campaignId} />
                         <DetalheItem rotulo="Ad Set" valor={linha.adSet} subValor={linha.adSetId} />
                         <DetalheItem rotulo="Título" valor={linha.titulo} />

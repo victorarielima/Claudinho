@@ -118,6 +118,37 @@ export function PainelCriacao() {
   const [filtroAdSet, setFiltroAdSet] = useState<string>("todos");
   const [busca, setBusca] = useState<string>("");
   const [compacto, setCompacto] = useState(true);
+  const [destaqueIndice, setDestaqueIndice] = useState<number | null>(null);
+
+  // Sync view mode with URL hash for browser back/forward
+  useEffect(() => {
+    function handlePopState() {
+      const hash = window.location.hash;
+      if (hash === "#detalhado") {
+        setCompacto(false);
+      } else {
+        setCompacto(true);
+        setDestaqueIndice(null);
+      }
+    }
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  const mudarParaDetalhado = useCallback((indiceLinha?: number) => {
+    window.history.pushState(null, "", "#detalhado");
+    setCompacto(false);
+    setDestaqueIndice(indiceLinha ?? null);
+  }, []);
+
+  const mudarParaCompacto = useCallback(() => {
+    if (window.location.hash === "#detalhado") {
+      window.history.back();
+    } else {
+      setCompacto(true);
+      setDestaqueIndice(null);
+    }
+  }, []);
 
   const [dialogCriar, setDialogCriar] = useState(false);
   const [dialogExplorador, setDialogExplorador] = useState(false);
@@ -129,6 +160,9 @@ export function PainelCriacao() {
     ad_name: string; texto_principal: string; titulo: string; descricao: string;
     cta: string; campaign_name: string; campaign_id: string;
     ad_set_name: string; ad_set_id: string; link_campanha: string;
+    tipo?: "video" | "image"; linkVideo?: string; thumbnailLink?: string;
+    bloqueiosMeta?: string[]; avisosMeta?: string[];
+    brand_id?: string; meta_account_id?: string;
   } | null>(null);
   const [importando, setImportando] = useState(false);
   const [abaLegada, setAbaLegada] = useState<ChaveAba>("evino");
@@ -605,17 +639,14 @@ export function PainelCriacao() {
           {fonteDados === "supabase" && (
             <>
               <button onClick={() => setDialogExplorador(true)}
-                className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border border-input bg-background px-4 text-sm font-medium shadow-sm transition-all hover:bg-accent hover:text-accent-foreground active:scale-[0.98]">
+                className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98]">
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
                 </svg>
                 Importar Vídeos
               </button>
               <button onClick={() => setDialogCriar(true)}
-                className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98]">
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                </svg>
+                className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-input bg-background px-3 text-xs font-medium text-muted-foreground shadow-sm transition-all hover:bg-accent hover:text-accent-foreground active:scale-[0.98]">
                 Novo Criativo
               </button>
             </>
@@ -775,7 +806,7 @@ export function PainelCriacao() {
                 className="h-9 w-56 rounded-lg border border-input bg-background pl-9 pr-3 text-sm shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2" />
             </div>
 
-            <button onClick={() => setCompacto((v) => !v)}
+            <button onClick={() => compacto ? mudarParaDetalhado() : mudarParaCompacto()}
               className={`ml-auto inline-flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-3 text-sm font-medium shadow-sm transition-all hover:bg-accent hover:text-accent-foreground active:scale-[0.98] ${compacto ? "ring-1 ring-primary/30 border-primary/40" : ""}`}>
               {compacto ? (
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" /></svg>
@@ -804,6 +835,13 @@ export function PainelCriacao() {
                 ad_set_name: linha.adSet ?? "",
                 ad_set_id: linha.adSetId ?? "",
                 link_campanha: linha.linkCampanha ?? "",
+                tipo: linha.tipo,
+                linkVideo: linha.linkVideo,
+                thumbnailLink: linha.thumbnailLink,
+                bloqueiosMeta: linha.bloqueiosMeta,
+                avisosMeta: linha.avisosMeta,
+                brand_id: brandSelecionado?.id,
+                meta_account_id: brandSelecionado?.meta_account_id,
               });
               setDialogEditar(true);
             }}
@@ -822,12 +860,28 @@ export function PainelCriacao() {
                 // silently fail — user can try again
               }
             }}
+            aoEditarCampo={async (adId, campo, valor) => {
+              try {
+                const res = await fetch(`/api/ads/${adId}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ [campo]: valor }),
+                });
+                if (!res.ok) throw new Error("Erro ao editar");
+                setLinhas((prev) =>
+                  prev.map((l) => l.adId === adId ? { ...l, [campo]: valor } : l)
+                );
+              } catch {
+                // silently fail — user can try again
+              }
+            }}
             aoRevalidarVideo={revalidarVideo}
             serviceAccountEmail={serviceAccountEmail}
             selecionados={selecionados}
             aoAlternarSelecao={alternarSelecao}
             compacto={compacto}
-            aoMostrarDetalhes={() => setCompacto(false)}
+            aoMostrarDetalhes={mudarParaDetalhado}
+            destaqueIndice={destaqueIndice}
           />
         </section>
       ) : !erro && !(fonteDados === "supabase" && brands.length === 0 && brandError) ? (

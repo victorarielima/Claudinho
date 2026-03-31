@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import type { VideoDrive } from "@/lib/drive-explorer";
 
 // ---------------------------------------------------------------------------
@@ -444,67 +445,29 @@ export function FormularioLoteVideos({
                 <label className="text-sm font-medium text-muted-foreground">
                   Campanha
                 </label>
-                <Select
+                <SearchableSelect
+                  options={campanhas.map((c) => ({ value: c.id, label: c.nome, status: c.status }))}
                   value={campanhaId}
                   onValueChange={handleCampanhaChange}
-                  disabled={!brandId || carregandoCampanhas}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue
-                      placeholder={
-                        carregandoCampanhas
-                          ? "Carregando..."
-                          : !brandId
-                            ? "Selecione a marca primeiro"
-                            : "Selecione a campanha"
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {campanhas.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.nome}{" "}
-                        <span className="text-muted-foreground">
-                          ({c.status})
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  disabled={!brandId}
+                  loading={carregandoCampanhas}
+                  placeholder={!brandId ? "Selecione a marca primeiro" : "Buscar campanha..."}
+                />
               </div>
 
               {/* Ad Set */}
               <div className="grid gap-1.5">
                 <label className="text-sm font-medium text-muted-foreground">
-                  Conjunto de Anúncios
+                  Conjunto de anúncios <span className="text-muted-foreground/60 font-normal">(Ad Set)</span>
                 </label>
-                <Select
+                <SearchableSelect
+                  options={adsets.map((a) => ({ value: a.id, label: a.nome, status: a.status }))}
                   value={adSetId}
                   onValueChange={setAdSetId}
-                  disabled={!campanhaId || carregandoAdsets}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue
-                      placeholder={
-                        carregandoAdsets
-                          ? "Carregando..."
-                          : !campanhaId
-                            ? "Selecione a campanha primeiro"
-                            : "Selecione o conjunto"
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {adsets.map((a) => (
-                      <SelectItem key={a.id} value={a.id}>
-                        {a.nome}{" "}
-                        <span className="text-muted-foreground">
-                          ({a.status})
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  disabled={!campanhaId}
+                  loading={carregandoAdsets}
+                  placeholder={!campanhaId ? "Selecione a campanha primeiro" : "Buscar ad set..."}
+                />
               </div>
             </div>
           </section>
@@ -638,7 +601,7 @@ export function FormularioLoteVideos({
                         }
                         rows={2}
                         className="flex-1 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                        placeholder="Texto principal (legenda)"
+                        placeholder="Legenda (texto principal do anúncio)"
                       />
                       {anuncios.length > 1 && anuncio.textoPrincipal && (
                         <button
