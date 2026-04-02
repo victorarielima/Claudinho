@@ -299,7 +299,10 @@ export async function criarCreativeVideo(
   if (params.link && params.link.trim()) {
     videoData.call_to_action = {
       type: params.ctaType || "SHOP_NOW",
-      value: { link: params.link },
+      value: {
+        link: params.link,
+        object_store_urls: { web: { url: params.link } },
+      },
     };
   }
 
@@ -504,7 +507,10 @@ async function criarCreativeImagemSimples(
   if (params.ctaType) {
     linkData.call_to_action = {
       type: params.ctaType || "SHOP_NOW",
-      value: { link: params.link },
+      value: {
+        link: params.link,
+        object_store_urls: { web: { url: params.link } },
+      },
     };
   }
 
