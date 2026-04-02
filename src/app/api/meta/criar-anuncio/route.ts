@@ -7,6 +7,7 @@ import {
   criarCreativeImagem,
   criarAnuncio,
   buscarAccountIdDoAdSet,
+  buscarCrossChannelInfo,
   type ImagemPlacement,
 } from "@/lib/meta-criar";
 import { buscarAd, buscarBrand, atualizarStatusAd } from "@/lib/db";
@@ -131,11 +132,18 @@ async function processarFluxoNovo(body: CorpoNovoFluxo) {
       throw new Error(diagnostico.bloqueios.map((item) => item.mensagem).join(" "));
     }
 
+    // Ao reprocessar após erro, limpar creative anterior para forçar recriação
+    // (o creative pode ter sido criado com params desatualizados)
+    const metaOverrides: Record<string, unknown> = { meta_account_id: accountId, error_message: null };
+    if (ad.status === "erro" && ad.meta_creative_id) {
+      metaOverrides.meta_creative_id = null;
+    }
+
     // Marcar como processando - store account info for the processar route
     await atualizarStatusAd(
       ad.id,
       "processando",
-      { meta_account_id: accountId },
+      metaOverrides,
       userId ?? "system"
     );
 
@@ -227,6 +235,9 @@ async function processarFluxoLegado(body: CorpoLegado) {
 
     let creativeId: string;
 
+    // Buscar object_store_urls do ad set (necessário para campanhas cross-channel)
+    const crossChannel = await buscarCrossChannelInfo(body.adSetId);
+
     if (tipoCriativo === "image") {
       const imageAssets = (body.imageAssets?.length ? body.imageAssets : extrairImageAssets(body.linkVideo))
         .map((asset) => ({
@@ -255,6 +266,7 @@ async function processarFluxoLegado(body: CorpoLegado) {
         ctaType: body.cta || "SHOP_NOW",
         link: body.linkAnuncio,
         name: `Creative - ${body.adName}`,
+        crossChannel,
       });
     } else {
       const arquivo = await baixarArquivoDrive(body.linkVideo);
@@ -274,6 +286,7 @@ async function processarFluxoLegado(body: CorpoLegado) {
         ctaType: body.cta || "SHOP_NOW",
         link: body.linkAnuncio,
         name: `Creative - ${body.adName}`,
+        crossChannel,
       });
     }
 

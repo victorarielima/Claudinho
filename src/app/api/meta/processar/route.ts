@@ -7,6 +7,7 @@ import {
   criarCreativeImagem,
   criarAnuncio,
   buscarAccountIdDoAdSet,
+  buscarCrossChannelInfo,
   type ImagemPlacement,
 } from "@/lib/meta-criar";
 import {
@@ -396,6 +397,9 @@ async function stepCriarCreative(
 
   let creativeId: string;
 
+  // Buscar info cross-channel do ad set (necessário para campanhas com otimização omnichannel)
+  const crossChannel = ad.ad_set_id ? await buscarCrossChannelInfo(ad.ad_set_id) : undefined;
+
   if (ad.type === "video") {
     const videoAsset = assets.find((a) => a.asset_type === "video");
     if (!videoAsset?.meta_asset_id) throw new Error("Video nao foi enviado para o Meta. Tente subir novamente.");
@@ -409,6 +413,7 @@ async function stepCriarCreative(
       ctaType: ad.cta || "SHOP_NOW",
       link: ad.link_anuncio || "",
       name: `Creative - ${ad.ad_name}`,
+      crossChannel,
     });
   } else {
     // Re-fetch assets from DB to get updated meta_asset_id values
@@ -435,6 +440,7 @@ async function stepCriarCreative(
       ctaType: ad.cta || "SHOP_NOW",
       link: ad.link_anuncio || "",
       name: `Creative - ${ad.ad_name}`,
+      crossChannel,
     });
   }
 

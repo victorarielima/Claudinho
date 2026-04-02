@@ -276,6 +276,7 @@ export interface ParamsCriativoVideo {
   ctaType: string;
   link: string;
   name: string;
+  crossChannel?: CrossChannelInfo;
 }
 
 export async function criarCreativeVideo(
@@ -296,13 +297,17 @@ export async function criarCreativeVideo(
     image_url: imageUrl,
   };
 
+  const isCrossChannel = (params.crossChannel?.objectStoreUrls?.length ?? 0) > 0;
+
   if (params.link && params.link.trim()) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ctaValue: Record<string, any> = { link: params.link };
+    if (isCrossChannel) {
+      ctaValue.object_store_urls = params.crossChannel!.objectStoreUrls;
+    }
     videoData.call_to_action = {
       type: params.ctaType || "SHOP_NOW",
-      value: {
-        link: params.link,
-        object_store_urls: { web: { url: params.link } },
-      },
+      value: ctaValue,
     };
   }
 
@@ -314,6 +319,21 @@ export async function criarCreativeVideo(
   const formData = new FormData();
   formData.append("name", params.name);
   formData.append("object_story_spec", JSON.stringify(objectStorySpec));
+  if (isCrossChannel) {
+    formData.append("applink_treatment", "deeplink_with_web_fallback");
+    if (params.crossChannel!.applicationId) {
+      formData.append("omnichannel_link_spec", JSON.stringify({
+        web: { url: params.link },
+        app: {
+          application_id: params.crossChannel!.applicationId,
+          platform_specs: {
+            android: { url: params.link },
+            ios: { url: params.link },
+          },
+        },
+      }));
+    }
+  }
   formData.append("access_token", token);
 
   const res = await metaFetchWithRetry(url, {
@@ -361,6 +381,7 @@ export interface ParamsCriativoImagem {
   ctaType: string;
   link: string;
   name: string;
+  crossChannel?: CrossChannelInfo;
 }
 
 type PlacementImagemNormalizado = "feed" | "stories" | "horizontal";
@@ -504,13 +525,17 @@ async function criarCreativeImagemSimples(
     image_hash: params.imagens[0].imageHash,
   };
 
+  const isCrossChannel = (params.crossChannel?.objectStoreUrls?.length ?? 0) > 0;
+
   if (params.ctaType) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ctaValue: Record<string, any> = { link: params.link };
+    if (isCrossChannel) {
+      ctaValue.object_store_urls = params.crossChannel!.objectStoreUrls;
+    }
     linkData.call_to_action = {
       type: params.ctaType || "SHOP_NOW",
-      value: {
-        link: params.link,
-        object_store_urls: { web: { url: params.link } },
-      },
+      value: ctaValue,
     };
   }
 
@@ -522,6 +547,21 @@ async function criarCreativeImagemSimples(
   const formData = new FormData();
   formData.append("name", params.name);
   formData.append("object_story_spec", JSON.stringify(objectStorySpec));
+  if (isCrossChannel) {
+    formData.append("applink_treatment", "deeplink_with_web_fallback");
+    if (params.crossChannel!.applicationId) {
+      formData.append("omnichannel_link_spec", JSON.stringify({
+        web: { url: params.link },
+        app: {
+          application_id: params.crossChannel!.applicationId,
+          platform_specs: {
+            android: { url: params.link },
+            ios: { url: params.link },
+          },
+        },
+      }));
+    }
+  }
   formData.append("access_token", token);
 
   const res = await metaFetchWithRetry(url, {
@@ -562,7 +602,7 @@ export async function criarAnuncio(
   const params = new URLSearchParams({
     name,
     adset_id: adsetId,
-    creative: JSON.stringify({ creative_id: creativeId, applink_treatment: "web_only" }),
+    creative: JSON.stringify({ creative_id: creativeId }),
     status: "PAUSED",
     access_token: token,
   });
@@ -619,4 +659,29 @@ export async function buscarAccountIdDoAdSet(
   }
 
   return `act_${json.account_id}`;
+}
+
+export interface CrossChannelInfo {
+  objectStoreUrls: string[];
+  applicationId: string | null;
+}
+
+export async function buscarCrossChannelInfo(
+  adsetId: string
+): Promise<CrossChannelInfo> {
+  const token = getAccessToken();
+  const url = `${META_API_BASE}/${adsetId}?fields=promoted_object&access_token=${token}`;
+
+  const res = await metaFetchWithRetry(url);
+  const json = await res.json();
+
+  if (!res.ok || json.error) return { objectStoreUrls: [], applicationId: null };
+
+  const apps = json.promoted_object?.omnichannel_object?.app;
+  if (!Array.isArray(apps) || apps.length === 0) return { objectStoreUrls: [], applicationId: null };
+
+  return {
+    objectStoreUrls: apps[0].object_store_urls ?? [],
+    applicationId: apps[0].application_id ?? null,
+  };
 }
