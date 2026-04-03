@@ -153,8 +153,12 @@ async function uploadVideoChunked(
   }
 
   const sessionId = startJson.upload_session_id as string;
+  const videoId = startJson.video_id as string;
   if (!sessionId) {
     throw new Error("Meta não retornou upload_session_id na fase start");
+  }
+  if (!videoId) {
+    throw new Error("Meta não retornou video_id na fase start");
   }
 
   // Phase 2: Transfer chunks
@@ -209,11 +213,6 @@ async function uploadVideoChunked(
   const finishJson = await safeResponseJson(finishRes);
   if (!finishRes.ok || finishJson.error) {
     throw new Error(`Erro ao finalizar upload chunked: ${extrairErroMeta(finishJson)}`);
-  }
-
-  const videoId = finishJson.video_id as string;
-  if (!videoId) {
-    throw new Error("Meta não retornou video_id na fase finish");
   }
 
   return videoId;
