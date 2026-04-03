@@ -34,11 +34,49 @@ function extrairErroMeta(json: Record<string, unknown>): string {
 
 // ─── Video Upload ───────────────────────────────────────────
 
+// Threshold for chunked upload (50 MB)
+const CHUNKED_UPLOAD_THRESHOLD = 50 * 1024 * 1024;
+// Chunk size for transfer phase (4 MB — Meta recommends between 1–50 MB)
+const CHUNK_SIZE = 4 * 1024 * 1024;
+
 export async function uploadVideo(
   accountId: string,
   videoBuffer: Buffer,
   fileName: string,
   mimeType: string = "video/mp4"
+): Promise<string> {
+  logger.info("Uploading video to Meta", {
+    fn: "uploadVideo",
+    accountId,
+    fileName,
+    sizeBytes: videoBuffer.byteLength,
+  });
+  const startMs = Date.now();
+
+  const videoId = videoBuffer.byteLength >= CHUNKED_UPLOAD_THRESHOLD
+    ? await uploadVideoChunked(accountId, videoBuffer, fileName, mimeType)
+    : await uploadVideoSimples(accountId, videoBuffer, fileName, mimeType);
+
+  const elapsedMs = Date.now() - startMs;
+  logger.info("Video uploaded successfully", {
+    fn: "uploadVideo",
+    accountId,
+    fileName,
+    videoId,
+    elapsedMs,
+  });
+
+  // Aguardar o Meta processar o vídeo antes de prosseguir
+  await aguardarProcessamentoVideo(videoId);
+
+  return videoId;
+}
+
+async function uploadVideoSimples(
+  accountId: string,
+  videoBuffer: Buffer,
+  fileName: string,
+  mimeType: string
 ): Promise<string> {
   const token = getAccessToken();
   const url = `${META_API_BASE}/${accountId}/advideos`;
@@ -53,14 +91,6 @@ export async function uploadVideo(
   formData.append("title", fileName);
   formData.append("access_token", token);
 
-  logger.info("Uploading video to Meta", {
-    fn: "uploadVideo",
-    accountId,
-    fileName,
-    sizeBytes: videoBuffer.byteLength,
-  });
-  const startMs = Date.now();
-
   const res = await metaFetchWithRetry(url, {
     method: "POST",
     body: formData,
@@ -69,7 +99,7 @@ export async function uploadVideo(
   const json = await safeResponseJson(res);
   if (!res.ok || json.error) {
     logger.error("Video upload failed", {
-      fn: "uploadVideo",
+      fn: "uploadVideoSimples",
       accountId,
       fileName,
       error: extrairErroMeta(json),
@@ -77,18 +107,114 @@ export async function uploadVideo(
     throw new Error(`Erro ao fazer upload do vídeo: ${extrairErroMeta(json)}`);
   }
 
-  const videoId = json.id;
-  const elapsedMs = Date.now() - startMs;
-  logger.info("Video uploaded successfully", {
-    fn: "uploadVideo",
+  return json.id;
+}
+
+/**
+ * Chunked upload using Meta's 3-phase protocol:
+ * 1. Start — declares file size, gets upload_session_id
+ * 2. Transfer — sends chunks sequentially
+ * 3. Finish — finalises upload, returns video_id
+ */
+async function uploadVideoChunked(
+  accountId: string,
+  videoBuffer: Buffer,
+  fileName: string,
+  mimeType: string
+): Promise<string> {
+  const token = getAccessToken();
+  const url = `${META_API_BASE}/${accountId}/advideos`;
+  const fileSize = videoBuffer.byteLength;
+
+  logger.info("Using chunked upload", {
+    fn: "uploadVideoChunked",
     accountId,
     fileName,
-    videoId,
-    elapsedMs,
+    fileSize,
+    chunkSize: CHUNK_SIZE,
+    chunks: Math.ceil(fileSize / CHUNK_SIZE),
   });
 
-  // Aguardar o Meta processar o vídeo antes de prosseguir
-  await aguardarProcessamentoVideo(videoId);
+  // Phase 1: Start
+  const startParams = new URLSearchParams({
+    upload_phase: "start",
+    file_size: String(fileSize),
+    access_token: token,
+  });
+
+  const startRes = await metaFetchWithRetry(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: startParams.toString(),
+  });
+  const startJson = await safeResponseJson(startRes);
+  if (!startRes.ok || startJson.error) {
+    throw new Error(`Erro ao iniciar upload chunked: ${extrairErroMeta(startJson)}`);
+  }
+
+  const sessionId = startJson.upload_session_id as string;
+  if (!sessionId) {
+    throw new Error("Meta não retornou upload_session_id na fase start");
+  }
+
+  // Phase 2: Transfer chunks
+  let offset = 0;
+  let chunkIndex = 0;
+  while (offset < fileSize) {
+    const end = Math.min(offset + CHUNK_SIZE, fileSize);
+    const chunk = videoBuffer.subarray(offset, end);
+
+    const formData = new FormData();
+    formData.append("upload_phase", "transfer");
+    formData.append("upload_session_id", sessionId);
+    formData.append("start_offset", String(offset));
+    formData.append("video_file_chunk", new Blob([new Uint8Array(chunk)], { type: mimeType }), fileName);
+    formData.append("access_token", token);
+
+    const chunkRes = await metaFetchWithRetry(url, {
+      method: "POST",
+      body: formData,
+    });
+    const chunkJson = await safeResponseJson(chunkRes);
+    if (!chunkRes.ok || chunkJson.error) {
+      throw new Error(`Erro no chunk ${chunkIndex} do upload: ${extrairErroMeta(chunkJson)}`);
+    }
+
+    // Meta returns the start_offset for the next chunk
+    offset = Number(chunkJson.start_offset ?? end);
+    chunkIndex++;
+
+    logger.debug("Chunk uploaded", {
+      fn: "uploadVideoChunked",
+      sessionId,
+      chunkIndex,
+      offset,
+      fileSize,
+    });
+  }
+
+  // Phase 3: Finish
+  const finishParams = new URLSearchParams({
+    upload_phase: "finish",
+    upload_session_id: sessionId,
+    title: fileName,
+    access_token: token,
+  });
+
+  const finishRes = await metaFetchWithRetry(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: finishParams.toString(),
+  });
+  const finishJson = await safeResponseJson(finishRes);
+  if (!finishRes.ok || finishJson.error) {
+    throw new Error(`Erro ao finalizar upload chunked: ${extrairErroMeta(finishJson)}`);
+  }
+
+  const videoId = finishJson.video_id as string;
+  if (!videoId) {
+    throw new Error("Meta não retornou video_id na fase finish");
+  }
 
   return videoId;
 }
