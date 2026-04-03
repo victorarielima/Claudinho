@@ -489,6 +489,7 @@ function CampoTexto({
       <input
         type="text"
         value={valor}
+        maxLength={contador}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         className={`w-full rounded-lg border bg-background px-3 py-2 text-sm shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-ring/20 ${

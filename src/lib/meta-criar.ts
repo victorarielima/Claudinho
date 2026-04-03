@@ -1,7 +1,7 @@
 import { normalizarPlacementImagem } from "./ad-media";
 import { META_API_BASE } from "./meta-config";
 import { logger } from "./logger";
-import { metaFetchWithRetry } from "./meta-retry";
+import { metaFetchWithRetry, safeResponseJson } from "./meta-retry";
 
 function getAccessToken(): string {
   const token = process.env.META_ACCESS_TOKEN;
@@ -66,7 +66,7 @@ export async function uploadVideo(
     body: formData,
   });
 
-  const json = await res.json();
+  const json = await safeResponseJson(res);
   if (!res.ok || json.error) {
     logger.error("Video upload failed", {
       fn: "uploadVideo",
@@ -103,7 +103,7 @@ async function aguardarProcessamentoVideo(videoId: string): Promise<void> {
     const url = `${META_API_BASE}/${videoId}?fields=status&access_token=${token}`;
     // Polling uses plain fetch — it has its own retry logic
     const res = await fetch(url);
-    const json = await res.json();
+    const json = await safeResponseJson(res);
 
     if (json.error) {
       logger.error("Error checking video processing status", {
@@ -169,7 +169,7 @@ async function buscarThumbnailVideo(videoId: string): Promise<string> {
   const url = `${META_API_BASE}/${videoId}?fields=picture,thumbnails&access_token=${token}`;
 
   const res = await metaFetchWithRetry(url);
-  const json = await res.json();
+  const json = await safeResponseJson(res);
 
   if (json.error) {
     logger.error("Failed to fetch video thumbnail", {
@@ -232,7 +232,7 @@ export async function uploadImage(
     body: formData,
   });
 
-  const json = await res.json();
+  const json = await safeResponseJson(res);
   if (!res.ok || json.error) {
     logger.error("Image upload failed", {
       fn: "uploadImage",
@@ -341,7 +341,7 @@ export async function criarCreativeVideo(
     body: formData,
   });
 
-  const json = await res.json();
+  const json = await safeResponseJson(res);
   if (!res.ok || json.error) {
     logger.error("Failed to create video creative", {
       fn: "criarCreativeVideo",
@@ -488,7 +488,7 @@ export async function criarCreativeImagem(
     body: formData,
   });
 
-  const json = await res.json();
+  const json = await safeResponseJson(res);
   if (!res.ok || json.error) {
     logger.error("Failed to create image creative (multi-placement)", {
       fn: "criarCreativeImagem",
@@ -569,7 +569,7 @@ async function criarCreativeImagemSimples(
     body: formData,
   });
 
-  const json = await res.json();
+  const json = await safeResponseJson(res);
   if (!res.ok || json.error) {
     logger.error("Failed to create image creative (simple)", {
       fn: "criarCreativeImagemSimples",
@@ -613,7 +613,7 @@ export async function criarAnuncio(
     body: params.toString(),
   });
 
-  const json = await res.json();
+  const json = await safeResponseJson(res);
   if (!res.ok || json.error) {
     logger.error("Failed to create ad", {
       fn: "criarAnuncio",
@@ -645,7 +645,7 @@ export async function buscarAccountIdDoAdSet(
   const url = `${META_API_BASE}/${adsetId}?fields=account_id&access_token=${token}`;
 
   const res = await metaFetchWithRetry(url);
-  const json = await res.json();
+  const json = await safeResponseJson(res);
 
   if (!res.ok || json.error) {
     logger.error("Failed to fetch account ID from adset", {
@@ -673,7 +673,7 @@ export async function buscarCrossChannelInfo(
   const url = `${META_API_BASE}/${adsetId}?fields=promoted_object&access_token=${token}`;
 
   const res = await metaFetchWithRetry(url);
-  const json = await res.json();
+  const json = await safeResponseJson(res);
 
   if (!res.ok || json.error) return { objectStoreUrls: [], applicationId: null };
 

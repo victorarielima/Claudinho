@@ -6,6 +6,33 @@ interface RetryOptions {
   maxDelayMs?: number      // default 30000
 }
 
+/**
+ * Safely parse JSON from a Response, returning a descriptive error object
+ * instead of throwing "Unexpected end of JSON input" on empty/invalid bodies.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function safeResponseJson(res: Response): Promise<Record<string, any>> {
+  const text = await res.text()
+  if (!text || text.trim().length === 0) {
+    return {
+      error: {
+        message: `Meta API retornou resposta vazia (HTTP ${res.status} ${res.statusText})`,
+        code: res.status,
+      },
+    }
+  }
+  try {
+    return JSON.parse(text)
+  } catch {
+    return {
+      error: {
+        message: `Meta API retornou resposta invalida (HTTP ${res.status}): ${text.slice(0, 200)}`,
+        code: res.status,
+      },
+    }
+  }
+}
+
 export async function metaFetchWithRetry(
   url: string,
   options?: RequestInit,

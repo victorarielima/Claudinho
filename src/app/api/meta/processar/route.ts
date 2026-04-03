@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { baixarArquivoDrive } from "@/lib/drive";
+import { safeResponseJson } from "@/lib/meta-retry";
 import {
   uploadImage,
   criarCreativeVideo,
@@ -83,7 +84,7 @@ async function uploadVideoSemAguardar(
     body: formData,
   });
 
-  const json = await res.json();
+  const json = await safeResponseJson(res);
   if (!res.ok || json.error) {
     throw new Error(`Erro ao fazer upload do video: ${extrairErroMeta(json)}`);
   }
@@ -101,7 +102,7 @@ async function verificarStatusVideo(
   const token = getAccessToken();
   const url = `${META_API_BASE}/${videoId}?fields=status&access_token=${token}`;
   const res = await fetch(url);
-  const json = await res.json();
+  const json = await safeResponseJson(res);
 
   if (json.error) {
     throw new Error(

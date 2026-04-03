@@ -785,6 +785,7 @@ export function DialogCriarAnuncio({
                         rotulo="Titulo"
                         valor={form.titulo}
                         onChange={(valor) => atualizarCampo("titulo", valor)}
+                        contador={40}
                       />
                       <CampoTexto
                         rotulo="Descricao"
@@ -1407,22 +1408,34 @@ function CampoTexto({
   onChange,
   placeholder,
   obrigatorio = false,
+  contador,
 }: {
   rotulo: string;
   valor: string;
   onChange: (valor: string) => void;
   placeholder?: string;
   obrigatorio?: boolean;
+  contador?: number;
 }) {
+  const len = valor.trim().length;
+  const excedeu = contador ? len > contador : false;
   return (
     <div>
-      <label className="text-sm font-medium text-slate-900">
-        {rotulo}
-        {obrigatorio && <span className="text-slate-400"> *</span>}
-      </label>
+      <div className="flex items-center justify-between">
+        <label className="text-sm font-medium text-slate-900">
+          {rotulo}
+          {obrigatorio && <span className="text-slate-400"> *</span>}
+        </label>
+        {contador != null && (
+          <span className={`text-[10px] tabular-nums ${excedeu ? "text-amber-600 font-medium" : "text-muted-foreground"}`}>
+            {len}/{contador}
+          </span>
+        )}
+      </div>
       <input
         type="text"
         value={valor}
+        maxLength={contador}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         className="mt-1.5 h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm shadow-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
