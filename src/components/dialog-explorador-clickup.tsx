@@ -7,7 +7,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -407,11 +406,11 @@ export function DialogExploradorClickUp({
           {/* Search */}
           <div className="relative ml-auto">
             <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
+            <input
               value={busca}
-              onChange={(e) => setBusca(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBusca(e.target.value)}
               placeholder="Buscar..."
-              className="h-7 w-48 pl-7 text-xs"
+              className="h-7 w-48 pl-7 text-xs rounded-md border border-input bg-background px-3 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
         </div>

@@ -7,8 +7,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -422,11 +420,11 @@ export function FormularioLoteImagens({
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">Descrição</label>
-                <Input
+                <input
                   value={descricao}
-                  onChange={(e) => setDescricao(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDescricao(e.target.value)}
                   placeholder="Beba com Moderação!"
-                  className="h-9 text-sm"
+                  className="h-9 text-sm w-full rounded-md border border-input bg-background px-3 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 />
               </div>
               <div className="space-y-1">
@@ -480,11 +478,11 @@ export function FormularioLoteImagens({
                         <X className="h-3.5 w-3.5" />
                       </Button>
                     </div>
-                    <Input
+                    <input
                       value={anuncio.adName}
-                      onChange={(e) => updateAnuncio(i, "adName", e.target.value)}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateAnuncio(i, "adName", e.target.value)}
                       placeholder="Nome do anúncio"
-                      className="h-8 text-xs font-mono"
+                      className="h-8 text-xs font-mono w-full rounded-md border border-input bg-background px-3 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     />
                   </div>
                 </div>
@@ -498,10 +496,10 @@ export function FormularioLoteImagens({
                         {anuncio.titulo.length}/40
                       </span>
                     </div>
-                    <Input
+                    <input
                       value={anuncio.titulo}
-                      onChange={(e) => updateAnuncio(i, "titulo", e.target.value)}
-                      className="h-8 text-xs"
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateAnuncio(i, "titulo", e.target.value)}
+                      className="h-8 text-xs w-full rounded-md border border-input bg-background px-3 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       maxLength={40}
                     />
                   </div>
@@ -518,10 +516,10 @@ export function FormularioLoteImagens({
                         </button>
                       )}
                     </div>
-                    <Textarea
+                    <textarea
                       value={anuncio.textoPrincipal}
-                      onChange={(e) => updateAnuncio(i, "textoPrincipal", e.target.value)}
-                      className="text-xs min-h-[32px] resize-none"
+                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => updateAnuncio(i, "textoPrincipal", e.target.value)}
+                      className="text-xs min-h-[32px] resize-none w-full rounded-md border border-input bg-background px-3 py-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       rows={1}
                     />
                   </div>
@@ -538,10 +536,10 @@ export function FormularioLoteImagens({
                         </button>
                       )}
                     </div>
-                    <Input
+                    <input
                       value={anuncio.linkCampanha}
-                      onChange={(e) => updateAnuncio(i, "linkCampanha", e.target.value)}
-                      className="h-8 text-xs"
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateAnuncio(i, "linkCampanha", e.target.value)}
+                      className="h-8 text-xs w-full rounded-md border border-input bg-background px-3 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       placeholder="https://..."
                     />
                   </div>
