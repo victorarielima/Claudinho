@@ -7,10 +7,13 @@ interface AnuncioItem {
   titulo: string;
   textoPrincipal?: string;
   linkCampanha?: string;
-  driveUrl: string;
+  // Video flow (backward compat)
+  driveUrl?: string;
   videoId?: string;
   thumbnailLink?: string;
   nomeArquivo?: string;
+  // Image flow
+  assets?: { placement: string; url: string; type: "image" | "video" }[];
 }
 
 interface LoteBody {
@@ -23,6 +26,7 @@ interface LoteBody {
   descricao: string;
   cta: string;
   linkCampanha: string;
+  type?: "video" | "image";
   anuncios: AnuncioItem[];
 }
 
@@ -65,10 +69,30 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const adType = body.type ?? "video";
+
     const promises = body.anuncios.map((item) => {
+      let assets: { placement: string; asset_url: string; asset_type: "image" | "video" }[];
+
+      if (item.assets && item.assets.length > 0) {
+        assets = item.assets.map((a) => ({
+          placement: a.placement,
+          asset_url: a.url,
+          asset_type: a.type,
+        }));
+      } else {
+        assets = [
+          {
+            placement: "video_principal",
+            asset_url: item.driveUrl ?? "",
+            asset_type: "video" as const,
+          },
+        ];
+      }
+
       const input: CriarAdInput = {
         brand_id: body.brandId,
-        type: "video",
+        type: adType,
         campaign_name: body.campaignName,
         campaign_id: body.campaignId,
         ad_set_name: body.adSetName,
@@ -79,13 +103,7 @@ export async function POST(request: NextRequest) {
         descricao: descricaoPadrao,
         cta: ctaPadrao,
         link_campanha: item.linkCampanha || body.linkCampanha,
-        assets: [
-          {
-            placement: "video_principal",
-            asset_url: item.driveUrl,
-            asset_type: "video",
-          },
-        ],
+        assets,
       };
 
       return criarAd(input, userId);
