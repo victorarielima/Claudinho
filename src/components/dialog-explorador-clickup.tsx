@@ -252,6 +252,7 @@ export function DialogExploradorClickUp({
   const [filtroTipo, setFiltroTipo] = useState<string>("todos");
   const [filtroYM, setFiltroYM] = useState<string>("todos");
   const [busca, setBusca] = useState("");
+  const [diasAtras, setDiasAtras] = useState(7);
 
   // Selection
   const [selecionados, setSelecionados] = useState<Map<string, ClickUpTask>>(new Map());
@@ -260,11 +261,12 @@ export function DialogExploradorClickUp({
   const [previewTask, setPreviewTask] = useState<ClickUpTask | null>(null);
 
   // ── Load index ──────────────────────────────────────────
-  const carregar = useCallback(async () => {
+  const carregar = useCallback(async (dias?: number) => {
+    const d = dias ?? diasAtras;
     setCarregando(true);
     setErroCarregamento(null);
     try {
-      const res = await fetch("/api/clickup/tasks");
+      const res = await fetch(`/api/clickup/tasks?dias=${d}`);
       if (!res.ok) throw new Error("Erro ao carregar tasks do ClickUp");
       const data: ClickUpIndice = await res.json();
       setIndice(data);
@@ -273,7 +275,14 @@ export function DialogExploradorClickUp({
     } finally {
       setCarregando(false);
     }
-  }, []);
+  }, [diasAtras]);
+
+  const carregarMais = useCallback(() => {
+    const novoDias = diasAtras === 7 ? 30 : diasAtras === 30 ? 90 : 365;
+    setDiasAtras(novoDias);
+    setIndice(null);
+    carregar(novoDias);
+  }, [diasAtras, carregar]);
 
   useEffect(() => {
     if (aberto && !indice) carregar();
@@ -285,6 +294,8 @@ export function DialogExploradorClickUp({
       setSelecionados(new Map());
       setPreviewTask(null);
       setBusca("");
+      setDiasAtras(7);
+      setIndice(null);
     }
   }, [aberto]);
 
@@ -332,7 +343,7 @@ export function DialogExploradorClickUp({
 
   return (
     <Dialog open={aberto} onOpenChange={(open) => !open && aoFechar()}>
-      <DialogContent className="flex h-[90vh] max-w-6xl flex-col gap-0 p-0 overflow-hidden">
+      <DialogContent className="flex h-[90vh] max-w-6xl sm:max-w-6xl flex-col gap-0 p-0 overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between border-b px-4 py-3">
           <DialogTitle className="text-base font-semibold">
@@ -422,7 +433,7 @@ export function DialogExploradorClickUp({
           ) : erroCarregamento ? (
             <div className="flex flex-col items-center justify-center h-full gap-3">
               <p className="text-sm text-destructive">{erroCarregamento}</p>
-              <Button variant="outline" size="sm" onClick={carregar}>Tentar novamente</Button>
+              <Button variant="outline" size="sm" onClick={() => carregar()}>Tentar novamente</Button>
             </div>
           ) : tasksFiltradas.length === 0 ? (
             <div className="flex items-center justify-center h-full">
@@ -447,14 +458,26 @@ export function DialogExploradorClickUp({
 
         {/* Footer */}
         <div className="flex items-center justify-between border-t px-4 py-3 bg-background">
-          <p className="text-sm text-muted-foreground">
-            {tasksFiltradas.length} card{tasksFiltradas.length !== 1 ? "s" : ""}
-            {selecionados.size > 0 && (
-              <span className="font-medium text-foreground">
-                {" "}· {selecionados.size} selecionado{selecionados.size !== 1 ? "s" : ""} ({totalImagens} imagens)
-              </span>
+          <div className="flex items-center gap-3">
+            <p className="text-sm text-muted-foreground">
+              {tasksFiltradas.length} card{tasksFiltradas.length !== 1 ? "s" : ""}
+              <span className="text-xs"> (últimos {diasAtras}d)</span>
+              {selecionados.size > 0 && (
+                <span className="font-medium text-foreground">
+                  {" "}· {selecionados.size} selecionado{selecionados.size !== 1 ? "s" : ""} ({totalImagens} imagens)
+                </span>
+              )}
+            </p>
+            {diasAtras < 365 && !carregando && (
+              <button
+                type="button"
+                onClick={carregarMais}
+                className="text-xs text-primary hover:underline"
+              >
+                Carregar mais antigos
+              </button>
             )}
-          </p>
+          </div>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={aoFechar}>Cancelar</Button>
             <Button

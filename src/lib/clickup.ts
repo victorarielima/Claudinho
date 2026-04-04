@@ -47,7 +47,7 @@ export interface ClickUpIndice {
 
 // ─── Cache ─────────────────────────────────────────────────
 
-let cacheIndice: { data: ClickUpIndice; timestamp: number } | null = null;
+let cacheIndice: { data: ClickUpIndice; timestamp: number; diasAtras: number } | null = null;
 
 // ─── Helpers ───────────────────────────────────────────────
 
@@ -62,19 +62,22 @@ async function clickupGet<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-/** Run promises with limited concurrency */
-async function pool<T>(tasks: (() => Promise<T>)[], concurrency: number): Promise<T[]> {
+/** Run promises in sequential batches with delay to respect rate limits */
+async function poolWithDelay<T>(
+  tasks: (() => Promise<T>)[],
+  batchSize: number,
+  delayMs: number
+): Promise<T[]> {
   const results: T[] = [];
-  let index = 0;
-
-  async function worker() {
-    while (index < tasks.length) {
-      const i = index++;
-      results[i] = await tasks[i]();
+  for (let i = 0; i < tasks.length; i += batchSize) {
+    const batch = tasks.slice(i, i + batchSize);
+    const batchResults = await Promise.all(batch.map((fn) => fn()));
+    results.push(...batchResults);
+    // Delay between batches to respect rate limit
+    if (i + batchSize < tasks.length) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
-
-  await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, worker));
   return results;
 }
 
@@ -131,20 +134,36 @@ interface RawAttachment {
   size: number;
 }
 
-async function listarTaskIds(): Promise<string[]> {
-  const ids: string[] = [];
+/** Statuses where images are expected to be attached */
+const STATUSES_COM_IMAGENS = new Set(["revisado", "finalizada", "revisão"]);
+
+interface RawListTask {
+  id: string;
+  name: string;
+  status: { status: string };
+  url: string;
+  custom_fields: { name: string; type: string; value: unknown }[];
+}
+
+async function listarTasks(diasAtras?: number): Promise<RawListTask[]> {
+  const tasks: RawListTask[] = [];
   let page = 0;
   let hasMore = true;
 
+  // Filter by date_updated to get recent tasks
+  const dateFilter = diasAtras
+    ? `&date_updated_gt=${Date.now() - diasAtras * 24 * 60 * 60 * 1000}`
+    : "";
+
   while (hasMore) {
-    const data = await clickupGet<{ tasks: { id: string }[] }>(
-      `/list/${CLICKUP_LIST_ID}/task?page=${page}&include_closed=false&subtasks=false`
+    const data = await clickupGet<{ tasks: RawListTask[] }>(
+      `/list/${CLICKUP_LIST_ID}/task?page=${page}&include_closed=false&subtasks=false${dateFilter}`
     );
-    for (const t of data.tasks) ids.push(t.id);
+    tasks.push(...data.tasks);
     hasMore = data.tasks.length === 100;
     page++;
   }
-  return ids;
+  return tasks;
 }
 
 async function buscarTaskDetalhe(taskId: string): Promise<RawTask> {
@@ -198,19 +217,31 @@ function mapearTask(
 
 // ─── Main: carregarIndiceClickUp ───────────────────────────
 
-export async function carregarIndiceClickUp(): Promise<ClickUpIndice> {
-  if (cacheIndice && Date.now() - cacheIndice.timestamp < CACHE_TTL_MS) {
+export async function carregarIndiceClickUp(diasAtras = 7): Promise<ClickUpIndice> {
+  // Use diasAtras as part of cache key — different ranges get different caches
+  if (
+    cacheIndice &&
+    cacheIndice.diasAtras === diasAtras &&
+    Date.now() - cacheIndice.timestamp < CACHE_TTL_MS
+  ) {
     return cacheIndice.data;
   }
 
-  const [dropdowns, taskIds] = await Promise.all([
+  const [dropdowns, listedTasks] = await Promise.all([
     carregarDropdowns(),
-    listarTaskIds(),
+    listarTasks(diasAtras),
   ]);
 
-  const rawTasks = await pool(
-    taskIds.map((id) => () => buscarTaskDetalhe(id)),
-    CONCURRENCY
+  // Only fetch details (for attachments) for tasks in statuses that typically have images
+  const tasksParaDetalhar = listedTasks.filter((t) =>
+    STATUSES_COM_IMAGENS.has(t.status.status)
+  );
+
+  // Fetch in batches of 8 with 1.5s delay to stay under 100 req/min rate limit
+  const rawTasks = await poolWithDelay(
+    tasksParaDetalhar.map((t) => () => buscarTaskDetalhe(t.id)),
+    8,
+    1500
   );
 
   const tasks = rawTasks
@@ -228,6 +259,6 @@ export async function carregarIndiceClickUp(): Promise<ClickUpIndice> {
     carregadoEm: new Date().toISOString(),
   };
 
-  cacheIndice = { data: indice, timestamp: Date.now() };
+  cacheIndice = { data: indice, timestamp: Date.now(), diasAtras };
   return indice;
 }
