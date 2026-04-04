@@ -20,9 +20,12 @@ import { DialogCriarAnuncio } from "@/components/dialog-criar-anuncio";
 import { DialogExploradorVideos } from "@/components/dialog-explorador-videos";
 import { FormularioLoteVideos } from "@/components/formulario-lote-videos";
 import { DialogEditarAnuncio } from "@/components/dialog-editar-anuncio";
+import { DialogExploradorClickUp } from "@/components/dialog-explorador-clickup";
+import { FormularioLoteImagens } from "@/components/formulario-lote-imagens";
 import { useBrand } from "@/components/brand-provider";
 import type { Ad, AdAsset, Brand } from "@/lib/db";
 import type { VideoDrive } from "@/lib/drive-explorer";
+import type { ClickUpTask } from "@/lib/clickup";
 import type { LinhaAnuncio, ChaveAba, DiagnosticoPlanilha } from "@/lib/sheets";
 import {
   detectarTipoCriativo,
@@ -164,6 +167,9 @@ export function PainelCriacao() {
     bloqueiosMeta?: string[]; avisosMeta?: string[];
     brand_id?: string; meta_account_id?: string;
   } | null>(null);
+  const [dialogClickUp, setDialogClickUp] = useState(false);
+  const [dialogLoteImagens, setDialogLoteImagens] = useState(false);
+  const [cardsClickUp, setCardsClickUp] = useState<ClickUpTask[]>([]);
   const [importando, setImportando] = useState(false);
   const [abaLegada, setAbaLegada] = useState<ChaveAba>("evino");
 
@@ -645,6 +651,13 @@ export function PainelCriacao() {
                 </svg>
                 Importar Vídeos
               </button>
+              <button onClick={() => setDialogClickUp(true)}
+                className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-medium text-white shadow-sm transition-all hover:bg-emerald-700 active:scale-[0.98]">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" />
+                </svg>
+                Importar Estáticos
+              </button>
               <button onClick={() => setDialogCriar(true)}
                 className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-input bg-background px-3 text-xs font-medium text-muted-foreground shadow-sm transition-all hover:bg-accent hover:text-accent-foreground active:scale-[0.98]">
                 Novo Criativo
@@ -927,6 +940,25 @@ export function PainelCriacao() {
         aberto={dialogLote}
         aoFechar={() => setDialogLote(false)}
         videos={videosSelecionados}
+        aoSalvar={carregarDados}
+      />
+
+      {/* Dialog: Explorador ClickUp (Estáticos) */}
+      <DialogExploradorClickUp
+        aberto={dialogClickUp}
+        aoFechar={() => setDialogClickUp(false)}
+        aoConfirmar={(cards: ClickUpTask[]) => {
+          setDialogClickUp(false);
+          setCardsClickUp(cards);
+          setDialogLoteImagens(true);
+        }}
+      />
+
+      {/* Dialog: Formulário de Lote Imagens */}
+      <FormularioLoteImagens
+        aberto={dialogLoteImagens}
+        aoFechar={() => setDialogLoteImagens(false)}
+        cards={cardsClickUp}
         aoSalvar={carregarDados}
       />
 
