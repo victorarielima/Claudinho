@@ -343,7 +343,7 @@ export function DialogExploradorClickUp({
 
   return (
     <Dialog open={aberto} onOpenChange={(open) => !open && aoFechar()}>
-      <DialogContent className="flex h-[90vh] max-w-6xl sm:max-w-6xl flex-col gap-0 p-0 overflow-hidden">
+      <DialogContent className="flex h-[90vh] max-w-6xl sm:max-w-6xl flex-col gap-0 p-0 overflow-hidden" showCloseButton={false}>
         {/* Header */}
         <div className="flex items-center justify-between border-b px-4 py-3">
           <DialogTitle className="text-base font-semibold">
