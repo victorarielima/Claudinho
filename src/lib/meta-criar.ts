@@ -402,6 +402,7 @@ export interface ParamsCriativoVideo {
   link: string;
   name: string;
   crossChannel?: CrossChannelInfo;
+  instagramActorId?: string | null;
 }
 
 export async function criarCreativeVideo(
@@ -436,10 +437,14 @@ export async function criarCreativeVideo(
     };
   }
 
-  const objectStorySpec = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const objectStorySpec: Record<string, any> = {
     page_id: params.pageId,
     video_data: videoData,
   };
+  if (params.instagramActorId) {
+    objectStorySpec.instagram_actor_id = params.instagramActorId;
+  }
 
   const formData = new FormData();
   formData.append("name", params.name);
@@ -507,6 +512,7 @@ export interface ParamsCriativoImagem {
   link: string;
   name: string;
   crossChannel?: CrossChannelInfo;
+  instagramActorId?: string | null;
 }
 
 type PlacementImagemNormalizado = "feed" | "stories" | "horizontal";
@@ -526,7 +532,7 @@ const PLACEMENT_RULES: Record<PlacementImagemNormalizado, Record<string, unknown
   },
   stories: {
     publisher_platforms: ["facebook", "instagram"],
-    facebook_positions: ["story", "reels"],
+    facebook_positions: ["story", "facebook_reels"],
     instagram_positions: ["story", "reels"],
   },
   horizontal: {
@@ -589,9 +595,15 @@ export async function criarCreativeImagem(
     asset_customization_rules: assetCustomizationRules,
   });
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const objectStorySpecMulti: Record<string, any> = { page_id: params.pageId };
+  if (params.instagramActorId) {
+    objectStorySpecMulti.instagram_actor_id = params.instagramActorId;
+  }
+
   const formData = new FormData();
   formData.append("name", params.name);
-  formData.append("object_story_spec", JSON.stringify({ page_id: params.pageId }));
+  formData.append("object_story_spec", JSON.stringify(objectStorySpecMulti));
   formData.append("asset_feed_spec", JSON.stringify(assetFeedSpec));
   if (params.link?.trim()) {
     formData.append("link_url", params.link);
@@ -600,9 +612,22 @@ export async function criarCreativeImagem(
     "degrees_of_freedom_spec",
     JSON.stringify({
       creative_features_spec: {
-        standard_enhancements: {
-          enroll_status: "OPT_OUT",
-        },
+        adapt_to_placement: { enroll_status: "OPT_OUT" },
+        add_text_overlay: { enroll_status: "OPT_OUT" },
+        creative_stickers: { enroll_status: "OPT_OUT" },
+        description_automation: { enroll_status: "OPT_OUT" },
+        enhance_cta: { enroll_status: "OPT_OUT" },
+        image_background_gen: { enroll_status: "OPT_OUT" },
+        image_brightness_and_contrast: { enroll_status: "OPT_OUT" },
+        image_templates: { enroll_status: "OPT_OUT" },
+        image_touchups: { enroll_status: "OPT_OUT" },
+        image_uncrop: { enroll_status: "OPT_OUT" },
+        inline_comment: { enroll_status: "OPT_OUT" },
+        media_type_automation: { enroll_status: "OPT_OUT" },
+        product_extensions: { enroll_status: "OPT_OUT" },
+        text_optimizations: { enroll_status: "OPT_OUT" },
+        text_translation: { enroll_status: "OPT_OUT" },
+        video_auto_crop: { enroll_status: "OPT_OUT" },
       },
     })
   );
@@ -664,10 +689,14 @@ async function criarCreativeImagemSimples(
     };
   }
 
-  const objectStorySpec = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const objectStorySpec: Record<string, any> = {
     page_id: params.pageId,
     link_data: linkData,
   };
+  if (params.instagramActorId) {
+    objectStorySpec.instagram_actor_id = params.instagramActorId;
+  }
 
   const formData = new FormData();
   formData.append("name", params.name);
@@ -789,6 +818,23 @@ export async function buscarAccountIdDoAdSet(
 export interface CrossChannelInfo {
   objectStoreUrls: string[];
   applicationId: string | null;
+}
+
+export async function buscarInstagramActorId(
+  pageId: string
+): Promise<string | null> {
+  const token = getAccessToken();
+  const url = `${META_API_BASE}/${pageId}/instagram_accounts?fields=id&access_token=${token}`;
+
+  try {
+    const res = await metaFetchWithRetry(url);
+    const json = await safeResponseJson(res);
+    if (!res.ok || json.error) return null;
+    const data = json.data as { id: string }[] | undefined;
+    return data?.[0]?.id ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function buscarCrossChannelInfo(

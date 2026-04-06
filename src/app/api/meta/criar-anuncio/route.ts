@@ -8,6 +8,7 @@ import {
   criarAnuncio,
   buscarAccountIdDoAdSet,
   buscarCrossChannelInfo,
+  buscarInstagramActorId,
   type ImagemPlacement,
 } from "@/lib/meta-criar";
 import { buscarAd, buscarBrand, atualizarStatusAd } from "@/lib/db";
@@ -235,8 +236,11 @@ async function processarFluxoLegado(body: CorpoLegado) {
 
     let creativeId: string;
 
-    // Buscar object_store_urls do ad set (necessário para campanhas cross-channel)
-    const crossChannel = await buscarCrossChannelInfo(body.adSetId);
+    // Buscar cross-channel info e Instagram actor ID em paralelo
+    const [crossChannel, instagramActorId] = await Promise.all([
+      buscarCrossChannelInfo(body.adSetId),
+      buscarInstagramActorId(pageId),
+    ]);
 
     if (tipoCriativo === "image") {
       const imageAssets = (body.imageAssets?.length ? body.imageAssets : extrairImageAssets(body.linkVideo))
@@ -267,6 +271,7 @@ async function processarFluxoLegado(body: CorpoLegado) {
         link: body.linkAnuncio,
         name: `Creative - ${body.adName}`,
         crossChannel,
+        instagramActorId,
       });
     } else {
       const arquivo = await baixarArquivoDrive(body.linkVideo);
@@ -287,6 +292,7 @@ async function processarFluxoLegado(body: CorpoLegado) {
         link: body.linkAnuncio,
         name: `Creative - ${body.adName}`,
         crossChannel,
+        instagramActorId,
       });
     }
 

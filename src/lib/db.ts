@@ -171,16 +171,30 @@ export async function listarAds(filtros: FiltrosAd = {}): Promise<{ ads: Ad[]; t
   return { ads: data as Ad[], total: count ?? 0 };
 }
 
-export async function buscarAd(id: string): Promise<Ad | null> {
+export async function buscarAd(id: string, tentativas = 3): Promise<Ad | null> {
   const sb = getSupabase();
-  const { data, error } = await sb
-    .from("ads")
-    .select("*, ad_assets(*)")
-    .eq("id", id)
-    .maybeSingle();
 
-  if (error) throw new Error(`Erro ao buscar ad: ${error.message}`);
-  return data as Ad | null;
+  for (let i = 0; i < tentativas; i++) {
+    try {
+      const { data, error } = await sb
+        .from("ads")
+        .select("*, ad_assets(*)")
+        .eq("id", id)
+        .maybeSingle();
+
+      if (error) throw new Error(`Erro ao buscar ad: ${error.message}`);
+      return data as Ad | null;
+    } catch (e) {
+      const isFetchError = e instanceof Error && e.message.includes("fetch failed");
+      if (isFetchError && i < tentativas - 1) {
+        await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
+        continue;
+      }
+      throw e;
+    }
+  }
+
+  return null;
 }
 
 export async function criarAd(input: CriarAdInput, userId: string, userName?: string): Promise<Ad> {

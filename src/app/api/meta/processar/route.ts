@@ -9,6 +9,7 @@ import {
   criarAnuncio,
   buscarAccountIdDoAdSet,
   buscarCrossChannelInfo,
+  buscarInstagramActorId,
   type ImagemPlacement,
 } from "@/lib/meta-criar";
 import {
@@ -497,8 +498,11 @@ async function stepCriarCreative(
 
   let creativeId: string;
 
-  // Buscar info cross-channel do ad set (necessário para campanhas com otimização omnichannel)
-  const crossChannel = ad.ad_set_id ? await buscarCrossChannelInfo(ad.ad_set_id) : undefined;
+  // Buscar info cross-channel e Instagram actor ID em paralelo
+  const [crossChannel, instagramActorId] = await Promise.all([
+    ad.ad_set_id ? buscarCrossChannelInfo(ad.ad_set_id) : Promise.resolve(undefined),
+    buscarInstagramActorId(pageId),
+  ]);
 
   if (ad.type === "video") {
     const videoAsset = assets.find((a) => a.asset_type === "video");
@@ -514,6 +518,7 @@ async function stepCriarCreative(
       link: ad.link_anuncio || "",
       name: `Creative - ${ad.ad_name}`,
       crossChannel,
+      instagramActorId,
     });
   } else {
     // Re-fetch assets from DB to get updated meta_asset_id values
@@ -541,6 +546,7 @@ async function stepCriarCreative(
       link: ad.link_anuncio || "",
       name: `Creative - ${ad.ad_name}`,
       crossChannel,
+      instagramActorId,
     });
   }
 
