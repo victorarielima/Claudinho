@@ -114,6 +114,8 @@ export function PainelCriacao() {
   const [serviceAccountEmail, setServiceAccountEmail] = useState<string>("");
   const [diagnosticoPlanilha, setDiagnosticoPlanilha] = useState<DiagnosticoPlanilha | null>(null);
 
+  const [sincronizando, setSincronizando] = useState(false);
+
   const [selecionados, setSelecionados] = useState<Set<number>>(new Set());
   const [filtroStatus, setFiltroStatus] = useState<string>("todos");
   const [filtroData, setFiltroData] = useState<string>("todas");
@@ -283,6 +285,7 @@ export function PainelCriacao() {
       })),
       linkCampanha: ad.link_campanha ?? "",
       linkAux: ad.link_aux ?? "",
+      metaEffectiveStatus: ad.meta_effective_status ?? null,
     };
   }
 
@@ -503,6 +506,39 @@ export function PainelCriacao() {
     }
   }, [abaLegada]);
 
+  const sincronizarMeta = useCallback(async () => {
+    setSincronizando(true);
+    try {
+      const res = await fetch("/api/meta/sync-status", { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.erro ?? "Erro ao sincronizar");
+
+      if (json.alterados > 0) {
+        // Recarregar dados para refletir mudanças
+        await carregarDados();
+        setFeedback({
+          tipo: "info",
+          titulo: "Sync concluído",
+          descricao: `${json.sincronizados} anúncio${json.sincronizados !== 1 ? "s" : ""} verificado${json.sincronizados !== 1 ? "s" : ""}, ${json.alterados} atualizado${json.alterados !== 1 ? "s" : ""}.`,
+        });
+      } else {
+        setFeedback({
+          tipo: "sucesso",
+          titulo: "Tudo sincronizado",
+          descricao: `${json.sincronizados} anúncio${json.sincronizados !== 1 ? "s" : ""} verificado${json.sincronizados !== 1 ? "s" : ""}, nenhuma alteração.`,
+        });
+      }
+    } catch (e) {
+      setFeedback({
+        tipo: "erro",
+        titulo: "Erro ao sincronizar com Meta",
+        descricao: e instanceof Error ? e.message : "Erro desconhecido",
+      });
+    } finally {
+      setSincronizando(false);
+    }
+  }, [carregarDados]);
+
   // QW-1: Collect target lines and show confirmation dialog
   const pedirConfirmacaoUpload = useCallback(() => {
     const podeSubir = (l: LinhaComStatus) =>
@@ -681,6 +717,13 @@ export function PainelCriacao() {
             className="inline-flex h-10 items-center gap-2 rounded-lg border border-input bg-background px-5 text-sm font-medium shadow-sm transition-all hover:bg-accent hover:text-accent-foreground active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50">
             {carregando ? (<><span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />Carregando...</>) : jaCarregou ? "Recarregar" : "Carregar"}
           </button>
+
+          {jaCarregou && fonteDados === "supabase" && totalConcluidos > 0 && (
+            <button onClick={sincronizarMeta} disabled={sincronizando || processando}
+              className="inline-flex h-10 items-center gap-2 rounded-lg border border-input bg-background px-5 text-sm font-medium shadow-sm transition-all hover:bg-accent hover:text-accent-foreground active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50">
+              {sincronizando ? (<><span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />Sincronizando...</>) : (<><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.992 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" /></svg>Sincronizar Meta</>)}
+            </button>
+          )}
 
           {fonteDados === "supabase" && SHEETS_ENABLED && (
             <button onClick={importarDaPlanilha} disabled={importando || carregando}

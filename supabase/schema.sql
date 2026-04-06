@@ -44,6 +44,7 @@ CREATE TABLE ads (
   meta_ad_id TEXT,
   meta_creative_id TEXT,
   meta_account_id TEXT,
+  meta_effective_status TEXT,
 
   created_by TEXT,            -- clerk user ID
   created_at TIMESTAMPTZ DEFAULT now(),

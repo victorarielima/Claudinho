@@ -45,6 +45,7 @@ export interface LinhaComStatus extends LinhaAnuncio {
   prontoMeta?: boolean;
   bloqueiosMeta?: string[];
   avisosMeta?: string[];
+  metaEffectiveStatus?: string | null;
 }
 
 interface TabelaPendentesProps {
@@ -107,6 +108,32 @@ function StatusBadge({ status }: { status: StatusProcessamento }) {
         </Badge>
       );
   }
+}
+
+const META_STATUS_STYLES: Record<string, { className: string; label: string }> = {
+  ACTIVE: { className: "border-green-200 bg-green-50 text-green-700", label: "Active" },
+  PAUSED: { className: "border-gray-200 bg-gray-50 text-gray-600", label: "Paused" },
+  DELETED: { className: "border-red-200 bg-red-50 text-red-700", label: "Deleted" },
+  DISAPPROVED: { className: "border-red-200 bg-red-50 text-red-700", label: "Disapproved" },
+  PENDING_REVIEW: { className: "border-yellow-200 bg-yellow-50 text-yellow-700", label: "Em revisão" },
+  WITH_ISSUES: { className: "border-amber-200 bg-amber-50 text-amber-700", label: "Com problemas" },
+  CAMPAIGN_PAUSED: { className: "border-gray-200 bg-gray-50 text-gray-600", label: "Campanha pausada" },
+  ADSET_PAUSED: { className: "border-gray-200 bg-gray-50 text-gray-600", label: "AdSet pausado" },
+};
+
+function MetaStatusBadge({ status }: { status: string }) {
+  const style = META_STATUS_STYLES[status] ?? {
+    className: "border-gray-200 bg-gray-50 text-gray-500",
+    label: status,
+  };
+  return (
+    <Badge variant="outline" className={`gap-1 text-xs ${style.className}`}>
+      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5a17.92 17.92 0 0 1-8.716-2.247m0 0A8.966 8.966 0 0 1 3 12c0-1.264.26-2.467.732-3.558" />
+      </svg>
+      {style.label}
+    </Badge>
+  );
 }
 
 function DetalheItem({
@@ -388,8 +415,19 @@ function TabelaCompacta({
                     />
                   )}
                 </td>
-                <td className="px-2 py-2" title={temErro && linha.mensagemErro ? linha.mensagemErro : undefined}>
-                  <StatusDot status={linha.statusProcessamento} />
+                <td className="px-2 py-2 whitespace-nowrap w-[110px] max-w-[110px]" title={temErro && linha.mensagemErro ? linha.mensagemErro : linha.metaEffectiveStatus ? `Meta: ${linha.metaEffectiveStatus}` : undefined}>
+                  <div className="flex items-center gap-1 overflow-hidden">
+                    <StatusDot status={linha.statusProcessamento} />
+                    {linha.metaEffectiveStatus && (
+                      <span className={`text-[9px] font-medium truncate ${
+                        linha.metaEffectiveStatus === "ACTIVE" ? "text-green-600"
+                        : linha.metaEffectiveStatus === "DELETED" || linha.metaEffectiveStatus === "DISAPPROVED" ? "text-red-600"
+                        : "text-gray-500"
+                      }`}>
+                        {META_STATUS_STYLES[linha.metaEffectiveStatus]?.label ?? linha.metaEffectiveStatus}
+                      </span>
+                    )}
+                  </div>
                 </td>
                 <td className="px-2 py-2">
                   <div className="flex items-center gap-1.5 min-w-0">
@@ -736,6 +774,9 @@ export function TabelaPendentes({
                               )}
                             </h3>
                             <StatusBadge status={linha.statusProcessamento} />
+                            {linha.metaEffectiveStatus && (
+                              <MetaStatusBadge status={linha.metaEffectiveStatus} />
+                            )}
                             <Badge variant="outline" className="gap-1 text-xs">
                               {isImage ? "Imagem" : "Vídeo"}
                             </Badge>

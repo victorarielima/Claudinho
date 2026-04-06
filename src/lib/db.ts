@@ -27,6 +27,7 @@ export interface Ad {
   meta_ad_id: string | null;
   meta_creative_id: string | null;
   meta_account_id: string | null;
+  meta_effective_status: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -328,6 +329,7 @@ export async function atualizarStatusAd(
     meta_ad_id?: string;
     meta_creative_id?: string;
     meta_account_id?: string;
+    meta_effective_status?: string | null;
   },
   userId?: string,
   userName?: string
@@ -339,6 +341,7 @@ export async function atualizarStatusAd(
   if (meta?.meta_ad_id) updateData.meta_ad_id = meta.meta_ad_id;
   if (meta?.meta_creative_id) updateData.meta_creative_id = meta.meta_creative_id;
   if (meta?.meta_account_id) updateData.meta_account_id = meta.meta_account_id;
+  if (meta?.meta_effective_status !== undefined) updateData.meta_effective_status = meta.meta_effective_status;
 
   const { error } = await sb.from("ads").update(updateData).eq("id", id);
   if (error) throw new Error(`Erro ao atualizar status: ${error.message}`);
@@ -364,6 +367,59 @@ export async function atualizarStatusAd(
     user_id: userId ?? "system",
     user_name: userName,
   });
+}
+
+export async function listarAdsSincronizaveis(tentativas = 3): Promise<Pick<Ad, "id" | "meta_ad_id" | "meta_account_id" | "status" | "meta_effective_status">[]> {
+  const sb = getSupabase();
+
+  for (let i = 0; i < tentativas; i++) {
+    try {
+      const { data, error } = await sb
+        .from("ads")
+        .select("id, meta_ad_id, meta_account_id, status, meta_effective_status")
+        .not("meta_ad_id", "is", null);
+
+      if (error) throw new Error(`Erro ao listar ads sincronizaveis: ${error.message}`);
+      return data ?? [];
+    } catch (e) {
+      const isFetchError = e instanceof Error && e.message.includes("fetch failed");
+      if (isFetchError && i < tentativas - 1) {
+        await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
+        continue;
+      }
+      throw e;
+    }
+  }
+
+  return [];
+}
+
+export async function atualizarMetaEffectiveStatus(
+  id: string,
+  metaEffectiveStatus: string,
+  statusLocal?: StatusAd,
+  errorMessage?: string,
+  tentativas = 3
+): Promise<void> {
+  const sb = getSupabase();
+  const updateData: Record<string, unknown> = { meta_effective_status: metaEffectiveStatus };
+  if (statusLocal) updateData.status = statusLocal;
+  if (errorMessage !== undefined) updateData.error_message = errorMessage;
+
+  for (let i = 0; i < tentativas; i++) {
+    try {
+      const { error } = await sb.from("ads").update(updateData).eq("id", id);
+      if (error) throw new Error(`Erro ao atualizar meta_effective_status: ${error.message}`);
+      return;
+    } catch (e) {
+      const isFetchError = e instanceof Error && e.message.includes("fetch failed");
+      if (isFetchError && i < tentativas - 1) {
+        await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
+        continue;
+      }
+      throw e;
+    }
+  }
 }
 
 export async function atualizarMetaAssetId(
