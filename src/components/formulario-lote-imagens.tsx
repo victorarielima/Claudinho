@@ -275,6 +275,29 @@ export function FormularioLoteImagens({
     });
   }, []);
 
+  // ── Sort: ACTIVE first, then alphabetical ───────────────
+  const campanhasOrdenadas = useMemo(
+    () =>
+      [...campanhas].sort((a, b) => {
+        const ativoA = a.status === "ACTIVE" ? 0 : 1;
+        const ativoB = b.status === "ACTIVE" ? 0 : 1;
+        if (ativoA !== ativoB) return ativoA - ativoB;
+        return a.nome.localeCompare(b.nome);
+      }),
+    [campanhas],
+  );
+
+  const adsetsOrdenados = useMemo(
+    () =>
+      [...adsets].sort((a, b) => {
+        const ativoA = a.status === "ACTIVE" ? 0 : 1;
+        const ativoB = b.status === "ACTIVE" ? 0 : 1;
+        if (ativoA !== ativoB) return ativoA - ativoB;
+        return a.nome.localeCompare(b.nome);
+      }),
+    [adsets],
+  );
+
   // ── Validation ──────────────────────────────────────────
   const podeSalvar = useMemo(() => {
     if (!brandId || !campanhaId || !adSetId) return false;
@@ -392,8 +415,19 @@ export function FormularioLoteImagens({
                     <SelectValue placeholder={carregandoCampanhas ? "Carregando..." : "Selecione"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {campanhas.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>
+                    {campanhasOrdenadas.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        <span className="flex items-center gap-2">
+                          <span
+                            className={`size-1.5 shrink-0 rounded-full ${
+                              c.status === "ACTIVE" ? "bg-emerald-500" : "bg-muted-foreground/40"
+                            }`}
+                          />
+                          <span className={c.status === "ACTIVE" ? "" : "text-muted-foreground"}>
+                            {c.nome}
+                          </span>
+                        </span>
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -405,8 +439,19 @@ export function FormularioLoteImagens({
                     <SelectValue placeholder={carregandoAdsets ? "Carregando..." : "Selecione"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {adsets.map((a) => (
-                      <SelectItem key={a.id} value={a.id}>{a.nome}</SelectItem>
+                    {adsetsOrdenados.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        <span className="flex items-center gap-2">
+                          <span
+                            className={`size-1.5 shrink-0 rounded-full ${
+                              a.status === "ACTIVE" ? "bg-emerald-500" : "bg-muted-foreground/40"
+                            }`}
+                          />
+                          <span className={a.status === "ACTIVE" ? "" : "text-muted-foreground"}>
+                            {a.nome}
+                          </span>
+                        </span>
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
