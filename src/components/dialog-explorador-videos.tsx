@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
   Check,
   ChevronRight,
   Clock,
+  ExternalLink,
   Folder,
   FolderOpen,
   Loader2,
@@ -37,7 +38,12 @@ import {
 // ---------------------------------------------------------------------------
 
 export type { PastaDrive, VideoDrive, FormatoVideo } from "@/lib/drive-explorer";
-import type { PastaDrive, VideoDrive, IndiceCompleto, FormatoVideo } from "@/lib/drive-explorer";
+import type {
+  PastaDrive,
+  VideoDrive,
+  StreamEvento,
+  FormatoVideo,
+} from "@/lib/drive-explorer";
 
 interface DialogExploradorVideosProps {
   aberto: boolean;
@@ -364,10 +370,29 @@ export function DialogExploradorVideos({
   aoFechar,
   aoConfirmar,
 }: DialogExploradorVideosProps) {
-  // Full index loaded once
-  const [indice, setIndice] = useState<IndiceCompleto | null>(null);
-  const [carregando, setCarregando] = useState(false);
+  // Progressive streaming load: pastas + videos arrive incrementally
+  const [filhosPorParent, setFilhosPorParent] = useState<Map<string, PastaDrive[]>>(new Map());
+  const [raizId, setRaizId] = useState<string | null>(null);
+  const [videos, setVideos] = useState<VideoDrive[]>([]);
+  const [todosVideosCarregados, setTodosVideosCarregados] = useState(false);
   const [erroCarregamento, setErroCarregamento] = useState<string | null>(null);
+  const autoSelecionouRef = useRef(false);
+  const streamRequestRef = useRef(false);
+
+  // Build nested tree from flat parent→children map
+  const pastas = useMemo<PastaDrive[] | null>(() => {
+    if (!raizId) return null;
+    const construir = (parentId: string): PastaDrive[] => {
+      const filhos = filhosPorParent.get(parentId) ?? [];
+      return filhos.map((c) => ({
+        id: c.id,
+        nome: c.nome,
+        modifiedTime: c.modifiedTime,
+        filhos: construir(c.id),
+      }));
+    };
+    return construir(raizId);
+  }, [filhosPorParent, raizId]);
 
   // Filters (all client-side)
   const [pastaSelecionada, setPastaSelecionada] = useState<string | null>(null);
@@ -383,31 +408,80 @@ export function DialogExploradorVideos({
   // Preview
   const [previewVideoId, setPreviewVideoId] = useState<string | null>(null);
 
-  // Load full index on dialog open (single API call, cached server-side for 10min)
+  // Progressive streaming: pastas + vídeos chegam conforme descobertos no Drive,
+  // priorizando pastas mais recentes (best-first por modifiedTime).
+  // Ref-guarded to be safe against React strict-mode double-invocation.
   useEffect(() => {
-    if (!aberto || indice) return;
+    if (!aberto || todosVideosCarregados || streamRequestRef.current) return;
+    streamRequestRef.current = true;
+    setErroCarregamento(null);
 
-    async function carregar() {
-      setCarregando(true);
-      setErroCarregamento(null);
-      try {
-        const res = await fetch("/api/drive/indice");
-        if (!res.ok) throw new Error("Erro ao carregar índice de vídeos");
-        const dados: IndiceCompleto = await res.json();
-        setIndice(dados);
-
-        // Auto-select most recent month folder
-        const recente = pastaMaisRecente(dados.pastas);
-        if (recente) setPastaSelecionada(recente.id);
-      } catch (err) {
-        setErroCarregamento(err instanceof Error ? err.message : "Erro desconhecido");
-      } finally {
-        setCarregando(false);
+    function processarEvento(ev: StreamEvento) {
+      switch (ev.tipo) {
+        case "raiz":
+          setRaizId(ev.raizId);
+          break;
+        case "pastas":
+          setFilhosPorParent((prev) => {
+            const next = new Map(prev);
+            next.set(ev.parentId, ev.filhos);
+            return next;
+          });
+          break;
+        case "videos":
+          setVideos((prev) => [...prev, ...ev.videos]);
+          break;
+        case "fim":
+          setTodosVideosCarregados(true);
+          break;
+        case "erro":
+          setErroCarregamento(ev.mensagem);
+          streamRequestRef.current = false;
+          break;
       }
     }
 
-    carregar();
-  }, [aberto, indice]);
+    (async () => {
+      try {
+        const res = await fetch("/api/drive/explorar");
+        if (!res.ok || !res.body) throw new Error("Erro ao iniciar stream do Drive");
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const linhas = buffer.split("\n");
+          buffer = linhas.pop() ?? "";
+          for (const linha of linhas) {
+            if (!linha.trim()) continue;
+            try {
+              processarEvento(JSON.parse(linha) as StreamEvento);
+            } catch {
+              // ignora linhas malformadas
+            }
+          }
+        }
+      } catch (err) {
+        setErroCarregamento(err instanceof Error ? err.message : "Erro desconhecido");
+        streamRequestRef.current = false;
+      }
+    })();
+  }, [aberto, todosVideosCarregados]);
+
+  // Auto-select most recent top-level folder once it arrives via stream
+  useEffect(() => {
+    if (autoSelecionouRef.current) return;
+    if (!pastas || pastas.length === 0) return;
+    const recente = pastaMaisRecente(pastas);
+    if (recente) {
+      setPastaSelecionada(recente.id);
+      autoSelecionouRef.current = true;
+    }
+  }, [pastas]);
 
   // Reset on close
   useEffect(() => {
@@ -419,15 +493,16 @@ export function DialogExploradorVideos({
       setPreviewVideoId(null);
       setAtalhoNovos(false);
       setBusca("");
-      // Don't clear indice — reuse on next open
+      autoSelecionouRef.current = false;
+      // Don't clear pastas/videos — reuse on next open
     }
   }, [aberto]);
 
   // Client-side video filtering (instant)
   const videosFiltrados = useMemo(() => {
-    if (!indice) return [];
+    if (!pastas) return [];
 
-    let lista = indice.videos;
+    let lista = videos;
 
     // Filter by folder
     if (atalhoNovos) {
@@ -438,7 +513,7 @@ export function DialogExploradorVideos({
 
     if (pastaSelecionada) {
       if (incluirSubpastas) {
-        const idsValidos = coletarIds(indice.pastas, pastaSelecionada);
+        const idsValidos = coletarIds(pastas, pastaSelecionada);
         lista = lista.filter((v) => idsValidos.has(v.pastaId));
       } else {
         lista = lista.filter((v) => v.pastaId === pastaSelecionada);
@@ -471,23 +546,22 @@ export function DialogExploradorVideos({
     }
 
     return lista;
-  }, [indice, pastaSelecionada, filtroData, incluirSubpastas, atalhoNovos, busca, filtroMarca]);
+  }, [pastas, videos, pastaSelecionada, filtroData, incluirSubpastas, atalhoNovos, busca, filtroMarca]);
 
   // Video count per folder (for sidebar badges)
   const contagensPorPasta = useMemo(() => {
-    if (!indice) return new Map<string, number>();
     const map = new Map<string, number>();
-    for (const v of indice.videos) {
+    for (const v of videos) {
       map.set(v.pastaId, (map.get(v.pastaId) ?? 0) + 1);
     }
     return map;
-  }, [indice]);
+  }, [videos]);
 
   // Breadcrumb
   const caminho = useMemo(() => {
-    if (!pastaSelecionada || !indice) return [];
-    return construirCaminho(indice.pastas, pastaSelecionada) ?? [];
-  }, [indice, pastaSelecionada]);
+    if (!pastaSelecionada || !pastas) return [];
+    return construirCaminho(pastas, pastaSelecionada) ?? [];
+  }, [pastas, pastaSelecionada]);
 
   // Handlers
   const alternarSelecao = useCallback((video: VideoDrive) => {
@@ -528,10 +602,24 @@ export function DialogExploradorVideos({
               <DialogTitle className="flex items-center gap-2">
                 <Video className="size-5 text-primary" />
                 Explorar Vídeos
+                {raizId && (
+                  <a
+                    href={`https://drive.google.com/drive/folders/${raizId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Abrir pasta no Drive"
+                    className="text-muted-foreground/60 hover:text-foreground transition-colors"
+                  >
+                    <ExternalLink className="size-3.5" />
+                  </a>
+                )}
               </DialogTitle>
-              {indice && (
+              {pastas && (
                 <Badge variant="outline" className="text-muted-foreground font-normal">
-                  {indice.totalVideos} vídeos
+                  {videos.length} vídeo{videos.length !== 1 ? "s" : ""}
+                  {!todosVideosCarregados && (
+                    <Loader2 className="ml-1 size-3 animate-spin" />
+                  )}
                 </Badge>
               )}
               {totalSelecionados > 0 && (
@@ -550,19 +638,30 @@ export function DialogExploradorVideos({
             </div>
           </div>
 
-          {/* ── Loading state (full index) ──────────────────────────── */}
-          {carregando ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-3">
-              <Loader2 className="size-8 animate-spin text-primary" />
-              <p className="text-sm text-muted-foreground">Carregando vídeos do Drive...</p>
-              <p className="text-xs text-muted-foreground/60">Primeira carga pode levar alguns segundos</p>
-            </div>
-          ) : erroCarregamento ? (
+          {/* ── Loading state (only blocks on initial pastas fetch) ─── */}
+          {erroCarregamento ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-2">
               <p className="text-sm text-destructive">{erroCarregamento}</p>
-              <Button variant="outline" size="sm" onClick={() => { setIndice(null); }}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setFilhosPorParent(new Map());
+                  setRaizId(null);
+                  setVideos([]);
+                  setTodosVideosCarregados(false);
+                  setErroCarregamento(null);
+                  streamRequestRef.current = false;
+                  autoSelecionouRef.current = false;
+                }}
+              >
                 Tentar novamente
               </Button>
+            </div>
+          ) : !raizId ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3">
+              <Loader2 className="size-8 animate-spin text-primary" />
+              <p className="text-sm text-muted-foreground">Conectando ao Drive...</p>
             </div>
           ) : (
             <>
@@ -659,7 +758,7 @@ export function DialogExploradorVideos({
                 {/* Sidebar */}
                 <aside className="flex w-[240px] shrink-0 flex-col border-r bg-muted/30">
                   <div className="flex-1 overflow-y-auto p-2">
-                    {indice?.pastas.map((pasta) => (
+                    {pastas?.map((pasta) => (
                       <ItemPasta
                         key={pasta.id}
                         pasta={pasta}
@@ -688,14 +787,18 @@ export function DialogExploradorVideos({
                 {/* Video grid */}
                 <main className="flex-1 overflow-y-auto p-4">
                   {videosFiltrados.length === 0 ? (
-                    <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
-                      <Video className="size-10 opacity-30" />
-                      <p className="text-sm">
-                        {pastaSelecionada || atalhoNovos
-                          ? "Nenhum vídeo encontrado com os filtros atuais"
-                          : "Selecione uma pasta para explorar vídeos"}
-                      </p>
-                    </div>
+                    videos.length === 0 && !todosVideosCarregados ? (
+                      <GradeEsqueleto />
+                    ) : (
+                      <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
+                        <Video className="size-10 opacity-30" />
+                        <p className="text-sm">
+                          {pastaSelecionada || atalhoNovos
+                            ? "Nenhum vídeo encontrado com os filtros atuais"
+                            : "Selecione uma pasta para explorar vídeos"}
+                        </p>
+                      </div>
+                    )
                   ) : (
                     <div className="grid auto-rows-max grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
                       {videosFiltrados.map((video) => (
@@ -707,6 +810,16 @@ export function DialogExploradorVideos({
                           aoPreview={() => setPreviewVideoId(video.id)}
                         />
                       ))}
+                      {!todosVideosCarregados &&
+                        Array.from({ length: 6 }).map((_, i) => (
+                          <div key={`sk-${i}`} className="overflow-hidden rounded-lg border">
+                            <Skeleton className="aspect-square w-full" />
+                            <div className="space-y-1.5 p-2">
+                              <Skeleton className="h-3.5 w-3/4" />
+                              <Skeleton className="h-3 w-1/2" />
+                            </div>
+                          </div>
+                        ))}
                     </div>
                   )}
                 </main>
@@ -725,7 +838,7 @@ export function DialogExploradorVideos({
           <div className="flex items-center justify-between gap-4 px-4 py-3 border-b">
             <DialogTitle className="text-sm font-medium truncate min-w-0">
               {(() => {
-                const v = previewVideoId ? indice?.videos.find((x) => x.id === previewVideoId) : null;
+                const v = previewVideoId ? videos.find((x) => x.id === previewVideoId) : null;
                 return v ? `${v.nome}  ·  ${v.largura}×${v.altura}  ·  ${ROTULO_FORMATO[v.formato]}` : "Preview";
               })()}
             </DialogTitle>

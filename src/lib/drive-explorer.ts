@@ -30,15 +30,17 @@ export interface VideoDrive {
   driveUrl: string;
 }
 
-export interface IndiceCompleto {
-  pastas: PastaDrive[];
-  videos: VideoDrive[];
-  totalVideos: number;
-  carregadoEm: string;
-}
+export type StreamEvento =
+  | { tipo: "raiz"; raizId: string }
+  | { tipo: "pastas"; parentId: string; filhos: PastaDrive[] }
+  | { tipo: "videos"; videos: VideoDrive[] }
+  | { tipo: "fim" }
+  | { tipo: "erro"; mensagem: string };
+
+export type EmitFn = (ev: StreamEvento) => void;
 
 // ---------------------------------------------------------------------------
-// Drive client helper
+// Drive client + constants
 // ---------------------------------------------------------------------------
 
 function getDrive() {
@@ -50,105 +52,177 @@ const SHARED_DRIVE_PARAMS = {
   includeItemsFromAllDrives: true,
 } as const;
 
-// ---------------------------------------------------------------------------
-// Cache — single index of everything (pastas + all videos)
-// ---------------------------------------------------------------------------
-
-let cacheIndice: { data: IndiceCompleto; timestamp: number } | null = null;
-const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const MAX_DEPTH = 8;
+const CACHE_TTL_MS = 10 * 60 * 1000;
+const CONCURRENCIA = 20;
+const FOLDER_MIME = "application/vnd.google-apps.folder";
 
 // ---------------------------------------------------------------------------
-// Main: carregarIndiceCompleto
-// Loads folder tree (2 levels) + ALL videos in one shot. Cached for 10min.
+// Cache (full result, populated after a complete walk)
 // ---------------------------------------------------------------------------
 
-export async function carregarIndiceCompleto(): Promise<IndiceCompleto> {
-  if (cacheIndice && Date.now() - cacheIndice.timestamp < CACHE_TTL_MS) {
-    return cacheIndice.data;
-  }
+interface CacheCompleto {
+  pastas: PastaDrive[];
+  raizId: string;
+  videos: VideoDrive[];
+  timestamp: number;
+}
 
+let cacheCompleto: CacheCompleto | null = null;
+
+export function invalidarCacheDrive() {
+  cacheCompleto = null;
+}
+
+// ---------------------------------------------------------------------------
+// Public: explorar(emit)
+// Walks the Drive tree level by level, sorted by modifiedTime desc within
+// each level, processing folders concurrently with a worker pool. Calls
+// `emit` with each event as it's discovered.
+// ---------------------------------------------------------------------------
+
+export async function explorar(emit: EmitFn): Promise<void> {
   const raiz = process.env.DRIVE_PASTA_VIDEOS;
   if (!raiz) {
-    throw new Error("DRIVE_PASTA_VIDEOS não configurada.");
+    emit({ tipo: "erro", mensagem: "DRIVE_PASTA_VIDEOS não configurada." });
+    return;
   }
+
+  // Cache hit → emit everything from memory
+  if (cacheCompleto && Date.now() - cacheCompleto.timestamp < CACHE_TTL_MS) {
+    emit({ tipo: "raiz", raizId: cacheCompleto.raizId });
+    emitirArvoreDoCache(emit, cacheCompleto.pastas, cacheCompleto.raizId);
+    if (cacheCompleto.videos.length > 0) {
+      emit({ tipo: "videos", videos: cacheCompleto.videos });
+    }
+    emit({ tipo: "fim" });
+    return;
+  }
+
+  emit({ tipo: "raiz", raizId: raiz });
 
   const drive = getDrive();
   const mapaNomes = new Map<string, string>();
+  const todosVideos: VideoDrive[] = [];
+  const filhosPorParent = new Map<string, PastaDrive[]>();
 
-  // Step 1: collect ALL folder IDs recursively (2 levels for tree, unlimited for video search)
-  const pastas = await buscarPastasRecursivo(drive, raiz, 0, 2, mapaNomes);
+  type Item = { id: string; modifiedTime: string; depth: number };
+  let nivelAtual: Item[] = [
+    { id: raiz, modifiedTime: new Date().toISOString(), depth: 0 },
+  ];
 
-  // Step 2: collect ALL folder IDs (unlimited depth) for video search
-  const todosIds = coletarTodosIds(pastas);
-  todosIds.push(raiz);
+  try {
+    while (nivelAtual.length > 0) {
+      // Sort: most recent first → events emit in recency order
+      nivelAtual.sort(
+        (a, b) =>
+          new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime(),
+      );
 
-  // Step 3: fetch ALL videos across all folders in parallel batches
-  const videos = await buscarTodosVideos(drive, todosIds, mapaNomes);
+      const proximoNivel: Item[] = [];
 
-  // Sort by date desc
-  videos.sort((a, b) => new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime());
+      // Worker pool: CONCURRENCIA workers pulling from a shared index
+      let nextIdx = 0;
+      const items = nivelAtual;
 
-  const indice: IndiceCompleto = {
-    pastas,
-    videos,
-    totalVideos: videos.length,
-    carregadoEm: new Date().toISOString(),
-  };
+      async function worker() {
+        while (true) {
+          const i = nextIdx++;
+          if (i >= items.length) return;
+          const item = items[i];
+          if (item.depth >= MAX_DEPTH) continue;
 
-  cacheIndice = { data: indice, timestamp: Date.now() };
+          const { subpastas, videos } = await listarConteudoPasta(
+            drive,
+            item.id,
+            mapaNomes,
+          );
 
-  return indice;
-}
+          if (subpastas.length > 0) {
+            filhosPorParent.set(item.id, subpastas);
+            emit({ tipo: "pastas", parentId: item.id, filhos: subpastas });
+            for (const sf of subpastas) {
+              proximoNivel.push({
+                id: sf.id,
+                modifiedTime: sf.modifiedTime,
+                depth: item.depth + 1,
+              });
+            }
+          }
+          if (videos.length > 0) {
+            todosVideos.push(...videos);
+            emit({ tipo: "videos", videos });
+          }
+        }
+      }
 
-// ---------------------------------------------------------------------------
-// Internals
-// ---------------------------------------------------------------------------
+      await Promise.all(
+        Array.from({ length: Math.min(CONCURRENCIA, items.length) }, () => worker()),
+      );
 
-async function buscarPastasRecursivo(
-  drive: ReturnType<typeof getDrive>,
-  folderId: string,
-  depth: number,
-  maxDepth: number,
-  mapaNomes: Map<string, string>,
-): Promise<PastaDrive[]> {
-  if (depth >= maxDepth) return [];
+      nivelAtual = proximoNivel;
+    }
 
-  const pastas: PastaDrive[] = [];
-  let pageToken: string | undefined;
+    todosVideos.sort(
+      (a, b) =>
+        new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime(),
+    );
+    cacheCompleto = {
+      pastas: construirArvore(raiz, filhosPorParent),
+      raizId: raiz,
+      videos: todosVideos,
+      timestamp: Date.now(),
+    };
 
-  do {
-    const res = await drive.files.list({
-      q: `'${folderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
-      fields: "nextPageToken, files(id, name, modifiedTime)",
-      orderBy: "name desc",
-      pageSize: 100,
-      pageToken,
-      ...SHARED_DRIVE_PARAMS,
-    });
-
-    const files = res.data.files ?? [];
-
-    const promises = files.map(async (f) => {
-      mapaNomes.set(f.id!, f.name!);
-      const filhos = await buscarPastasRecursivo(drive, f.id!, depth + 1, maxDepth, mapaNomes);
-      return { id: f.id!, nome: f.name!, modifiedTime: f.modifiedTime!, filhos };
-    });
-
-    pastas.push(...(await Promise.all(promises)));
-    pageToken = res.data.nextPageToken ?? undefined;
-  } while (pageToken);
-
-  return pastas;
-}
-
-function coletarTodosIds(pastas: PastaDrive[]): string[] {
-  const ids: string[] = [];
-  for (const p of pastas) {
-    ids.push(p.id);
-    ids.push(...coletarTodosIds(p.filhos));
+    emit({ tipo: "fim" });
+  } catch (err) {
+    const mensagem = err instanceof Error ? err.message : "Erro desconhecido";
+    emit({ tipo: "erro", mensagem });
   }
-  return ids;
 }
+
+// ---------------------------------------------------------------------------
+// Cache emission
+// ---------------------------------------------------------------------------
+
+function emitirArvoreDoCache(
+  emit: EmitFn,
+  pastas: PastaDrive[],
+  parentId: string,
+) {
+  if (pastas.length > 0) {
+    emit({
+      tipo: "pastas",
+      parentId,
+      filhos: pastas.map((p) => ({
+        id: p.id,
+        nome: p.nome,
+        modifiedTime: p.modifiedTime,
+        filhos: [],
+      })),
+    });
+  }
+  for (const p of pastas) {
+    emitirArvoreDoCache(emit, p.filhos, p.id);
+  }
+}
+
+function construirArvore(
+  rootId: string,
+  filhosPorParent: Map<string, PastaDrive[]>,
+): PastaDrive[] {
+  const filhos = filhosPorParent.get(rootId) ?? [];
+  return filhos.map((c) => ({
+    id: c.id,
+    nome: c.nome,
+    modifiedTime: c.modifiedTime,
+    filhos: construirArvore(c.id, filhosPorParent),
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Drive listing — combined query (folders + videos in one call)
+// ---------------------------------------------------------------------------
 
 function detectarFormato(w: number | null, h: number | null): FormatoVideo {
   if (w == null || h == null) return "unknown";
@@ -158,70 +232,58 @@ function detectarFormato(w: number | null, h: number | null): FormatoVideo {
   return "square";
 }
 
-async function buscarTodosVideos(
-  drive: ReturnType<typeof getDrive>,
-  folderIds: string[],
-  mapaNomes: Map<string, string>,
-): Promise<VideoDrive[]> {
-  const allVideos: VideoDrive[] = [];
-
-  // Process folders in parallel batches of 10 to avoid API rate limits
-  const BATCH_SIZE = 10;
-  for (let i = 0; i < folderIds.length; i += BATCH_SIZE) {
-    const batch = folderIds.slice(i, i + BATCH_SIZE);
-    const batchResults = await Promise.all(
-      batch.map((fid) => buscarVideosDePasta(drive, fid, mapaNomes)),
-    );
-    for (const videos of batchResults) {
-      allVideos.push(...videos);
-    }
-  }
-
-  return allVideos;
-}
-
-async function buscarVideosDePasta(
+async function listarConteudoPasta(
   drive: ReturnType<typeof getDrive>,
   folderId: string,
   mapaNomes: Map<string, string>,
-): Promise<VideoDrive[]> {
+): Promise<{ subpastas: PastaDrive[]; videos: VideoDrive[] }> {
+  const subpastas: PastaDrive[] = [];
   const videos: VideoDrive[] = [];
   let pageToken: string | undefined;
 
   do {
     const res = await drive.files.list({
-      q: `'${folderId}' in parents and mimeType contains 'video/' and trashed = false`,
-      fields: "nextPageToken, files(id, name, mimeType, size, modifiedTime, thumbnailLink, videoMediaMetadata)",
-      orderBy: "modifiedTime desc",
-      pageSize: 100,
+      q: `'${folderId}' in parents and (mimeType = '${FOLDER_MIME}' or mimeType contains 'video/') and trashed = false`,
+      fields:
+        "nextPageToken, files(id, name, mimeType, size, modifiedTime, thumbnailLink, videoMediaMetadata)",
+      pageSize: 1000,
       pageToken,
       ...SHARED_DRIVE_PARAMS,
     });
 
     for (const f of res.data.files ?? []) {
-      const w = f.videoMediaMetadata?.width ? Number(f.videoMediaMetadata.width) : null;
-      const h = f.videoMediaMetadata?.height ? Number(f.videoMediaMetadata.height) : null;
-      videos.push({
-        id: f.id!,
-        nome: f.name ?? "",
-        mimeType: f.mimeType ?? "video/mp4",
-        tamanho: Number(f.size ?? 0),
-        duracao: f.videoMediaMetadata?.durationMillis
-          ? Math.round(Number(f.videoMediaMetadata.durationMillis) / 1000)
-          : null,
-        largura: w,
-        altura: h,
-        formato: detectarFormato(w, h),
-        modifiedTime: f.modifiedTime ?? "",
-        thumbnailLink: f.thumbnailLink ?? null,
-        pastaOrigem: mapaNomes.get(folderId) ?? folderId,
-        pastaId: folderId,
-        driveUrl: `https://drive.google.com/file/d/${f.id}/view`,
-      });
+      if (f.mimeType === FOLDER_MIME) {
+        mapaNomes.set(f.id!, f.name!);
+        subpastas.push({
+          id: f.id!,
+          nome: f.name!,
+          modifiedTime: f.modifiedTime ?? new Date(0).toISOString(),
+          filhos: [],
+        });
+      } else {
+        const w = f.videoMediaMetadata?.width ? Number(f.videoMediaMetadata.width) : null;
+        const h = f.videoMediaMetadata?.height ? Number(f.videoMediaMetadata.height) : null;
+        videos.push({
+          id: f.id!,
+          nome: f.name ?? "",
+          mimeType: f.mimeType ?? "video/mp4",
+          tamanho: Number(f.size ?? 0),
+          duracao: f.videoMediaMetadata?.durationMillis
+            ? Math.round(Number(f.videoMediaMetadata.durationMillis) / 1000)
+            : null,
+          largura: w,
+          altura: h,
+          formato: detectarFormato(w, h),
+          modifiedTime: f.modifiedTime ?? "",
+          thumbnailLink: f.thumbnailLink ?? null,
+          pastaOrigem: mapaNomes.get(folderId) ?? folderId,
+          pastaId: folderId,
+          driveUrl: `https://drive.google.com/file/d/${f.id}/view`,
+        });
+      }
     }
-
     pageToken = res.data.nextPageToken ?? undefined;
   } while (pageToken);
 
-  return videos;
+  return { subpastas, videos };
 }
