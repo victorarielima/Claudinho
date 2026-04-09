@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import type { LinhaAnuncio } from "@/lib/sheets";
 import { rotuloPlacementImagem } from "@/lib/ad-media";
+import { interpretarErroMeta } from "@/lib/erros-meta";
 
 export type StatusProcessamento =
   | "pendente"
@@ -273,10 +274,13 @@ function NomeEditavel({
   valor,
   aoSalvar,
   className = "",
+  limite,
 }: {
   valor: string;
   aoSalvar: (novoValor: string) => void;
   className?: string;
+  /** Limite de caracteres (aplica maxLength + mostra contador). */
+  limite?: number;
 }) {
   const [editando, setEditando] = useState(false);
   const [texto, setTexto] = useState(valor);
@@ -304,21 +308,33 @@ function NomeEditavel({
   }, [texto, valor, aoSalvar]);
 
   if (editando) {
+    const len = texto.trim().length;
+    const excedeu = limite ? len > limite : false;
     return (
-      <input
-        ref={inputRef}
-        value={texto}
-        onChange={(e) => setTexto(e.target.value)}
-        onBlur={confirmar}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") confirmar();
-          if (e.key === "Escape") {
-            setTexto(valor);
-            setEditando(false);
-          }
-        }}
-        className={`w-full rounded border border-primary/40 bg-background px-1.5 py-0.5 text-sm font-medium outline-none ring-1 ring-primary/20 ${className}`}
-      />
+      <div className="relative w-full">
+        <input
+          ref={inputRef}
+          value={texto}
+          maxLength={limite}
+          onChange={(e) => setTexto(e.target.value)}
+          onBlur={confirmar}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") confirmar();
+            if (e.key === "Escape") {
+              setTexto(valor);
+              setEditando(false);
+            }
+          }}
+          className={`w-full rounded border border-primary/40 bg-background px-1.5 py-0.5 ${limite ? "pr-10" : ""} text-sm font-medium outline-none ring-1 ring-primary/20 ${className}`}
+        />
+        {limite != null && (
+          <span
+            className={`pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[9px] tabular-nums ${excedeu ? "text-amber-600 font-medium" : "text-muted-foreground"}`}
+          >
+            {len}/{limite}
+          </span>
+        )}
+      </div>
     );
   }
 
@@ -460,11 +476,18 @@ function TabelaCompacta({
                       </button>
                     )}
                   </div>
-                  {temErro && linha.mensagemErro && (
-                    <p className="text-[10px] text-destructive truncate max-w-[300px] mt-0.5" title={linha.mensagemErro}>
-                      {linha.mensagemErro}
-                    </p>
-                  )}
+                  {temErro && linha.mensagemErro && (() => {
+                    const erro = interpretarErroMeta(linha.mensagemErro);
+                    if (!erro) return null;
+                    return (
+                      <p
+                        className="text-[10px] text-destructive truncate max-w-[300px] mt-0.5"
+                        title={`${erro.tipo}\n\n${erro.explicacao}\n\nMeta: ${erro.original}`}
+                      >
+                        <span className="font-semibold">{erro.tipo}:</span> {erro.explicacao}
+                      </p>
+                    );
+                  })()}
                 </td>
                 <td className="px-2 py-2">
                   {aoEditarCampo && podeEditar ? (
@@ -472,6 +495,7 @@ function TabelaCompacta({
                       valor={linha.titulo}
                       aoSalvar={(novoTitulo) => aoEditarCampo(linha.adId!, "titulo", novoTitulo)}
                       className="text-xs text-muted-foreground"
+                      limite={40}
                     />
                   ) : (
                     <span className="truncate block text-muted-foreground text-xs" title={linha.titulo}>{linha.titulo}</span>
@@ -997,11 +1021,28 @@ export function TabelaPendentes({
                       )}
 
                       {/* Mensagem de erro */}
-                      {temErro && linha.mensagemErro && (
-                        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                          {linha.mensagemErro}
-                        </div>
-                      )}
+                      {temErro && linha.mensagemErro && (() => {
+                        const erro = interpretarErroMeta(linha.mensagemErro);
+                        if (!erro) return null;
+                        return (
+                          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive space-y-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] uppercase tracking-wide font-bold rounded bg-destructive/20 px-1.5 py-0.5">
+                                {erro.tipo}
+                              </span>
+                            </div>
+                            <p className="leading-snug">{erro.explicacao}</p>
+                            <details className="text-xs opacity-80">
+                              <summary className="cursor-pointer select-none hover:opacity-100">
+                                Mensagem original do Meta
+                              </summary>
+                              <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] bg-destructive/5 rounded p-2">
+                                {erro.original}
+                              </pre>
+                            </details>
+                          </div>
+                        );
+                      })()}
 
                       <Separator />
 
