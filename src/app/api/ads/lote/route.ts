@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { criarAd, type CriarAdInput } from "@/lib/db";
+import { normalizarPlacementImagem } from "@/lib/ad-media";
 
 interface AnuncioItem {
   adName: string;
@@ -76,7 +77,9 @@ export async function POST(request: NextRequest) {
 
       if (item.assets && item.assets.length > 0) {
         assets = item.assets.map((a) => ({
-          placement: a.placement,
+          placement: a.type === "image"
+            ? normalizarPlacementImagem(a.placement, a.url)
+            : a.placement,
           asset_url: a.url,
           asset_type: a.type,
         }));

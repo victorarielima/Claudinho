@@ -36,6 +36,60 @@ export interface DiagnosticoAnuncio {
   imageAssetsNormalizados: AssetImagemValidavel[];
 }
 
+const CHARS_PROIBIDOS_INICIO = new Set(["\\", "/", "!", ".", "?", "-", "*", "(", ")", ",", ";", ":"]);
+
+function validarTextoMeta(texto: string, campo: string): AvisoAnuncio[] {
+  const avisos: AvisoAnuncio[] = [];
+
+  // 1. Primeiro caractere proibido
+  const primeiro = texto.charAt(0);
+  if (CHARS_PROIBIDOS_INICIO.has(primeiro)) {
+    avisos.push({
+      nivel: "aviso",
+      codigo: `${campo}_char_proibido`,
+      mensagem: `'${campo}' começa com caractere proibido (${primeiro})`,
+    });
+  }
+
+  // 2. Pontuação consecutiva (exceto ...)
+  if (/[^\w\s]{2,}/u.test(texto) && !/^\.{3}$/.test(texto)) {
+    // Verifica se há sequências de 2+ pontuação que não sejam exatamente "..."
+    const matches = texto.match(/[^\w\s]{2,}/gu);
+    if (matches) {
+      const temPontuacaoProblematica = matches.some((m) => m !== "...");
+      if (temPontuacaoProblematica) {
+        avisos.push({
+          nivel: "aviso",
+          codigo: `${campo}_pontuacao_consecutiva`,
+          mensagem: `'${campo}' contém pontuação consecutiva`,
+        });
+      }
+    }
+  }
+
+  // 3. Palavra com mais de 30 caracteres
+  const palavras = texto.split(/\s+/).filter(Boolean);
+  if (palavras.some((p) => p.length > 30)) {
+    avisos.push({
+      nivel: "aviso",
+      codigo: `${campo}_palavra_longa`,
+      mensagem: `'${campo}' contém palavra com mais de 30 caracteres`,
+    });
+  }
+
+  // 4. Muitas palavras de 1 caractere
+  const palavrasCurtas = palavras.filter((p) => p.length === 1);
+  if (palavrasCurtas.length > 3) {
+    avisos.push({
+      nivel: "aviso",
+      codigo: `${campo}_palavras_curtas`,
+      mensagem: `'${campo}' contém muitas palavras de um caractere (${palavrasCurtas.length})`,
+    });
+  }
+
+  return avisos;
+}
+
 function ehUrlHttp(valor: string | null | undefined): boolean {
   return /^https?:\/\//i.test((valor ?? "").trim());
 }
@@ -188,6 +242,40 @@ export function analisarProntidaoAnuncio(input: AnuncioValidavel): DiagnosticoAn
       nivel: "aviso",
       codigo: "descricao_longa",
       mensagem: "Descricao excede 30 caracteres (recomendado pelo Meta)",
+    });
+  }
+
+  // ── Meta text validation rules ─────────────────────────────
+  if (input.texto_principal?.trim()) {
+    avisos.push(...validarTextoMeta(input.texto_principal.trim(), "texto_principal"));
+  }
+  if (input.titulo?.trim()) {
+    avisos.push(...validarTextoMeta(input.titulo.trim(), "titulo"));
+  }
+  if (input.descricao?.trim()) {
+    avisos.push(...validarTextoMeta(input.descricao.trim(), "descricao"));
+  }
+
+  // ── Hard limit blockers ────────────────────────────────────
+  if (input.texto_principal && input.texto_principal.length > 2200) {
+    bloqueios.push({
+      nivel: "erro",
+      codigo: "texto_principal_hard_limit",
+      mensagem: "Texto principal excede o limite absoluto de 2200 caracteres do Meta",
+    });
+  }
+  if (input.titulo && input.titulo.length > 255) {
+    bloqueios.push({
+      nivel: "erro",
+      codigo: "titulo_hard_limit",
+      mensagem: "Titulo excede o limite absoluto de 255 caracteres do Meta",
+    });
+  }
+  if (input.descricao && input.descricao.length > 255) {
+    bloqueios.push({
+      nivel: "erro",
+      codigo: "descricao_hard_limit",
+      mensagem: "Descricao excede o limite absoluto de 255 caracteres do Meta",
     });
   }
 

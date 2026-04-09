@@ -547,6 +547,9 @@ export function FormularioLoteImagens({
                       className="h-8 text-xs w-full rounded-md border border-input bg-background px-3 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       maxLength={40}
                     />
+                    {anuncio.titulo.length === 0 && (
+                      <p className="text-[10px] text-amber-600">Recomendado pela Meta</p>
+                    )}
                   </div>
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
@@ -587,6 +590,9 @@ export function FormularioLoteImagens({
                       className="h-8 text-xs w-full rounded-md border border-input bg-background px-3 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       placeholder="https://..."
                     />
+                    {anuncio.linkCampanha.length > 0 && !anuncio.linkCampanha.startsWith("https://") && (
+                      <p className="text-[10px] text-amber-600">URL deve começar com https://</p>
+                    )}
                   </div>
                 </div>
               </div>

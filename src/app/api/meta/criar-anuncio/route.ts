@@ -9,6 +9,7 @@ import {
   buscarAccountIdDoAdSet,
   buscarCrossChannelInfo,
   buscarInstagramActorId,
+  verificarIssuesAd,
   deletarAdMeta,
   type ImagemPlacement,
 } from "@/lib/meta-criar";
@@ -315,6 +316,30 @@ async function processarFluxoLegado(body: CorpoLegado) {
       body.adName,
       creativeId
     );
+
+    // Validação pós-criação: o Meta valida o ad de forma assíncrona.
+    // Se houver delivery error (ex: cross-channel mal configurado), surge
+    // em issues_info dentro de alguns segundos. Pegando aqui evitamos que
+    // o ad fique "criado" mas quebrado no Meta.
+    const issueMessage = await verificarIssuesAd(adId);
+    if (issueMessage) {
+      logger.error("Ad criado com delivery issue detectado em pós-validação", {
+        fn: "processarFluxoLegado",
+        indiceLinha,
+        aba: nomeAba,
+        metaAdId: adId,
+        issue: issueMessage,
+      });
+
+      if (indiceLinha) {
+        await marcarErro(nomeAba, indiceLinha, `Meta WITH_ISSUES: ${issueMessage}`);
+      }
+
+      return NextResponse.json(
+        { erro: `Meta WITH_ISSUES: ${issueMessage}`, adId, creativeId },
+        { status: 500 }
+      );
+    }
 
     if (indiceLinha) {
       await atualizarLinha(nomeAba, indiceLinha, adId, accountId.replace("act_", ""));

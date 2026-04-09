@@ -226,8 +226,7 @@ async function aguardarProcessamentoVideo(videoId: string): Promise<void> {
 
   for (let tentativa = 0; tentativa < maxTentativas; tentativa++) {
     const url = `${META_API_BASE}/${videoId}?fields=status&access_token=${token}`;
-    // Polling uses plain fetch — it has its own retry logic
-    const res = await fetch(url);
+    const res = await metaFetchWithRetry(url);
     const json = await safeResponseJson(res);
 
     if (json.error) {
@@ -437,16 +436,18 @@ export async function criarCreativeVideo(
     };
   }
 
+  if (!params.instagramActorId) {
+    throw new Error(`Instagram actor ID não encontrado para page ${params.pageId}. Configure META_INSTAGRAM_ACTOR_ID no .env ou vincule o Instagram Business à página.`);
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const objectStorySpec: Record<string, any> = {
     page_id: params.pageId,
     video_data: videoData,
   };
-  if (params.instagramActorId) {
-    // `instagram_actor_id` foi descontinuado pelo Meta — usar `instagram_user_id`
-    // (aceita o IG Business Account id retornado por buscarInstagramActorId).
-    objectStorySpec.instagram_user_id = params.instagramActorId;
-  }
+  // `instagram_actor_id` foi descontinuado pelo Meta — usar `instagram_user_id`
+  // (aceita o IG Business Account id retornado por buscarInstagramActorId).
+  objectStorySpec.instagram_user_id = params.instagramActorId;
 
   const formData = new FormData();
   formData.append("name", params.name);
@@ -558,7 +559,11 @@ export async function criarCreativeImagem(
   const imagensPorPlacement = new Map<PlacementImagemNormalizado, ImagemPlacement>();
   for (const imagem of params.imagens) {
     const placement = normalizarPlacementImagem(imagem.placement) as PlacementImagemNormalizado;
-    if (!PLACEMENT_RULES[placement] || imagensPorPlacement.has(placement)) continue;
+    if (!PLACEMENT_RULES[placement]) {
+      console.warn(`[meta-criar] Placement ignorado para imagem: "${imagem.placement}" — será excluída do creative`);
+      continue;
+    }
+    if (imagensPorPlacement.has(placement)) continue;
     imagensPorPlacement.set(placement, imagem);
   }
 
@@ -626,11 +631,13 @@ export async function criarCreativeImagem(
     asset_customization_rules: assetCustomizationRules,
   });
 
+  if (!params.instagramActorId) {
+    throw new Error(`Instagram actor ID não encontrado para page ${params.pageId}. Configure META_INSTAGRAM_ACTOR_ID no .env ou vincule o Instagram Business à página.`);
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const objectStorySpecMulti: Record<string, any> = { page_id: params.pageId };
-  if (params.instagramActorId) {
-    objectStorySpecMulti.instagram_user_id = params.instagramActorId;
-  }
+  objectStorySpecMulti.instagram_user_id = params.instagramActorId;
 
   const formData = new FormData();
   formData.append("name", params.name);
@@ -724,16 +731,18 @@ async function criarCreativeImagemSimples(
     };
   }
 
+  if (!params.instagramActorId) {
+    throw new Error(`Instagram actor ID não encontrado para page ${params.pageId}. Configure META_INSTAGRAM_ACTOR_ID no .env ou vincule o Instagram Business à página.`);
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const objectStorySpec: Record<string, any> = {
     page_id: params.pageId,
     link_data: linkData,
   };
-  if (params.instagramActorId) {
-    // `instagram_actor_id` foi descontinuado pelo Meta — usar `instagram_user_id`
-    // (aceita o IG Business Account id retornado por buscarInstagramActorId).
-    objectStorySpec.instagram_user_id = params.instagramActorId;
-  }
+  // `instagram_actor_id` foi descontinuado pelo Meta — usar `instagram_user_id`
+  // (aceita o IG Business Account id retornado por buscarInstagramActorId).
+  objectStorySpec.instagram_user_id = params.instagramActorId;
 
   const formData = new FormData();
   formData.append("name", params.name);
@@ -859,7 +868,7 @@ export async function verificarIssuesAd(
 
     const url = `${META_API_BASE}/${metaAdId}?fields=effective_status,issues_info&access_token=${token}`;
     try {
-      const res = await fetch(url);
+      const res = await metaFetchWithRetry(url);
       const json = await safeResponseJson(res);
       if (json.error) {
         logger.warn("Falha ao verificar issues do ad pós-criação", {
@@ -930,7 +939,7 @@ export async function deletarAdMeta(metaAdId: string): Promise<void> {
   const token = getAccessToken();
   const url = `${META_API_BASE}/${metaAdId}?access_token=${token}`;
   try {
-    const res = await fetch(url, { method: "DELETE" });
+    const res = await metaFetchWithRetry(url, { method: "DELETE" });
     const json = await safeResponseJson(res);
     if (res.ok && json.success) {
       logger.info("Ad deletado no Meta", { fn: "deletarAdMeta", metaAdId });
@@ -1100,6 +1109,7 @@ export async function buscarInstagramActorId(
     pageId,
     hint: "Set META_INSTAGRAM_ACTOR_ID_EVINO/GRANDCRU as fallback, or grant the access token instagram_basic + pages_show_list permissions.",
   });
+  console.warn(`[buscarInstagramActorId] Instagram actor ID não encontrado para page ${pageId}. Configure META_INSTAGRAM_ACTOR_ID no .env ou vincule o Instagram Business à página.`);
   return null;
 }
 
