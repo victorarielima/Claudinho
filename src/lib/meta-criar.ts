@@ -588,13 +588,40 @@ export async function criarCreativeImagem(
 
   const isCrossChannel = (params.crossChannel?.objectStoreUrls?.length ?? 0) > 0;
 
+  // Cross-channel multi-placement: o `omnichannel_link_spec` precisa
+  // ficar DENTRO de cada entrada de `asset_feed_spec.link_urls[]` —
+  // não no nível do form, não como key direta de asset_feed_spec, não
+  // dentro de object_story_spec. Esse foi o ÚNICO lugar que o Meta
+  // aceitou em testes empíricos contra a conta real (subcode 2446461
+  // dispara em qualquer outra posição).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const linkUrlEntry: Record<string, any> | undefined = params.link
+    ? { website_url: params.link }
+    : undefined;
+  if (linkUrlEntry && isCrossChannel && params.crossChannel!.applicationId) {
+    linkUrlEntry.omnichannel_link_spec = {
+      web: { url: params.link },
+      app: {
+        application_id: params.crossChannel!.applicationId,
+        platform_specs: {
+          android: { url: params.link },
+          ios: { url: params.link },
+        },
+      },
+    };
+  }
+
+  // optimization_type=PLACEMENT + ad_formats=AUTOMATIC_FORMAT são o
+  // padrão usado pela UI do Ads Manager para criativos placement-based.
+  // Validado por inspeção de criativos que funcionam na conta.
   const assetFeedSpec = limparObjeto({
-    ad_formats: ["SINGLE_IMAGE"],
+    ad_formats: ["AUTOMATIC_FORMAT"],
+    optimization_type: "PLACEMENT",
     images,
     bodies: params.message ? [{ text: params.message }] : undefined,
     titles: params.title ? [{ text: params.title }] : undefined,
     descriptions: params.linkDescription ? [{ text: params.linkDescription }] : undefined,
-    link_urls: params.link ? [{ website_url: params.link }] : undefined,
+    link_urls: linkUrlEntry ? [linkUrlEntry] : undefined,
     call_to_action_types: params.ctaType ? [params.ctaType] : undefined,
     asset_customization_rules: assetCustomizationRules,
   });
@@ -612,28 +639,9 @@ export async function criarCreativeImagem(
   if (params.link?.trim()) {
     formData.append("link_url", params.link);
   }
-  // Cross-channel: applink_treatment + omnichannel_link_spec — sem isso o
-  // criarAnuncio falha com "applink_treatment is required in ad's creative"
-  // [code 100] [subcode 2446455] em adsets com cross-channel optimization.
-  // O path simples (criarCreativeImagemSimples) já fazia isso; o multi-
-  // placement não fazia, era um bug.
+  // applink_treatment continua no form (subcode 2446455 ainda exige).
   if (isCrossChannel) {
     formData.append("applink_treatment", "deeplink_with_web_fallback");
-    if (params.crossChannel!.applicationId) {
-      formData.append(
-        "omnichannel_link_spec",
-        JSON.stringify({
-          web: { url: params.link },
-          app: {
-            application_id: params.crossChannel!.applicationId,
-            platform_specs: {
-              android: { url: params.link },
-              ios: { url: params.link },
-            },
-          },
-        })
-      );
-    }
   }
   formData.append(
     "degrees_of_freedom_spec",

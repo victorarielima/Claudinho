@@ -4,14 +4,14 @@ import { metaFetchWithRetry, safeResponseJson } from "@/lib/meta-retry";
 import { listarAdsSincronizaveis, atualizarMetaEffectiveStatus } from "@/lib/db";
 import { logger } from "@/lib/logger";
 
-// Apenas estados terminais/bloqueantes do Meta voltam o ad para "erro".
-// WITH_ISSUES NÃO entra aqui — é frequentemente um aviso brando (ad
-// pausado pelo parent, revisão pendente, tracking issue) e marcar como
-// erro ofusca uploads que deram certo. O badge de effective_status na
-// UI já comunica visualmente esse aviso.
+// Estados do Meta que voltam o ad para "erro". WITH_ISSUES está aqui
+// porque na prática significa que o ad existe mas tem delivery error
+// (a API expõe os detalhes em `issues_info` — buscamos junto e usamos
+// a mensagem real do Meta no error_message, não um texto genérico).
 const STATUS_QUE_VOLTAM_PARA_ERRO = new Set([
   "DELETED",
   "DISAPPROVED",
+  "WITH_ISSUES",
 ]);
 
 function getAccessToken(): string {
@@ -20,22 +20,51 @@ function getAccessToken(): string {
   return token;
 }
 
+interface IssueInfo {
+  level?: string;
+  error_code?: number;
+  error_summary?: string;
+  error_message?: string;
+  error_type?: string;
+}
+
+interface AdStatusInfo {
+  effectiveStatus: string;
+  /** Mensagem detalhada vinda de issues_info (quando WITH_ISSUES). */
+  issueMessage?: string;
+}
+
 interface SyncResult {
   /** IDs que retornaram effective_status do Meta */
-  encontrados: Map<string, string>;
+  encontrados: Map<string, AdStatusInfo>;
   /** IDs que o Meta confirmou não existir (erro 803 ou similar) */
   deletados: Set<string>;
 }
 
+function formatarIssue(issues: IssueInfo[] | undefined): string | undefined {
+  if (!issues || issues.length === 0) return undefined;
+  // Pega o primeiro issue (geralmente é o relevante; se houver mais
+  // raramente vale a pena listar todos).
+  const primeiro = issues[0];
+  const partes: string[] = [];
+  if (primeiro.error_summary) partes.push(primeiro.error_summary);
+  if (primeiro.error_message && primeiro.error_message !== primeiro.error_summary) {
+    partes.push(primeiro.error_message);
+  }
+  if (primeiro.error_code) partes.push(`[code ${primeiro.error_code}]`);
+  return partes.join(" — ") || undefined;
+}
+
 /**
  * Consulta Meta API individualmente por ad.
- * Usa chamadas individuais GET /{ad_id}?fields=effective_status para ter
- * certeza se o ad existe ou não (batch ?ids= não diferencia "não retornou"
- * de "deletado").
+ * Usa chamadas individuais GET /{ad_id}?fields=effective_status,issues_info
+ * para ter certeza se o ad existe ou não (batch ?ids= não diferencia
+ * "não retornou" de "deletado") e capturar issues_info quando o status
+ * for WITH_ISSUES (a mensagem real fica nesse campo).
  */
 async function buscarStatusMeta(metaAdIds: string[]): Promise<SyncResult> {
   const token = getAccessToken();
-  const encontrados = new Map<string, string>();
+  const encontrados = new Map<string, AdStatusInfo>();
   const deletados = new Set<string>();
 
   // Executar em paralelo com limite de concorrência
@@ -45,12 +74,15 @@ async function buscarStatusMeta(metaAdIds: string[]): Promise<SyncResult> {
 
     const results = await Promise.allSettled(
       batch.map(async (adId) => {
-        const url = `${META_API_BASE}/${adId}?fields=effective_status&access_token=${token}`;
+        const url = `${META_API_BASE}/${adId}?fields=effective_status,issues_info&access_token=${token}`;
         const res = await metaFetchWithRetry(url);
         const json = await safeResponseJson(res);
 
         if (res.ok && json.effective_status) {
-          encontrados.set(adId, json.effective_status as string);
+          encontrados.set(adId, {
+            effectiveStatus: json.effective_status as string,
+            issueMessage: formatarIssue(json.issues_info as IssueInfo[] | undefined),
+          });
           return;
         }
 
@@ -115,11 +147,14 @@ export async function POST() {
       if (!ad.meta_ad_id) continue;
 
       let effectiveStatus: string | null = null;
+      let issueMessage: string | undefined;
 
       if (deletados.has(ad.meta_ad_id)) {
         effectiveStatus = "DELETED";
       } else if (encontrados.has(ad.meta_ad_id)) {
-        effectiveStatus = encontrados.get(ad.meta_ad_id)!;
+        const info = encontrados.get(ad.meta_ad_id)!;
+        effectiveStatus = info.effectiveStatus;
+        issueMessage = info.issueMessage;
       } else {
         // Não conseguiu verificar (erro de rede, permissão, etc) — não alterar
         continue;
@@ -132,9 +167,20 @@ export async function POST() {
       const deveVoltar =
         STATUS_QUE_VOLTAM_PARA_ERRO.has(effectiveStatus) && ad.status === "concluido";
 
-      const mensagemErro = deveVoltar
-        ? `Meta status: ${effectiveStatus}. O anúncio foi ${effectiveStatus === "DELETED" ? "excluído" : "reprovado"} no Meta.`
-        : undefined;
+      // Mensagem: prefere a issue real do Meta (issues_info), senão
+      // texto genérico baseado no status.
+      let mensagemErro: string | undefined;
+      if (deveVoltar) {
+        if (issueMessage) {
+          mensagemErro = `Meta ${effectiveStatus}: ${issueMessage}`;
+        } else if (effectiveStatus === "DELETED") {
+          mensagemErro = "Meta status: DELETED. O anúncio foi excluído no Meta.";
+        } else if (effectiveStatus === "DISAPPROVED") {
+          mensagemErro = "Meta status: DISAPPROVED. O anúncio foi reprovado no Meta.";
+        } else {
+          mensagemErro = `Meta status: ${effectiveStatus}. O anúncio foi sinalizado no Meta.`;
+        }
+      }
 
       await atualizarMetaEffectiveStatus(
         ad.id,

@@ -48,6 +48,12 @@ const REGRAS: RegraErro[] = [
     marcadores: ["2446455", "applink_treatment is required"],
   },
   {
+    tipo: "Cross-channel: omnichannel_link_spec mal posicionado",
+    explicacao:
+      "O criativo foi criado com asset_feed_spec (placements múltiplos), mas o omnichannel_link_spec ficou no nível do form em vez de dentro do asset_feed_spec. Esse erro só aparece em runtime (delivery error). Já corrigido — recrie o criativo desse anúncio.",
+    marcadores: ["omnichannel_link_spec needs to be within"],
+  },
+  {
     tipo: "Vídeo ainda processando",
     explicacao:
       "O Meta ainda está processando o vídeo. Aguarde alguns instantes e tente novamente; vídeos grandes podem levar até alguns minutos.",
