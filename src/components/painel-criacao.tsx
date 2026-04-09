@@ -20,6 +20,7 @@ import { DialogCriarAnuncio } from "@/components/dialog-criar-anuncio";
 import { DialogExploradorVideos } from "@/components/dialog-explorador-videos";
 import { FormularioLoteVideos } from "@/components/formulario-lote-videos";
 import { DialogEditarAnuncio } from "@/components/dialog-editar-anuncio";
+import { DialogDetalhesAnuncio } from "@/components/dialog-detalhes-anuncio";
 import { DialogExploradorClickUp } from "@/components/dialog-explorador-clickup";
 import { FormularioLoteImagens } from "@/components/formulario-lote-imagens";
 import { useBrand } from "@/components/brand-provider";
@@ -160,6 +161,8 @@ export function PainelCriacao() {
   const [dialogLote, setDialogLote] = useState(false);
   const [videosSelecionados, setVideosSelecionados] = useState<VideoDrive[]>([]);
   const [dialogEditar, setDialogEditar] = useState(false);
+  const [dialogDetalhes, setDialogDetalhes] = useState(false);
+  const [linhaDetalhes, setLinhaDetalhes] = useState<LinhaComStatus | null>(null);
   const [editarAdId, setEditarAdId] = useState<string | null>(null);
   const [editarDados, setEditarDados] = useState<{
     ad_name: string; texto_principal: string; titulo: string; descricao: string;
@@ -878,6 +881,10 @@ export function PainelCriacao() {
               if (!linha.adId) return;
               setConfirmExcluir({ show: true, linha });
             }}
+            aoVerDetalhes={(linha) => {
+              setLinhaDetalhes(linha);
+              setDialogDetalhes(true);
+            }}
             aoEditar={(linha) => {
               if (!linha.adId) return;
               setEditarAdId(linha.adId);
@@ -1017,6 +1024,12 @@ export function PainelCriacao() {
         adId={editarAdId}
         dadosIniciais={editarDados}
         aoSalvar={carregarDados}
+      />
+
+      <DialogDetalhesAnuncio
+        aberto={dialogDetalhes}
+        aoFechar={() => { setDialogDetalhes(false); setLinhaDetalhes(null); }}
+        linha={linhaDetalhes}
       />
 
       {/* QW-1: Confirmation dialog before bulk upload */}

@@ -54,6 +54,7 @@ interface TabelaPendentesProps {
   carregando: boolean;
   aoSubir: (linha: LinhaComStatus) => void;
   aoEditar?: (linha: LinhaComStatus) => void;
+  aoVerDetalhes?: (linha: LinhaComStatus) => void;
   aoExcluir?: (linha: LinhaComStatus) => void;
   aoRenomear?: (adId: string, novoNome: string) => void;
   aoEditarCampo?: (adId: string, campo: string, valor: string) => void;
@@ -438,6 +439,7 @@ function TabelaCompacta({
   linhas,
   aoSubir,
   aoEditar,
+  aoVerDetalhes,
   aoExcluir,
   aoRenomear,
   aoEditarCampo,
@@ -450,6 +452,7 @@ function TabelaCompacta({
   linhas: LinhaComStatus[];
   aoSubir: (linha: LinhaComStatus) => void;
   aoEditar?: (linha: LinhaComStatus) => void;
+  aoVerDetalhes?: (linha: LinhaComStatus) => void;
   aoExcluir?: (linha: LinhaComStatus) => void;
   aoRenomear?: (adId: string, novoNome: string) => void;
   aoEditarCampo?: (adId: string, campo: string, valor: string) => void;
@@ -595,21 +598,35 @@ function TabelaCompacta({
                 <td className="px-2 py-2 text-right">
                   <div className="flex items-center justify-end gap-1">
                     {concluido ? (
-                      <a
-                        href={
-                          linha.accountId
-                            ? `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${linha.accountId}&selected_adset_ids=${linha.adSetId}`
-                            : `https://adsmanager.facebook.com/adsmanager/manage/ads?selected_adset_ids=${linha.adSetId}`
-                        }
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-xs font-medium text-green-700 hover:text-green-900 transition-colors"
-                      >
-                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                        </svg>
-                        Ads
-                      </a>
+                      <div className="flex items-center gap-1">
+                        {aoVerDetalhes && (
+                          <button
+                            onClick={() => aoVerDetalhes(linha)}
+                            className="inline-flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs font-medium transition-all hover:bg-accent active:scale-[0.98]"
+                            title="Ver detalhes"
+                          >
+                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                            </svg>
+                          </button>
+                        )}
+                        <a
+                          href={
+                            linha.accountId
+                              ? `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${linha.accountId}&selected_adset_ids=${linha.adSetId}`
+                              : `https://adsmanager.facebook.com/adsmanager/manage/ads?selected_adset_ids=${linha.adSetId}`
+                          }
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs font-medium text-green-700 hover:text-green-900 transition-colors"
+                        >
+                          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                          </svg>
+                          Ads
+                        </a>
+                      </div>
                     ) : (
                       <>
                         {podeEditar && aoExcluir && (
@@ -671,6 +688,7 @@ export function TabelaPendentes({
   carregando,
   aoSubir,
   aoEditar,
+  aoVerDetalhes,
   aoExcluir,
   aoRenomear,
   aoEditarCampo,
@@ -765,6 +783,7 @@ export function TabelaPendentes({
           selecionados={selecionados}
           aoAlternarSelecao={aoAlternarSelecao}
           setPreviewAberto={setPreviewAberto}
+          aoVerDetalhes={aoVerDetalhes}
           aoMostrarDetalhes={aoMostrarDetalhes ?? (() => {})}
         />
       ) : (
@@ -918,31 +937,35 @@ export function TabelaPendentes({
 
                         <div className="flex-shrink-0 flex items-center gap-2 flex-col justify-end">
                           {concluido ? (
-                            <a
-                              href={
-                                linha.accountId
-                                  ? `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${linha.accountId}&selected_ad_ids=${linha.adIdCriado}`
-                                  : `https://adsmanager.facebook.com/adsmanager/manage/ads?selected_ad_ids=${linha.adIdCriado}`
-                              }
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex h-10 items-center gap-2 rounded-lg border border-green-300 bg-green-50 px-4 text-sm font-medium text-green-800 shadow-sm transition-all hover:bg-green-100 active:scale-[0.98]"
-                            >
-                              <svg
-                                className="h-4 w-4"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                strokeWidth={1.5}
-                                stroke="currentColor"
+                            <div className="flex items-center gap-2">
+                              {aoVerDetalhes && (
+                                <button
+                                  onClick={() => aoVerDetalhes(linha)}
+                                  className="inline-flex h-10 items-center gap-2 rounded-lg border border-input bg-background px-4 text-sm font-medium shadow-sm transition-all hover:bg-accent hover:text-accent-foreground active:scale-[0.98]"
+                                >
+                                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                                  </svg>
+                                  Detalhes
+                                </button>
+                              )}
+                              <a
+                                href={
+                                  linha.accountId
+                                    ? `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${linha.accountId}&selected_ad_ids=${linha.adIdCriado}`
+                                    : `https://adsmanager.facebook.com/adsmanager/manage/ads?selected_ad_ids=${linha.adIdCriado}`
+                                }
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex h-10 items-center gap-2 rounded-lg border border-green-300 bg-green-50 px-4 text-sm font-medium text-green-800 shadow-sm transition-all hover:bg-green-100 active:scale-[0.98]"
                               >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
-                                />
-                              </svg>
-                              Ver no Ads Manager
-                            </a>
+                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                                </svg>
+                                Ads Manager
+                              </a>
+                            </div>
                           ) : (
                             <div className="flex items-center gap-2">
                               {aoExcluir && (linha.statusProcessamento === "pendente" || linha.statusProcessamento === "erro") && linha.adId && (
