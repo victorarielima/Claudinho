@@ -53,7 +53,7 @@ function validarTextoMeta(texto: string, campo: string): AvisoAnuncio[] {
 
   // 2. Pontuação ASCII consecutiva (exceto ...)
   // Usa classe explícita de pontuação ASCII — emojis e acentos NÃO contam.
-  const matchesPontuacao = texto.match(/[!?.,;:*#@&%$^~(){}\[\]<>\\/"'-]{2,}/g);
+  const matchesPontuacao = texto.match(/[!?.,;:*#@&%$^~(){}\[\]<>\\/"'-]{3,}/g);
   if (matchesPontuacao) {
     const temProblematica = matchesPontuacao.some((m) => m !== "...");
     if (temProblematica) {
