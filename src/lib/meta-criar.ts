@@ -443,7 +443,9 @@ export async function criarCreativeVideo(
     video_data: videoData,
   };
   if (params.instagramActorId) {
-    objectStorySpec.instagram_actor_id = params.instagramActorId;
+    // `instagram_actor_id` foi descontinuado pelo Meta — usar `instagram_user_id`
+    // (aceita o IG Business Account id retornado por buscarInstagramActorId).
+    objectStorySpec.instagram_user_id = params.instagramActorId;
   }
 
   const formData = new FormData();
@@ -584,6 +586,8 @@ export async function criarCreativeImagem(
     image_label: { name: labels[placement] },
   }));
 
+  const isCrossChannel = (params.crossChannel?.objectStoreUrls?.length ?? 0) > 0;
+
   const assetFeedSpec = limparObjeto({
     ad_formats: ["SINGLE_IMAGE"],
     images,
@@ -598,7 +602,7 @@ export async function criarCreativeImagem(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const objectStorySpecMulti: Record<string, any> = { page_id: params.pageId };
   if (params.instagramActorId) {
-    objectStorySpecMulti.instagram_actor_id = params.instagramActorId;
+    objectStorySpecMulti.instagram_user_id = params.instagramActorId;
   }
 
   const formData = new FormData();
@@ -607,6 +611,29 @@ export async function criarCreativeImagem(
   formData.append("asset_feed_spec", JSON.stringify(assetFeedSpec));
   if (params.link?.trim()) {
     formData.append("link_url", params.link);
+  }
+  // Cross-channel: applink_treatment + omnichannel_link_spec — sem isso o
+  // criarAnuncio falha com "applink_treatment is required in ad's creative"
+  // [code 100] [subcode 2446455] em adsets com cross-channel optimization.
+  // O path simples (criarCreativeImagemSimples) já fazia isso; o multi-
+  // placement não fazia, era um bug.
+  if (isCrossChannel) {
+    formData.append("applink_treatment", "deeplink_with_web_fallback");
+    if (params.crossChannel!.applicationId) {
+      formData.append(
+        "omnichannel_link_spec",
+        JSON.stringify({
+          web: { url: params.link },
+          app: {
+            application_id: params.crossChannel!.applicationId,
+            platform_specs: {
+              android: { url: params.link },
+              ios: { url: params.link },
+            },
+          },
+        })
+      );
+    }
   }
   formData.append(
     "degrees_of_freedom_spec",
@@ -695,7 +722,9 @@ async function criarCreativeImagemSimples(
     link_data: linkData,
   };
   if (params.instagramActorId) {
-    objectStorySpec.instagram_actor_id = params.instagramActorId;
+    // `instagram_actor_id` foi descontinuado pelo Meta — usar `instagram_user_id`
+    // (aceita o IG Business Account id retornado por buscarInstagramActorId).
+    objectStorySpec.instagram_user_id = params.instagramActorId;
   }
 
   const formData = new FormData();
@@ -820,21 +849,121 @@ export interface CrossChannelInfo {
   applicationId: string | null;
 }
 
+/**
+ * Resolve o Instagram User ID a ser usado em `object_story_spec.instagram_user_id`.
+ *
+ * Sem essa identidade, criativos com placements do Instagram falham com:
+ *   "Select an Instagram account or a Facebook Page to represent your business
+ *    on Instagram." [code 100] [subcode 1772103]
+ *
+ * Estratégia (em ordem):
+ *   1. Override por env (`META_INSTAGRAM_ACTOR_ID_EVINO/GRANDCRU` ou
+ *      `META_INSTAGRAM_ACTOR_ID_<PAGEID>`) — útil quando o token não tem
+ *      permissão para ler a conexão IG da página.
+ *   2. `GET /{pageId}?fields=instagram_business_account,connected_instagram_account`
+ *      Esse é o caminho moderno; cobre páginas conectadas via Meta Business
+ *      Suite / Accounts Center.
+ *   3. `GET /{pageId}/instagram_accounts` (endpoint legado, mantido como
+ *      último recurso).
+ *
+ * Erros são logados em vez de engolidos silenciosamente — antes a função
+ * retornava null em qualquer falha, escondendo a causa raiz quando o Meta
+ * depois recusava o creative.
+ */
 export async function buscarInstagramActorId(
   pageId: string
 ): Promise<string | null> {
-  const token = getAccessToken();
-  const url = `${META_API_BASE}/${pageId}/instagram_accounts?fields=id&access_token=${token}`;
+  // 1. Env overrides
+  const envOverride =
+    process.env[`META_INSTAGRAM_ACTOR_ID_${pageId}`] ||
+    (pageId === process.env.META_PAGE_ID_EVINO
+      ? process.env.META_INSTAGRAM_ACTOR_ID_EVINO
+      : undefined) ||
+    (pageId === process.env.META_PAGE_ID_GRANDCRU
+      ? process.env.META_INSTAGRAM_ACTOR_ID_GRANDCRU
+      : undefined);
+  if (envOverride && envOverride.trim()) {
+    logger.debug("Instagram actor id resolved from env override", {
+      fn: "buscarInstagramActorId",
+      pageId,
+    });
+    return envOverride.trim();
+  }
 
+  const token = getAccessToken();
+
+  // 2. Modern fields on the page itself
   try {
+    const url = `${META_API_BASE}/${pageId}?fields=instagram_business_account,connected_instagram_account&access_token=${token}`;
     const res = await metaFetchWithRetry(url);
     const json = await safeResponseJson(res);
-    if (!res.ok || json.error) return null;
-    const data = json.data as { id: string }[] | undefined;
-    return data?.[0]?.id ?? null;
-  } catch {
-    return null;
+    if (res.ok && !json.error) {
+      const igb = (json.instagram_business_account as { id?: string } | undefined)?.id;
+      const cig = (json.connected_instagram_account as { id?: string } | undefined)?.id;
+      const resolved = igb ?? cig ?? null;
+      if (resolved) {
+        logger.debug("Instagram actor id resolved from page fields", {
+          fn: "buscarInstagramActorId",
+          pageId,
+          source: igb ? "instagram_business_account" : "connected_instagram_account",
+        });
+        return resolved;
+      }
+      logger.warn("Page has no instagram_business_account/connected_instagram_account", {
+        fn: "buscarInstagramActorId",
+        pageId,
+      });
+    } else {
+      logger.warn("Failed to read page IG fields", {
+        fn: "buscarInstagramActorId",
+        pageId,
+        error: extrairErroMeta(json),
+      });
+    }
+  } catch (err) {
+    logger.warn("Exception reading page IG fields", {
+      fn: "buscarInstagramActorId",
+      pageId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
+
+  // 3. Legacy endpoint
+  try {
+    const url = `${META_API_BASE}/${pageId}/instagram_accounts?fields=id&access_token=${token}`;
+    const res = await metaFetchWithRetry(url);
+    const json = await safeResponseJson(res);
+    if (res.ok && !json.error) {
+      const data = json.data as { id: string }[] | undefined;
+      const resolved = data?.[0]?.id ?? null;
+      if (resolved) {
+        logger.debug("Instagram actor id resolved from legacy endpoint", {
+          fn: "buscarInstagramActorId",
+          pageId,
+        });
+        return resolved;
+      }
+    } else {
+      logger.warn("Legacy /instagram_accounts call failed", {
+        fn: "buscarInstagramActorId",
+        pageId,
+        error: extrairErroMeta(json),
+      });
+    }
+  } catch (err) {
+    logger.warn("Exception on legacy /instagram_accounts", {
+      fn: "buscarInstagramActorId",
+      pageId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  logger.error("Could not resolve Instagram actor id — creative will likely be rejected for IG placements", {
+    fn: "buscarInstagramActorId",
+    pageId,
+    hint: "Set META_INSTAGRAM_ACTOR_ID_EVINO/GRANDCRU as fallback, or grant the access token instagram_basic + pages_show_list permissions.",
+  });
+  return null;
 }
 
 export async function buscarCrossChannelInfo(
