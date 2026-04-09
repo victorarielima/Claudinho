@@ -452,20 +452,11 @@ export async function criarCreativeVideo(
   const formData = new FormData();
   formData.append("name", params.name);
   formData.append("object_story_spec", JSON.stringify(objectStorySpec));
-  if (isCrossChannel) {
+  if (isCrossChannelValido(params.crossChannel)) {
     formData.append("applink_treatment", "deeplink_with_web_fallback");
-    if (params.crossChannel!.applicationId) {
-      formData.append("omnichannel_link_spec", JSON.stringify({
-        web: { url: params.link },
-        app: {
-          application_id: params.crossChannel!.applicationId,
-          platform_specs: {
-            android: { url: params.link },
-            ios: { url: params.link },
-          },
-        },
-      }));
-    }
+    formData.append("omnichannel_link_spec", JSON.stringify(
+      construirOmnichannelSpec(params.link ?? "", params.crossChannel),
+    ));
   }
   formData.append("access_token", token);
 
@@ -591,8 +582,6 @@ export async function criarCreativeImagem(
     image_label: { name: labels[placement] },
   }));
 
-  const isCrossChannel = (params.crossChannel?.objectStoreUrls?.length ?? 0) > 0;
-
   // Cross-channel multi-placement: o `omnichannel_link_spec` precisa
   // ficar DENTRO de cada entrada de `asset_feed_spec.link_urls[]` —
   // não no nível do form, não como key direta de asset_feed_spec, não
@@ -603,17 +592,8 @@ export async function criarCreativeImagem(
   const linkUrlEntry: Record<string, any> | undefined = params.link
     ? { website_url: params.link }
     : undefined;
-  if (linkUrlEntry && isCrossChannel && params.crossChannel!.applicationId) {
-    linkUrlEntry.omnichannel_link_spec = {
-      web: { url: params.link },
-      app: {
-        application_id: params.crossChannel!.applicationId,
-        platform_specs: {
-          android: { url: params.link },
-          ios: { url: params.link },
-        },
-      },
-    };
+  if (linkUrlEntry && isCrossChannelValido(params.crossChannel)) {
+    linkUrlEntry.omnichannel_link_spec = construirOmnichannelSpec(params.link!, params.crossChannel);
   }
 
   // optimization_type=PLACEMENT + ad_formats=AUTOMATIC_FORMAT são o
@@ -647,7 +627,9 @@ export async function criarCreativeImagem(
     formData.append("link_url", params.link);
   }
   // applink_treatment continua no form (subcode 2446455 ainda exige).
-  if (isCrossChannel) {
+  // Só adiciona quando temos applicationId — sem ele, omnichannel_link_spec
+  // não foi adicionado e applink_treatment sozinho causa erro #100.
+  if (isCrossChannelValido(params.crossChannel)) {
     formData.append("applink_treatment", "deeplink_with_web_fallback");
   }
   formData.append(
@@ -747,20 +729,11 @@ async function criarCreativeImagemSimples(
   const formData = new FormData();
   formData.append("name", params.name);
   formData.append("object_story_spec", JSON.stringify(objectStorySpec));
-  if (isCrossChannel) {
+  if (isCrossChannelValido(params.crossChannel)) {
     formData.append("applink_treatment", "deeplink_with_web_fallback");
-    if (params.crossChannel!.applicationId) {
-      formData.append("omnichannel_link_spec", JSON.stringify({
-        web: { url: params.link },
-        app: {
-          application_id: params.crossChannel!.applicationId,
-          platform_specs: {
-            android: { url: params.link },
-            ios: { url: params.link },
-          },
-        },
-      }));
-    }
+    formData.append("omnichannel_link_spec", JSON.stringify(
+      construirOmnichannelSpec(params.link ?? "", params.crossChannel),
+    ));
   }
   formData.append("access_token", token);
 
@@ -993,6 +966,33 @@ export async function buscarAccountIdDoAdSet(
 export interface CrossChannelInfo {
   objectStoreUrls: string[];
   applicationId: string | null;
+}
+
+/**
+ * Determina se um crossChannel é realmente válido para uso (tem applicationId).
+ * Sem applicationId, adicionar applink_treatment sem omnichannel_link_spec
+ * causa erro #100 no Meta.
+ */
+function isCrossChannelValido(cc?: CrossChannelInfo): cc is CrossChannelInfo & { applicationId: string } {
+  return Boolean(cc && cc.objectStoreUrls.length > 0 && cc.applicationId);
+}
+
+/**
+ * Constrói omnichannel_link_spec com URLs corretas das app stores.
+ */
+function construirOmnichannelSpec(link: string, cc: CrossChannelInfo & { applicationId: string }) {
+  const androidUrl = cc.objectStoreUrls.find((u) => u.includes("play.google.com")) ?? link;
+  const iosUrl = cc.objectStoreUrls.find((u) => u.includes("apple.com") || u.includes("itunes.apple.com")) ?? link;
+  return {
+    web: { url: link },
+    app: {
+      application_id: cc.applicationId,
+      platform_specs: {
+        android: { url: androidUrl },
+        ios: { url: iosUrl },
+      },
+    },
+  };
 }
 
 /**
