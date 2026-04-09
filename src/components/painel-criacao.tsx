@@ -166,6 +166,7 @@ export function PainelCriacao() {
     cta: string; campaign_name: string; campaign_id: string;
     ad_set_name: string; ad_set_id: string; link_campanha: string;
     tipo?: "video" | "image"; linkVideo?: string; thumbnailLink?: string;
+    imageAssets?: { placement: string; url: string }[];
     bloqueiosMeta?: string[]; avisosMeta?: string[];
     brand_id?: string; meta_account_id?: string;
   } | null>(null);
@@ -894,6 +895,7 @@ export function PainelCriacao() {
                 tipo: linha.tipo,
                 linkVideo: linha.linkVideo,
                 thumbnailLink: linha.thumbnailLink,
+                imageAssets: linha.imageAssets,
                 bloqueiosMeta: linha.bloqueiosMeta,
                 avisosMeta: linha.avisosMeta,
                 brand_id: brandSelecionado?.id,

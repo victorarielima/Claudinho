@@ -21,7 +21,8 @@ import {
 } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { CTA_OPTIONS } from "@/lib/constants";
-import { analisarProntidaoAnuncio } from "@/lib/ad-readiness";
+import { analisarProntidaoAnuncio, type AssetImagemValidavel } from "@/lib/ad-readiness";
+import { rotuloPlacementImagem } from "@/lib/ad-media";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -41,6 +42,7 @@ interface DadosEdicao {
   tipo?: "video" | "image";
   linkVideo?: string;
   thumbnailLink?: string;
+  imageAssets?: AssetImagemValidavel[];
   bloqueiosMeta?: string[];
   avisosMeta?: string[];
   brand_id?: string;
@@ -171,6 +173,7 @@ export function DialogEditarAnuncio({
       adSetId: form.ad_set_id,
       adName: form.ad_name,
       linkVideo: form.linkVideo,
+      imageAssets: form.imageAssets,
       linkAnuncio: form.link_campanha,
       texto_principal: form.texto_principal,
       titulo: form.titulo,
@@ -333,6 +336,46 @@ export function DialogEditarAnuncio({
 
           <Separator />
 
+          {/* ── Imagens (apenas para criativos estáticos) ─────────── */}
+          {form.tipo === "image" && form.imageAssets && form.imageAssets.length > 0 && (
+            <>
+              <section>
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                  Imagens ({form.imageAssets.length})
+                </h4>
+                <div className="grid grid-cols-3 gap-2">
+                  {form.imageAssets.map((asset, i) => (
+                    <a
+                      key={`${asset.placement}-${i}`}
+                      href={asset.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group block overflow-hidden rounded-lg border bg-muted/30 transition-colors hover:border-ring"
+                      title={asset.url}
+                    >
+                      <div className="aspect-square bg-muted flex items-center justify-center overflow-hidden">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={asset.url}
+                          alt=""
+                          className="h-full w-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                      <div className="px-2 py-1.5">
+                        <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                          {rotuloPlacementImagem(asset.placement)}
+                        </p>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              </section>
+
+              <Separator />
+            </>
+          )}
+
           {/* ── Conteúdo (copy) ────────────────────────────────────── */}
           <section>
             <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Conteúdo</h4>
@@ -429,6 +472,7 @@ export function DialogEditarAnuncio({
               cta={form.cta}
               linkCampanha={form.link_campanha}
               thumbnailLink={form.thumbnailLink}
+              imageAssets={form.imageAssets}
               tipo={form.tipo}
             />
           </div>
@@ -520,6 +564,7 @@ function PreviewAnuncio({
   cta,
   linkCampanha,
   thumbnailLink,
+  imageAssets,
   tipo,
 }: {
   textoPrincipal: string;
@@ -528,8 +573,14 @@ function PreviewAnuncio({
   cta: string;
   linkCampanha: string;
   thumbnailLink?: string;
+  imageAssets?: AssetImagemValidavel[];
   tipo?: "video" | "image";
 }) {
+  // For image ads, prefer the feed image (or first available) for the preview
+  const imagemPreview =
+    tipo === "image" && imageAssets && imageAssets.length > 0
+      ? (imageAssets.find((a) => a.placement === "feed") ?? imageAssets[0]).url
+      : thumbnailLink;
   const ctaLabel = CTA_OPTIONS.find((o) => o.value === cta)?.label ?? cta;
 
   let dominio = "";
@@ -559,10 +610,10 @@ function PreviewAnuncio({
 
       {/* Media */}
       <div className="relative aspect-square bg-slate-100 flex items-center justify-center">
-        {thumbnailLink ? (
+        {imagemPreview ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={thumbnailLink}
+            src={imagemPreview}
             alt=""
             className="h-full w-full object-cover"
             referrerPolicy="no-referrer"
