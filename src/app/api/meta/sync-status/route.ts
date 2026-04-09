@@ -4,10 +4,14 @@ import { metaFetchWithRetry, safeResponseJson } from "@/lib/meta-retry";
 import { listarAdsSincronizaveis, atualizarMetaEffectiveStatus } from "@/lib/db";
 import { logger } from "@/lib/logger";
 
+// Apenas estados terminais/bloqueantes do Meta voltam o ad para "erro".
+// WITH_ISSUES NÃO entra aqui — é frequentemente um aviso brando (ad
+// pausado pelo parent, revisão pendente, tracking issue) e marcar como
+// erro ofusca uploads que deram certo. O badge de effective_status na
+// UI já comunica visualmente esse aviso.
 const STATUS_QUE_VOLTAM_PARA_ERRO = new Set([
   "DELETED",
   "DISAPPROVED",
-  "WITH_ISSUES",
 ]);
 
 function getAccessToken(): string {
@@ -129,7 +133,7 @@ export async function POST() {
         STATUS_QUE_VOLTAM_PARA_ERRO.has(effectiveStatus) && ad.status === "concluido";
 
       const mensagemErro = deveVoltar
-        ? `Meta status: ${effectiveStatus}. O anúncio foi ${effectiveStatus === "DELETED" ? "excluído" : effectiveStatus === "DISAPPROVED" ? "reprovado" : "sinalizado"} no Meta.`
+        ? `Meta status: ${effectiveStatus}. O anúncio foi ${effectiveStatus === "DELETED" ? "excluído" : "reprovado"} no Meta.`
         : undefined;
 
       await atualizarMetaEffectiveStatus(
