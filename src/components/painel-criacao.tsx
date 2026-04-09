@@ -885,6 +885,71 @@ export function PainelCriacao() {
               setLinhaDetalhes(linha);
               setDialogDetalhes(true);
             }}
+            aoDuplicar={async (linha) => {
+              try {
+                const assets = linha.tipo === "image"
+                  ? (linha.imageAssets ?? []).map((a) => ({
+                      placement: a.placement,
+                      asset_url: a.url,
+                      asset_type: "image" as const,
+                    }))
+                  : linha.linkVideo
+                    ? [{ placement: "video_principal", asset_url: linha.linkVideo, asset_type: "video" as const }]
+                    : [];
+
+                const res = await fetch("/api/ads", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    brand_id: brandSelecionado?.id,
+                    type: linha.tipo ?? "video",
+                    campaign_name: linha.campaign || "(selecionar)",
+                    campaign_id: "",
+                    ad_set_name: linha.adSet || "(selecionar)",
+                    ad_set_id: "",
+                    ad_name: `${linha.adName} (cópia)`,
+                    texto_principal: linha.textoPrincipal,
+                    titulo: linha.titulo,
+                    descricao: linha.descricao,
+                    cta: linha.cta,
+                    link_campanha: linha.linkCampanha,
+                    assets,
+                  }),
+                });
+                if (!res.ok) {
+                  const json = await res.json();
+                  throw new Error(json.erro ?? "Erro ao duplicar");
+                }
+                const { data: novoAd } = await res.json();
+                setFeedback({ tipo: "sucesso", titulo: "Anúncio duplicado", descricao: "Selecione campanha e ad set antes de subir." });
+                await carregarDados();
+                // Abre editor no novo ad
+                if (novoAd?.id) {
+                  setEditarAdId(novoAd.id);
+                  setEditarDados({
+                    ad_name: `${linha.adName} (cópia)`,
+                    texto_principal: linha.textoPrincipal ?? "",
+                    titulo: linha.titulo ?? "",
+                    descricao: linha.descricao ?? "",
+                    cta: linha.cta ?? "SHOP_NOW",
+                    campaign_name: "",
+                    campaign_id: "",
+                    ad_set_name: "",
+                    ad_set_id: "",
+                    link_campanha: linha.linkCampanha ?? "",
+                    tipo: linha.tipo,
+                    linkVideo: linha.linkVideo,
+                    thumbnailLink: linha.thumbnailLink,
+                    imageAssets: linha.imageAssets,
+                    brand_id: brandSelecionado?.id,
+                    meta_account_id: brandSelecionado?.meta_account_id,
+                  });
+                  setDialogEditar(true);
+                }
+              } catch (e) {
+                setFeedback({ tipo: "erro", titulo: "Falha ao duplicar", descricao: e instanceof Error ? e.message : "Erro desconhecido" });
+              }
+            }}
             aoEditar={(linha) => {
               if (!linha.adId) return;
               setEditarAdId(linha.adId);
