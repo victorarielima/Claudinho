@@ -41,9 +41,9 @@ const CHARS_PROIBIDOS_INICIO = new Set(["\\", "/", "!", ".", "?", "-", "*", "(",
 function validarTextoMeta(texto: string, campo: string): AvisoAnuncio[] {
   const avisos: AvisoAnuncio[] = [];
 
-  // 1. Primeiro caractere proibido
-  const primeiro = texto.charAt(0);
-  if (CHARS_PROIBIDOS_INICIO.has(primeiro)) {
+  // 1. Primeiro caractere proibido (ignora emojis — charAt(0) pode ser metade de surrogate)
+  const primeiro = [...texto][0] ?? "";
+  if (primeiro.length === 1 && CHARS_PROIBIDOS_INICIO.has(primeiro)) {
     avisos.push({
       nivel: "aviso",
       codigo: `${campo}_char_proibido`,
@@ -51,19 +51,17 @@ function validarTextoMeta(texto: string, campo: string): AvisoAnuncio[] {
     });
   }
 
-  // 2. Pontuação consecutiva (exceto ...)
-  if (/[^\w\s]{2,}/u.test(texto) && !/^\.{3}$/.test(texto)) {
-    // Verifica se há sequências de 2+ pontuação que não sejam exatamente "..."
-    const matches = texto.match(/[^\w\s]{2,}/gu);
-    if (matches) {
-      const temPontuacaoProblematica = matches.some((m) => m !== "...");
-      if (temPontuacaoProblematica) {
-        avisos.push({
-          nivel: "aviso",
-          codigo: `${campo}_pontuacao_consecutiva`,
-          mensagem: `'${campo}' contém pontuação consecutiva`,
-        });
-      }
+  // 2. Pontuação ASCII consecutiva (exceto ...)
+  // Usa classe explícita de pontuação ASCII — emojis e acentos NÃO contam.
+  const matchesPontuacao = texto.match(/[!?.,;:*#@&%$^~(){}\[\]<>\\/"'-]{2,}/g);
+  if (matchesPontuacao) {
+    const temProblematica = matchesPontuacao.some((m) => m !== "...");
+    if (temProblematica) {
+      avisos.push({
+        nivel: "aviso",
+        codigo: `${campo}_pontuacao_consecutiva`,
+        mensagem: `'${campo}' contém pontuação consecutiva`,
+      });
     }
   }
 
