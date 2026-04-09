@@ -76,7 +76,10 @@ export function SearchableSelect({
         disabled={disabled || loading}
         className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-background px-3 text-sm shadow-xs transition-colors hover:bg-accent/50 focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        <span className={selecionado ? "truncate" : "truncate text-muted-foreground"}>
+        <span
+          className={selecionado ? "truncate" : "truncate text-muted-foreground"}
+          title={selecionado?.label}
+        >
           {loading ? "Carregando..." : selecionado ? selecionado.label : placeholder}
         </span>
         <svg className="h-3.5 w-3.5 shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -86,7 +89,7 @@ export function SearchableSelect({
 
       {/* Dropdown */}
       {aberto && (
-        <div className="absolute z-50 mt-1 w-full rounded-md border bg-background shadow-lg">
+        <div className="absolute z-50 mt-1 min-w-full w-max max-w-[480px] rounded-md border bg-background shadow-lg">
           {/* Search input */}
           <div className="border-b px-2 py-1.5">
             <input
@@ -109,6 +112,7 @@ export function SearchableSelect({
                   key={opt.value}
                   type="button"
                   onClick={() => selecionar(opt.value)}
+                  title={opt.label}
                   className={`flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-accent ${
                     opt.value === value ? "bg-accent/50 font-medium" : ""
                   }`}

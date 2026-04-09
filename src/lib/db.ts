@@ -201,18 +201,30 @@ export async function buscarAd(id: string, tentativas = 3): Promise<Ad | null> {
 export async function criarAd(input: CriarAdInput, userId: string, userName?: string): Promise<Ad> {
   const sb = getSupabase();
 
-  // Verificar duplicata antes de inserir
+  // Verificar duplicata antes de inserir. Escopo: mesma brand + ad_name +
+  // campaign + ad_set. Só bloqueia se o existente estiver em estado ativo
+  // (pendente, processando, concluido). Se estiver em `erro`, permitimos
+  // criar um novo — o usuário pode ter corrigido assets ou configuração e
+  // está recriando. O Meta API não exige unicidade de ad_name.
   const { data: existente } = await sb
     .from("ads")
-    .select("id")
+    .select("id, status")
     .eq("brand_id", input.brand_id)
     .eq("ad_name", input.ad_name)
     .eq("campaign_name", input.campaign_name)
+    .eq("ad_set_name", input.ad_set_name)
+    .in("status", ["pendente", "processando", "concluido"])
     .maybeSingle();
 
   if (existente) {
+    const label =
+      existente.status === "concluido"
+        ? "ja foi subido para a Meta"
+        : existente.status === "processando"
+          ? "esta sendo processado"
+          : "ja existe como rascunho";
     throw new Error(
-      `Ja existe um anuncio com o nome '${input.ad_name}' na campanha '${input.campaign_name}'`
+      `O anuncio '${input.ad_name}' ${label} neste ad set. Edite o existente em vez de criar um novo.`
     );
   }
 
