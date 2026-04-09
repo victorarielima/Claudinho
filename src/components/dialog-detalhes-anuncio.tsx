@@ -54,6 +54,11 @@ function copiarTexto(texto: string) {
   navigator.clipboard.writeText(texto).catch(() => {});
 }
 
+function extrairDriveFileId(url: string): string | null {
+  const m = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  return m ? m[1] : null;
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -74,6 +79,8 @@ export function DialogDetalhesAnuncio({
       ? `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${linha.accountId}&selected_ad_ids=${linha.adIdCriado}`
       : `https://adsmanager.facebook.com/adsmanager/manage/ads?selected_ad_ids=${linha.adIdCriado}`
     : null;
+
+  const videoFileId = !isImage && linha.linkVideo ? extrairDriveFileId(linha.linkVideo) : null;
 
   let dominio = "";
   try {
@@ -225,24 +232,44 @@ export function DialogDetalhesAnuncio({
               </>
             )}
 
-            {!isImage && linha.linkVideo && (
-              <>
-                <section>
-                  <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                    Vídeo
-                  </h4>
-                  <a
-                    href={linha.linkVideo}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-blue-600 hover:underline break-all"
-                  >
-                    {linha.linkVideo}
-                  </a>
-                </section>
-                <Separator />
-              </>
-            )}
+            {!isImage && linha.linkVideo && (() => {
+              const fileId = extrairDriveFileId(linha.linkVideo);
+              return (
+                <>
+                  <section>
+                    <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                      Vídeo
+                    </h4>
+                    {fileId ? (
+                      <video
+                        src={`/api/drive/stream/${fileId}`}
+                        controls
+                        className="w-full max-h-[280px] rounded-lg border bg-black"
+                        preload="metadata"
+                      />
+                    ) : (
+                      <a
+                        href={linha.linkVideo}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-blue-600 hover:underline break-all"
+                      >
+                        {linha.linkVideo}
+                      </a>
+                    )}
+                    <a
+                      href={linha.linkVideo}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] text-muted-foreground hover:underline mt-1.5 block truncate"
+                    >
+                      {linha.linkVideo}
+                    </a>
+                  </section>
+                  <Separator />
+                </>
+              );
+            })()}
 
             {/* ── Conteúdo ───────────────────────────────────── */}
             <section>
@@ -344,6 +371,7 @@ export function DialogDetalhesAnuncio({
                 imageAssets={imageAssets}
                 tipo={linha.tipo}
                 dominio={dominio}
+                videoFileId={videoFileId}
               />
             </div>
           </div>
@@ -456,6 +484,7 @@ function PreviewAnuncio({
   imageAssets,
   tipo,
   dominio,
+  videoFileId,
 }: {
   textoPrincipal: string;
   titulo: string;
@@ -466,6 +495,7 @@ function PreviewAnuncio({
   imageAssets?: { placement: string; url: string }[];
   tipo?: "video" | "image";
   dominio: string;
+  videoFileId?: string | null;
 }) {
   const imagemPreview =
     tipo === "image" && imageAssets && imageAssets.length > 0
@@ -493,8 +523,15 @@ function PreviewAnuncio({
       )}
 
       {/* Media */}
-      <div className="relative aspect-square bg-slate-100 flex items-center justify-center">
-        {imagemPreview ? (
+      <div className="relative aspect-square bg-slate-100 flex items-center justify-center overflow-hidden">
+        {videoFileId ? (
+          <video
+            src={`/api/drive/stream/${videoFileId}`}
+            controls
+            className="h-full w-full object-cover"
+            preload="metadata"
+          />
+        ) : imagemPreview ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={imagemPreview}
