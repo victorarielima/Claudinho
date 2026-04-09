@@ -270,6 +270,86 @@ function StatusDot({ status }: { status: StatusProcessamento }) {
   );
 }
 
+function BotaoErroMeta({ mensagem, adName }: { mensagem: string; adName: string }) {
+  const [aberto, setAberto] = useState(false);
+  const erro = interpretarErroMeta(mensagem);
+  if (!erro) return null;
+
+  const tooltip = `${erro.tipo}\n\n${erro.explicacao}\n\nClique para ver o erro original do Meta`;
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setAberto(true);
+        }}
+        title={tooltip}
+        aria-label={`Erro: ${erro.tipo}. Clique para detalhes.`}
+        className="group mt-0.5 w-full max-w-[300px] text-left text-[10px] text-destructive hover:text-destructive/80 transition-colors"
+      >
+        <span className="inline-flex items-center gap-1 font-semibold underline decoration-dotted underline-offset-2">
+          <svg className="h-2.5 w-2.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          {erro.tipo}
+        </span>
+        <span className="block truncate text-muted-foreground group-hover:text-destructive/70">
+          {erro.explicacao}
+        </span>
+      </button>
+
+      <Dialog open={aberto} onOpenChange={setAberto}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-destructive/15 px-2 py-1 text-xs font-bold uppercase tracking-wide text-destructive">
+                <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+                {erro.tipo}
+              </span>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-muted-foreground mb-1">Anúncio</p>
+              <p className="text-sm font-medium break-all">{adName}</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-wide text-muted-foreground mb-1">O que aconteceu</p>
+              <p className="text-sm leading-relaxed">{erro.explicacao}</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-wide text-muted-foreground mb-1">
+                Mensagem original do Meta
+              </p>
+              <pre className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs font-mono whitespace-pre-wrap break-words text-destructive select-all">
+                {erro.original}
+              </pre>
+              <p className="mt-1.5 text-[10px] text-muted-foreground">
+                Clique no texto acima para selecionar e copiar.
+              </p>
+            </div>
+            {!erro.conhecido && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                Esse erro ainda não está catalogado. Compartilhe a mensagem
+                original com o time para adicionarmos ao classificador em
+                <code className="mx-1 rounded bg-amber-100 px-1 py-0.5 font-mono">src/lib/erros-meta.ts</code>.
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 function NomeEditavel({
   valor,
   aoSalvar,
@@ -476,18 +556,9 @@ function TabelaCompacta({
                       </button>
                     )}
                   </div>
-                  {temErro && linha.mensagemErro && (() => {
-                    const erro = interpretarErroMeta(linha.mensagemErro);
-                    if (!erro) return null;
-                    return (
-                      <p
-                        className="text-[10px] text-destructive truncate max-w-[300px] mt-0.5"
-                        title={`${erro.tipo}\n\n${erro.explicacao}\n\nMeta: ${erro.original}`}
-                      >
-                        <span className="font-semibold">{erro.tipo}:</span> {erro.explicacao}
-                      </p>
-                    );
-                  })()}
+                  {temErro && linha.mensagemErro && (
+                    <BotaoErroMeta mensagem={linha.mensagemErro} adName={linha.adName} />
+                  )}
                 </td>
                 <td className="px-2 py-2">
                   {aoEditarCampo && podeEditar ? (
