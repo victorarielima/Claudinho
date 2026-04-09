@@ -827,6 +827,135 @@ export async function criarAnuncio(
   return json.id;
 }
 
+// ─── Validação pós-criação ──────────────────────────────────
+
+interface IssueInfo {
+  level?: string;
+  error_code?: number;
+  error_summary?: string;
+  error_message?: string;
+  error_type?: string;
+}
+
+/**
+ * Após criar o ad, o Meta valida assincronamente. Estados que podem
+ * aparecer brevemente: IN_PROCESS → PENDING_REVIEW → PAUSED/ACTIVE.
+ * Se houver delivery error, surge WITH_ISSUES com `issues_info`
+ * preenchido. Polling curto pega isso na hora do upload em vez de
+ * ficar latente até o próximo sync.
+ *
+ * Retorna a mensagem do issue se houver problema, ou null se OK.
+ */
+export async function verificarIssuesAd(
+  metaAdId: string,
+  opts: { tentativas?: number; intervaloMs?: number } = {}
+): Promise<string | null> {
+  const tentativas = opts.tentativas ?? 3;
+  const intervaloMs = opts.intervaloMs ?? 4_000;
+  const token = getAccessToken();
+
+  for (let i = 0; i < tentativas; i++) {
+    await new Promise((r) => setTimeout(r, intervaloMs));
+
+    const url = `${META_API_BASE}/${metaAdId}?fields=effective_status,issues_info&access_token=${token}`;
+    try {
+      const res = await fetch(url);
+      const json = await safeResponseJson(res);
+      if (json.error) {
+        logger.warn("Falha ao verificar issues do ad pós-criação", {
+          fn: "verificarIssuesAd",
+          metaAdId,
+          attempt: i + 1,
+          error: extrairErroMeta(json),
+        });
+        continue;
+      }
+
+      const status = json.effective_status as string | undefined;
+      const issues = json.issues_info as IssueInfo[] | undefined;
+
+      logger.debug("Pós-criação poll", {
+        fn: "verificarIssuesAd",
+        metaAdId,
+        attempt: i + 1,
+        status,
+        hasIssues: !!issues?.length,
+      });
+
+      // Se já tem issues, retorna a mensagem na hora — não espera mais.
+      if (issues && issues.length > 0) {
+        const primeiro = issues[0];
+        const partes: string[] = [];
+        if (primeiro.error_summary) partes.push(primeiro.error_summary);
+        if (primeiro.error_message && primeiro.error_message !== primeiro.error_summary) {
+          partes.push(primeiro.error_message);
+        }
+        if (primeiro.error_code) partes.push(`[code ${primeiro.error_code}]`);
+        return partes.join(" — ") || `Meta sinalizou problemas (status ${status})`;
+      }
+
+      // Estados terminais que indicam problema sem issues_info preenchido
+      // (raro, mas defensivo).
+      if (status === "DISAPPROVED" || status === "DELETED") {
+        return `Meta status: ${status}`;
+      }
+
+      // Estados normais — terminamos cedo, não precisa esperar mais.
+      if (status === "ACTIVE" || status === "PAUSED" || status === "PENDING_REVIEW") {
+        return null;
+      }
+
+      // IN_PROCESS / outro estado intermediário → continua tentando
+    } catch (err) {
+      logger.warn("Exceção ao verificar issues pós-criação", {
+        fn: "verificarIssuesAd",
+        metaAdId,
+        attempt: i + 1,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // Polling esgotou sem confirmar — não bloqueia o upload, o sync
+  // posterior pega se algo aparecer.
+  return null;
+}
+
+/**
+ * Deleta um ad no Meta. Usado quando reprocessamos um ad em erro,
+ * para liberar o slot na campanha (Advantage+ tem limite de 150) e
+ * evitar acumular ads zumbis.
+ */
+export async function deletarAdMeta(metaAdId: string): Promise<void> {
+  const token = getAccessToken();
+  const url = `${META_API_BASE}/${metaAdId}?access_token=${token}`;
+  try {
+    const res = await fetch(url, { method: "DELETE" });
+    const json = await safeResponseJson(res);
+    if (res.ok && json.success) {
+      logger.info("Ad deletado no Meta", { fn: "deletarAdMeta", metaAdId });
+      return;
+    }
+    // Se o ad já não existe (803), trata como sucesso silencioso.
+    const code = (json.error as { code?: number } | undefined)?.code;
+    if (code === 803) {
+      logger.info("Ad já não existia no Meta (803)", { fn: "deletarAdMeta", metaAdId });
+      return;
+    }
+    logger.warn("Falha ao deletar ad no Meta", {
+      fn: "deletarAdMeta",
+      metaAdId,
+      error: extrairErroMeta(json),
+    });
+  } catch (err) {
+    logger.warn("Exceção ao deletar ad no Meta", {
+      fn: "deletarAdMeta",
+      metaAdId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 // ─── Utilitários ────────────────────────────────────────────
 
 export async function buscarAccountIdDoAdSet(

@@ -9,6 +9,7 @@ import {
   buscarAccountIdDoAdSet,
   buscarCrossChannelInfo,
   buscarInstagramActorId,
+  deletarAdMeta,
   type ImagemPlacement,
 } from "@/lib/meta-criar";
 import { buscarAd, buscarBrand, atualizarStatusAd } from "@/lib/db";
@@ -133,11 +134,23 @@ async function processarFluxoNovo(body: CorpoNovoFluxo) {
       throw new Error(diagnostico.bloqueios.map((item) => item.mensagem).join(" "));
     }
 
-    // Ao reprocessar após erro, limpar creative anterior para forçar recriação
-    // (o creative pode ter sido criado com params desatualizados)
-    const metaOverrides: Record<string, unknown> = { meta_account_id: accountId, error_message: null };
-    if (ad.status === "erro" && ad.meta_creative_id) {
-      metaOverrides.meta_creative_id = null;
+    // Ao reprocessar após erro, limpar creative E ad anteriores para
+    // forçar recriação. Se o ad anterior foi criado no Meta (mesmo
+    // bugado), deletamos pra liberar slot na campanha (Advantage+ tem
+    // limite de 150 ads) e evitar acumular zumbis.
+    const metaOverrides: Record<string, string | null> = {
+      meta_account_id: accountId,
+      error_message: null,
+      meta_effective_status: null,
+    };
+    if (ad.status === "erro") {
+      if (ad.meta_ad_id) {
+        await deletarAdMeta(ad.meta_ad_id);
+        metaOverrides.meta_ad_id = null;
+      }
+      if (ad.meta_creative_id) {
+        metaOverrides.meta_creative_id = null;
+      }
     }
 
     // Marcar como processando - store account info for the processar route

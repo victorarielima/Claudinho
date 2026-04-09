@@ -325,10 +325,10 @@ export async function atualizarStatusAd(
   id: string,
   status: StatusAd,
   meta?: {
-    error_message?: string;
-    meta_ad_id?: string;
-    meta_creative_id?: string;
-    meta_account_id?: string;
+    error_message?: string | null;
+    meta_ad_id?: string | null;
+    meta_creative_id?: string | null;
+    meta_account_id?: string | null;
     meta_effective_status?: string | null;
   },
   userId?: string,
@@ -336,11 +336,15 @@ export async function atualizarStatusAd(
 ): Promise<void> {
   const sb = getSupabase();
 
+  // Importante: usar `!== undefined` para permitir setar explicitamente
+  // null (limpar o campo). Antes só atualizava em truthy, então passar
+  // null era silenciosamente ignorado — bug latente que travava retry
+  // de ads em erro (meta_creative_id antigo persistia).
   const updateData: Record<string, unknown> = { status };
   if (meta?.error_message !== undefined) updateData.error_message = meta.error_message;
-  if (meta?.meta_ad_id) updateData.meta_ad_id = meta.meta_ad_id;
-  if (meta?.meta_creative_id) updateData.meta_creative_id = meta.meta_creative_id;
-  if (meta?.meta_account_id) updateData.meta_account_id = meta.meta_account_id;
+  if (meta?.meta_ad_id !== undefined) updateData.meta_ad_id = meta.meta_ad_id;
+  if (meta?.meta_creative_id !== undefined) updateData.meta_creative_id = meta.meta_creative_id;
+  if (meta?.meta_account_id !== undefined) updateData.meta_account_id = meta.meta_account_id;
   if (meta?.meta_effective_status !== undefined) updateData.meta_effective_status = meta.meta_effective_status;
 
   const { error } = await sb.from("ads").update(updateData).eq("id", id);

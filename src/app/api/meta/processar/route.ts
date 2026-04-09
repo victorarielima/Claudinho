@@ -10,6 +10,8 @@ import {
   buscarAccountIdDoAdSet,
   buscarCrossChannelInfo,
   buscarInstagramActorId,
+  verificarIssuesAd,
+  deletarAdMeta,
   type ImagemPlacement,
 } from "@/lib/meta-criar";
 import {
@@ -593,6 +595,39 @@ async function stepCriarAnuncio(
   }
 
   const metaAdId = await criarAnuncio(accountId, ad.ad_set_id, ad.ad_name, ad.meta_creative_id);
+
+  // Validação pós-criação: o Meta valida o ad asincronamente. Se houver
+  // delivery error (ex: cross-channel mal configurado), surge em
+  // issues_info dentro de alguns segundos. Pegando aqui evitamos que o
+  // ad fique "concluido" no banco mas quebrado no Meta — o usuário
+  // antes só descobriria ao rodar o sync depois.
+  const issueMessage = await verificarIssuesAd(metaAdId);
+  if (issueMessage) {
+    logger.error("Ad criado com delivery issue detectado em pós-validação", {
+      fn: "stepCriarAnuncio",
+      adId: ad.id,
+      metaAdId,
+      issue: issueMessage,
+    });
+    await atualizarStatusAd(
+      ad.id,
+      "erro",
+      {
+        meta_ad_id: metaAdId,
+        meta_creative_id: ad.meta_creative_id,
+        meta_account_id: accountId,
+        meta_effective_status: "WITH_ISSUES",
+        error_message: `Meta WITH_ISSUES: ${issueMessage}`,
+      },
+      userId ?? "system"
+    );
+    return NextResponse.json({
+      step: "error",
+      status: "erro",
+      adId: ad.id,
+      message: `Meta WITH_ISSUES: ${issueMessage}`,
+    } satisfies ProcessarResponse);
+  }
 
   // Mark as completed with all meta IDs - keep act_ prefix (QW-13)
   await atualizarStatusAd(
