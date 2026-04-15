@@ -848,7 +848,7 @@ function EditorUtm({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onFechar(); }}>
-      <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Editar Link</DialogTitle>
           <DialogDescription>Edite a URL base e os parâmetros separadamente.</DialogDescription>
