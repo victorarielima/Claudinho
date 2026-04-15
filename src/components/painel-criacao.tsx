@@ -105,6 +105,8 @@ export function PainelCriacao() {
   const [progressoUpload, setProgressoUpload] = useState<{atual: number, total: number} | null>(null);
   // QW-12: AlertDialog for delete confirmation
   const [confirmExcluir, setConfirmExcluir] = useState<{show: boolean, linha: LinhaComStatus | null}>({show: false, linha: null});
+  // Confirmation for deleting ad from Meta
+  const [confirmExcluirMeta, setConfirmExcluirMeta] = useState<{show: boolean, linha: LinhaComStatus | null}>({show: false, linha: null});
 
   const [linhas, setLinhas] = useState<LinhaComStatus[]>([]);
   const [carregando, setCarregando] = useState(false);
@@ -883,6 +885,10 @@ export function PainelCriacao() {
               if (!linha.adId) return;
               setConfirmExcluir({ show: true, linha });
             }}
+            aoExcluirMeta={(linha) => {
+              if (!linha.adId) return;
+              setConfirmExcluirMeta({ show: true, linha });
+            }}
             aoVerDetalhes={(linha) => {
               setLinhaDetalhes(linha);
               setDialogDetalhes(true);
@@ -1166,6 +1172,48 @@ export function PainelCriacao() {
               }}
             >
               Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirmation: delete ad from Meta */}
+      <AlertDialog open={confirmExcluirMeta.show} onOpenChange={(open) => { if (!open) setConfirmExcluirMeta({ show: false, linha: null }); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir anúncio do Meta</AlertDialogTitle>
+            <AlertDialogDescription>
+              O anúncio &ldquo;{confirmExcluirMeta.linha?.adName ?? ""}&rdquo; será apagado permanentemente do Meta Ads Manager.
+              {confirmExcluirMeta.linha?.metaEffectiveStatus === "ACTIVE" && " Este anúncio está ativo e sairá do ar imediatamente."}
+              {" "}O rascunho será mantido no Claudinho.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={async () => {
+                const linha = confirmExcluirMeta.linha;
+                if (!linha?.adId) return;
+                setConfirmExcluirMeta({ show: false, linha: null });
+                try {
+                  const res = await fetch(`/api/ads/${linha.adId}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ _excluirMeta: true }),
+                  });
+                  if (!res.ok) {
+                    const json = await res.json();
+                    throw new Error(json.erro ?? "Erro ao excluir do Meta");
+                  }
+                  setFeedback({ tipo: "sucesso", titulo: "Anúncio excluído do Meta", descricao: "O rascunho foi mantido." });
+                  await carregarDados();
+                } catch (e) {
+                  setFeedback({ tipo: "erro", titulo: "Falha ao excluir do Meta", descricao: e instanceof Error ? e.message : "Erro desconhecido" });
+                }
+              }}
+            >
+              Excluir do Meta
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

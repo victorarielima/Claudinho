@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { buscarAd, atualizarAd, atualizarStatusAd, excluirAd } from "@/lib/db";
+import { deletarAdMeta } from "@/lib/meta-criar";
 
 export async function GET(
   _request: NextRequest,
@@ -34,7 +35,24 @@ export async function PATCH(
   try {
     const body = await request.json();
     const recriar = body._recriar === true;
+    const excluirMeta = body._excluirMeta === true;
     delete body._recriar;
+    delete body._excluirMeta;
+
+    // Excluir do Meta: deletar ad no Meta e resetar para pendente
+    if (excluirMeta) {
+      const ad = await buscarAd(id);
+      if (!ad) throw new Error("Ad não encontrado");
+      if (ad.meta_ad_id) {
+        try { await deletarAdMeta(ad.meta_ad_id); } catch { /* já não existe */ }
+      }
+      await atualizarStatusAd(
+        id, "pendente",
+        { meta_ad_id: null, meta_creative_id: null, meta_effective_status: null, error_message: null },
+        userId
+      );
+      return NextResponse.json({ data: ad, excluido: true });
+    }
 
     // Salvar campos editados
     const ad = await atualizarAd(id, body, userId);

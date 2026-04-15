@@ -6,6 +6,16 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -97,6 +107,7 @@ export function DialogEditarAnuncio({
   });
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  const [confirmRecriar, setConfirmRecriar] = useState(false);
 
   // Campaign / AdSet selectors
   const [campanhas, setCampanhas] = useState<Campanha[]>([]);
@@ -493,7 +504,11 @@ export function DialogEditarAnuncio({
             </p>
             <div className="flex gap-2">
               <Button variant="outline" onClick={aoFechar} size="sm">Cancelar</Button>
-              <Button onClick={salvar} disabled={salvando || (recriar && !temAlteracao)} size="sm">
+              <Button
+                onClick={recriar ? () => setConfirmRecriar(true) : salvar}
+                disabled={salvando || (recriar && !temAlteracao)}
+                size="sm"
+              >
                 {salvando && <Loader2 className="size-3.5 animate-spin" />}
                 {recriar ? "Salvar e Recriar" : "Salvar"}
               </Button>
@@ -519,6 +534,26 @@ export function DialogEditarAnuncio({
         </div>
         </div>
       </DialogContent>
+
+      {/* Confirmation before recreating */}
+      <AlertDialog open={confirmRecriar} onOpenChange={setConfirmRecriar}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar recriação</AlertDialogTitle>
+            <AlertDialogDescription>
+              Ao subir as alterações, o anúncio atual será apagado do Meta e um novo será criado com um ID diferente.
+              {dadosIniciais?.metaEffectiveStatus === "ACTIVE" &&
+                " Como ele está ativo, ficará fora do ar até você clicar \"Subir\"."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { setConfirmRecriar(false); salvar(); }}>
+              Confirmar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }
