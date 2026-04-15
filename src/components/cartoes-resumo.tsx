@@ -2,11 +2,12 @@
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { AnuncioMeta } from "@/lib/meta";
+import type { AnuncioMeta, ResumoMeta } from "@/lib/meta";
 
 interface CartoesResumoProps {
   anuncios: AnuncioMeta[];
   carregando: boolean;
+  resumo?: ResumoMeta | null;
 }
 
 function formatarNumero(valor: number): string {
@@ -30,8 +31,8 @@ function formatarPorcentagem(valor: number): string {
   return `${valor.toFixed(2)}%`;
 }
 
-export function CartoesResumo({ anuncios, carregando }: CartoesResumoProps) {
-  const totais = anuncios.reduce(
+export function CartoesResumo({ anuncios, carregando, resumo }: CartoesResumoProps) {
+  const totaisCalculados = anuncios.reduce(
     (acc, anuncio) => {
       const insight = anuncio.insights?.data?.[0];
       if (!insight) return acc;
@@ -44,10 +45,17 @@ export function CartoesResumo({ anuncios, carregando }: CartoesResumoProps) {
     { investimento: 0, impressoes: 0, cliques: 0, alcance: 0 }
   );
 
-  const ctrMedio =
-    totais.impressoes > 0 ? (totais.cliques / totais.impressoes) * 100 : 0;
-  const cpcMedio =
-    totais.cliques > 0 ? totais.investimento / totais.cliques : 0;
+  const totais = resumo ?? {
+    ...totaisCalculados,
+    ctr:
+      totaisCalculados.impressoes > 0
+        ? (totaisCalculados.cliques / totaisCalculados.impressoes) * 100
+        : 0,
+    cpc:
+      totaisCalculados.cliques > 0
+        ? totaisCalculados.investimento / totaisCalculados.cliques
+        : 0,
+  };
 
   const metricas = [
     {
@@ -67,12 +75,12 @@ export function CartoesResumo({ anuncios, carregando }: CartoesResumoProps) {
     },
     {
       titulo: "CTR",
-      valor: formatarPorcentagem(ctrMedio),
+      valor: formatarPorcentagem(totais.ctr),
       descricao: "Taxa de cliques por impressão",
     },
     {
       titulo: "CPC Médio",
-      valor: formatarMoeda(cpcMedio),
+      valor: formatarMoeda(totais.cpc),
       descricao: "Custo médio por clique",
     },
     {

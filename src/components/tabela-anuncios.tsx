@@ -152,12 +152,14 @@ export function TabelaAnuncios({ anuncios, carregando }: TabelaAnunciosProps) {
                     <span className="font-medium text-sm leading-tight">
                       {anuncio.name}
                     </span>
-                    <Badge
-                      variant="secondary"
-                      className="w-fit text-[10px] px-1.5 py-0 h-4 font-normal"
-                    >
-                      {anuncio.effective_status}
-                    </Badge>
+                    {anuncio.effective_status && (
+                      <Badge
+                        variant="secondary"
+                        className="w-fit text-[10px] px-1.5 py-0 h-4 font-normal"
+                      >
+                        {anuncio.effective_status}
+                      </Badge>
+                    )}
                   </div>
                 </TableCell>
                 <TableCell className="text-sm text-muted-foreground">

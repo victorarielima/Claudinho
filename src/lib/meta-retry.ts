@@ -54,7 +54,13 @@ export async function metaFetchWithRetry(
       try {
         const body = await response.clone().json()
         const errorCode = body?.error?.code
-        isMetaRateLimit = errorCode === 17 || errorCode === 32 || errorCode === 4 || errorCode === 100
+        isMetaRateLimit =
+          errorCode === 17 ||
+          errorCode === 32 ||
+          errorCode === 4 ||
+          errorCode === 100 ||
+          errorCode === 613 ||
+          errorCode === 80004
       } catch {}
     }
 

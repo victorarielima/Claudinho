@@ -1,6 +1,6 @@
 import { META_API_BASE } from "./meta-config";
 import { logger } from "./logger";
-import { metaFetchWithRetry } from "./meta-retry";
+import { metaFetchWithRetry, safeResponseJson } from "./meta-retry";
 
 export interface ContaMeta {
   id: string;
@@ -46,7 +46,7 @@ export interface MetaAdSet {
 export interface AnuncioMeta {
   id: string;
   name: string;
-  effective_status: string;
+  effective_status?: string;
   creative?: MetaCreative;
   campaign?: MetaCampaign;
   adset?: MetaAdSet;
@@ -61,6 +61,44 @@ interface MetaApiResponse {
   };
 }
 
+interface MetaInsightsRow {
+  ad_id: string;
+  ad_name: string;
+  campaign_id?: string;
+  campaign_name?: string;
+  objective?: string;
+  impressions?: string;
+  clicks?: string;
+  spend?: string;
+  ctr?: string;
+  cpc?: string;
+  cpm?: string;
+  reach?: string;
+}
+
+interface MetaInsightsResponse {
+  data: MetaInsightsRow[];
+  paging?: {
+    cursors?: { before: string; after: string };
+    next?: string;
+  };
+}
+
+export interface ResumoMeta {
+  investimento: number;
+  impressoes: number;
+  cliques: number;
+  alcance: number;
+  ctr: number;
+  cpc: number;
+}
+
+export interface ResultadoPaginaAnuncios {
+  data: AnuncioMeta[];
+  nextCursor: string | null;
+  hasNextPage: boolean;
+}
+
 export type PresetPeriodo =
   | "today"
   | "yesterday"
@@ -70,80 +108,155 @@ export type PresetPeriodo =
   | "this_month"
   | "last_month";
 
-export async function buscarAnunciosDoPeriodo(
+export async function buscarResumoDoPeriodo(
   accountId: string,
   datePreset: PresetPeriodo = "last_30d"
-): Promise<AnuncioMeta[]> {
+): Promise<ResumoMeta> {
   const accessToken = process.env.META_ACCESS_TOKEN;
   if (!accessToken) {
     throw new Error("META_ACCESS_TOKEN não configurado");
   }
 
-  const fields = [
-    "id",
-    "name",
-    "effective_status",
-    "creative{id,thumbnail_url,body,title}",
-    "campaign{id,name,objective}",
-    "adset{id,name,daily_budget}",
-    `insights.date_preset(${datePreset}){impressions,clicks,spend,ctr,cpc,cpm,reach,actions,cost_per_action_type}`,
-  ].join(",");
-
-  const url = new URL(`${META_API_BASE}/${accountId}/ads`);
-  url.searchParams.set("fields", fields);
-  url.searchParams.set("limit", "100");
+  const url = new URL(`${META_API_BASE}/${accountId}/insights`);
+  url.searchParams.set("level", "account");
+  url.searchParams.set("fields", "impressions,clicks,spend,ctr,cpc,reach");
+  url.searchParams.set("date_preset", datePreset);
   url.searchParams.set("access_token", accessToken);
 
-  const todosAnuncios: AnuncioMeta[] = [];
-  let nextUrl: string | null = url.toString();
-  let page = 0;
-
-  logger.info("Fetching ads from Meta API", {
-    fn: "buscarAnunciosDoPeriodo",
+  logger.info("Fetching account summary from Meta API", {
+    fn: "buscarResumoDoPeriodo",
     accountId,
     datePreset,
   });
-  const startMs = Date.now();
 
-  while (nextUrl) {
-    page++;
-    const res = await metaFetchWithRetry(nextUrl);
-    if (!res.ok) {
-      const erro = await res.json();
-      logger.error("Failed to fetch ads from Meta API", {
-        fn: "buscarAnunciosDoPeriodo",
-        accountId,
-        datePreset,
-        page,
-        error: erro.error?.message ?? res.statusText,
-      });
-      throw new Error(
-        `Erro na API Meta: ${erro.error?.message ?? res.statusText}`
-      );
-    }
-    const json: MetaApiResponse = await res.json();
-    todosAnuncios.push(...json.data);
+  const res = await metaFetchWithRetry(url.toString());
+  const json = await safeResponseJson(res);
 
-    logger.debug("Fetched page of ads", {
-      fn: "buscarAnunciosDoPeriodo",
+  if (!res.ok) {
+    logger.error("Failed to fetch account summary from Meta API", {
+      fn: "buscarResumoDoPeriodo",
       accountId,
-      page,
-      itemsInPage: json.data.length,
-      totalSoFar: todosAnuncios.length,
+      datePreset,
+      error: json.error?.message ?? res.statusText,
     });
-
-    nextUrl = json.paging?.next ?? null;
+    throw new Error(
+      `Erro na API Meta: ${json.error?.message ?? res.statusText}`
+    );
   }
 
-  const elapsedMs = Date.now() - startMs;
-  logger.info("Finished fetching ads from Meta API", {
-    fn: "buscarAnunciosDoPeriodo",
+  const resumo = Array.isArray((json as { data?: MetaInsights[] }).data)
+    ? (json as { data: MetaInsights[] }).data[0]
+    : undefined;
+
+  return {
+    investimento: Number.parseFloat(resumo?.spend ?? "0"),
+    impressoes: Number.parseInt(resumo?.impressions ?? "0", 10),
+    cliques: Number.parseInt(resumo?.clicks ?? "0", 10),
+    alcance: Number.parseInt(resumo?.reach ?? "0", 10),
+    ctr: Number.parseFloat(resumo?.ctr ?? "0"),
+    cpc: Number.parseFloat(resumo?.cpc ?? "0"),
+  };
+}
+
+function construirFiltroCanal(canal: "todos" | "ecommerce" | "clube") {
+  if (canal === "todos") return null;
+  return [
+    {
+      field: "campaign.name",
+      operator: canal === "clube" ? "CONTAIN" : "NOT_CONTAIN",
+      value: "clube",
+    },
+  ];
+}
+
+function mapearInsightParaAnuncio(row: MetaInsightsRow): AnuncioMeta {
+  return {
+    id: row.ad_id,
+    name: row.ad_name,
+    campaign: {
+      id: row.campaign_id ?? "",
+      name: row.campaign_name ?? "—",
+      objective: row.objective,
+    },
+    insights: {
+      data: [
+        {
+          impressions: row.impressions ?? "0",
+          clicks: row.clicks ?? "0",
+          spend: row.spend ?? "0",
+          ctr: row.ctr ?? "0",
+          cpc: row.cpc ?? "0",
+          cpm: row.cpm ?? "0",
+          reach: row.reach ?? "0",
+        },
+      ],
+    },
+  };
+}
+
+export async function buscarPaginaAnunciosDoPeriodo(
+  accountId: string,
+  datePreset: PresetPeriodo = "last_30d",
+  opts: { canal?: "todos" | "ecommerce" | "clube"; limit?: number; after?: string | null } = {}
+): Promise<ResultadoPaginaAnuncios> {
+  const accessToken = process.env.META_ACCESS_TOKEN;
+  if (!accessToken) {
+    throw new Error("META_ACCESS_TOKEN não configurado");
+  }
+
+  const { canal = "todos", limit = 25, after } = opts;
+
+  const url = new URL(`${META_API_BASE}/${accountId}/insights`);
+  url.searchParams.set("level", "ad");
+  url.searchParams.set(
+    "fields",
+    "ad_id,ad_name,campaign_id,campaign_name,objective,impressions,clicks,spend,ctr,cpc,cpm,reach"
+  );
+  url.searchParams.set("date_preset", datePreset);
+  url.searchParams.set("limit", String(limit));
+  url.searchParams.set("sort[0]", "spend_descending");
+  if (after) url.searchParams.set("after", after);
+
+  const filtro = construirFiltroCanal(canal);
+  if (filtro) {
+    url.searchParams.set("filtering", JSON.stringify(filtro));
+  }
+
+  url.searchParams.set("access_token", accessToken);
+
+  logger.info("Fetching paginated ad insights from Meta API", {
+    fn: "buscarPaginaAnunciosDoPeriodo",
     accountId,
     datePreset,
-    totalAds: todosAnuncios.length,
-    pages: page,
-    elapsedMs,
+    canal,
+    limit,
+    after,
   });
 
-  return todosAnuncios;
+  const res = await metaFetchWithRetry(url.toString());
+  const json = await safeResponseJson(res);
+
+  if (!res.ok) {
+    logger.error("Failed to fetch paginated ad insights from Meta API", {
+      fn: "buscarPaginaAnunciosDoPeriodo",
+      accountId,
+      datePreset,
+      canal,
+      limit,
+      error: json.error?.message ?? res.statusText,
+    });
+    throw new Error(
+      `Erro na API Meta: ${json.error?.message ?? res.statusText}`
+    );
+  }
+
+  const data = Array.isArray((json as MetaInsightsResponse).data)
+    ? (json as MetaInsightsResponse).data
+    : [];
+
+  return {
+    data: data.map(mapearInsightParaAnuncio),
+    nextCursor: (json as MetaInsightsResponse).paging?.cursors?.after ?? null,
+    hasNextPage: Boolean((json as MetaInsightsResponse).paging?.next),
+  };
 }

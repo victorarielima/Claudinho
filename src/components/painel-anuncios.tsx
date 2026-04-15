@@ -1,13 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { SeletorConta } from "@/components/seletor-conta";
 import { SeletorPeriodo } from "@/components/seletor-periodo";
 import { CartoesResumo } from "@/components/cartoes-resumo";
 import { TabelaAnuncios } from "@/components/tabela-anuncios";
-import type { AnuncioMeta, PresetPeriodo } from "@/lib/meta";
+import type { AnuncioMeta, PresetPeriodo, ResumoMeta } from "@/lib/meta";
 
 const CONTA_PADRAO = "act_775254035944122";
+const PAGE_SIZE = 25;
 
 function formatarHora(iso: string) {
   return new Date(iso).toLocaleTimeString("pt-BR", {
@@ -33,9 +34,22 @@ export function PainelAnuncios() {
   const [erro, setErro] = useState<string | null>(null);
   const [usouCache, setUsouCache] = useState(false);
   const [atualizadoEm, setAtualizadoEm] = useState<string | null>(null);
+  const [resumo, setResumo] = useState<ResumoMeta | null>(null);
+  const [cursorAtual, setCursorAtual] = useState<string | null>(null);
+  const [proximoCursor, setProximoCursor] = useState<string | null>(null);
+  const [historicoCursores, setHistoricoCursores] = useState<(string | null)[]>([]);
+  const [paginaAtual, setPaginaAtual] = useState(1);
+  const [temProximaPagina, setTemProximaPagina] = useState(false);
+  const requisicaoAtualRef = useRef(0);
 
   const buscarDados = useCallback(
-    async (forcar = false) => {
+    async (
+      forcar = false,
+      after: string | null = null,
+      historicoAnterior?: (string | null)[],
+      paginaDestino = 1
+    ) => {
+      const requestId = ++requisicaoAtualRef.current;
       setCarregando(true);
       setErro(null);
 
@@ -44,32 +58,75 @@ export function PainelAnuncios() {
           accountId: contaId,
           datePreset: periodo,
           canal,
+          limit: String(PAGE_SIZE),
         });
+        if (after) params.set("after", after);
         if (forcar) params.set("fresh", "1");
 
         const res = await fetch(`/api/meta/anuncios?${params}`);
         const json = await res.json();
+
+        if (requestId !== requisicaoAtualRef.current) {
+          return;
+        }
 
         if (!res.ok) {
           throw new Error(json.erro ?? "Erro ao buscar anúncios");
         }
 
         setAnuncios(json.data);
+        setResumo(json.resumo ?? null);
         setUsouCache(json.cache ?? false);
         setAtualizadoEm(json.atualizadoEm ?? null);
+        setCursorAtual(after);
+        setPaginaAtual(paginaDestino);
+        setTemProximaPagina(Boolean(json.hasNextPage));
+        setProximoCursor(json.nextCursor ?? null);
+        setHistoricoCursores(historicoAnterior ?? []);
       } catch (e) {
+        if (requestId !== requisicaoAtualRef.current) {
+          return;
+        }
         setErro(e instanceof Error ? e.message : "Erro desconhecido");
         setAnuncios([]);
+        setResumo(null);
+        setUsouCache(false);
+        setAtualizadoEm(null);
+        setProximoCursor(null);
+        setTemProximaPagina(false);
       } finally {
-        setCarregando(false);
+        if (requestId === requisicaoAtualRef.current) {
+          setCarregando(false);
+        }
       }
     },
     [contaId, periodo, canal]
   );
 
   useEffect(() => {
-    buscarDados();
+    setCursorAtual(null);
+    setHistoricoCursores([]);
+    setProximoCursor(null);
+    setPaginaAtual(1);
+    buscarDados(false, null, [], 1);
   }, [buscarDados]);
+
+  const carregarProximaPagina = () => {
+    if (!temProximaPagina || !proximoCursor) return;
+    void buscarDados(
+      false,
+      proximoCursor,
+      [...historicoCursores, cursorAtual],
+      paginaAtual + 1
+    );
+  };
+
+  const carregarPaginaAnterior = () => {
+    if (historicoCursores.length === 0) return;
+    const proximoHistorico = [...historicoCursores];
+    const anterior = proximoHistorico.pop() ?? null;
+    void buscarDados(false, anterior, proximoHistorico, Math.max(1, paginaAtual - 1));
+  };
 
   return (
     <div className="flex flex-col gap-8">
@@ -101,7 +158,7 @@ export function PainelAnuncios() {
             ))}
           </div>
           <button
-            onClick={() => buscarDados(true)}
+            onClick={() => buscarDados(true, cursorAtual, historicoCursores, paginaAtual)}
             disabled={carregando}
             title="Atualizar dados (ignora cache)"
             className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-input bg-background text-muted-foreground shadow-sm transition-all hover:bg-accent hover:text-accent-foreground active:scale-95 disabled:pointer-events-none disabled:opacity-50"
@@ -144,7 +201,7 @@ export function PainelAnuncios() {
             </span>
           )}
         </div>
-        <CartoesResumo anuncios={anuncios} carregando={carregando} />
+        <CartoesResumo anuncios={anuncios} carregando={carregando} resumo={resumo} />
       </section>
 
       {/* Tabela de anúncios */}
@@ -155,11 +212,27 @@ export function PainelAnuncios() {
           </h2>
           {!carregando && anuncios.length > 0 && (
             <span className="text-xs text-muted-foreground">
-              {anuncios.length} anúncio{anuncios.length !== 1 ? "s" : ""}
+              Página {paginaAtual} • {anuncios.length} anúncio{anuncios.length !== 1 ? "s" : ""}
             </span>
           )}
         </div>
         <TabelaAnuncios anuncios={anuncios} carregando={carregando} />
+        <div className="mt-4 flex items-center justify-end gap-2">
+          <button
+            onClick={carregarPaginaAnterior}
+            disabled={carregando || historicoCursores.length === 0}
+            className="rounded-lg border border-input bg-background px-3 py-2 text-sm text-muted-foreground transition-all hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+          >
+            Anterior
+          </button>
+          <button
+            onClick={carregarProximaPagina}
+            disabled={carregando || !temProximaPagina || !proximoCursor}
+            className="rounded-lg border border-input bg-background px-3 py-2 text-sm text-muted-foreground transition-all hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+          >
+            Próxima
+          </button>
+        </div>
       </section>
     </div>
   );
