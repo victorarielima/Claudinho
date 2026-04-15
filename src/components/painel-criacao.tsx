@@ -1183,9 +1183,15 @@ export function PainelCriacao() {
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir anúncio do Meta</AlertDialogTitle>
             <AlertDialogDescription>
-              O anúncio &ldquo;{confirmExcluirMeta.linha?.adName ?? ""}&rdquo; será apagado permanentemente do Meta Ads Manager.
-              {confirmExcluirMeta.linha?.metaEffectiveStatus === "ACTIVE" && " Este anúncio está ativo e sairá do ar imediatamente."}
-              {" "}O rascunho será mantido no Claudinho.
+              O anúncio &ldquo;{confirmExcluirMeta.linha?.adName ?? ""}&rdquo;
+              {confirmExcluirMeta.linha?.metaEffectiveStatus === "ACTIVE"
+                ? " está ativo no Meta e sairá do ar imediatamente."
+                : confirmExcluirMeta.linha?.metaEffectiveStatus === "PAUSED"
+                  ? " está pausado no Meta."
+                  : confirmExcluirMeta.linha?.metaEffectiveStatus
+                    ? ` está com status "${confirmExcluirMeta.linha.metaEffectiveStatus}" no Meta.`
+                    : ""}
+              {" "}Será apagado permanentemente do Meta Ads Manager. O rascunho será mantido no Claudinho.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
