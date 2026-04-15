@@ -593,6 +593,7 @@ export async function criarCreativeImagem(
     ? { website_url: params.link }
     : undefined;
   if (linkUrlEntry && isCrossChannelValido(params.crossChannel)) {
+    linkUrlEntry.deeplink_url = params.link;
     linkUrlEntry.omnichannel_link_spec = construirOmnichannelSpec(params.link!, params.crossChannel);
     linkUrlEntry.object_store_urls = params.crossChannel.objectStoreUrls;
   }
