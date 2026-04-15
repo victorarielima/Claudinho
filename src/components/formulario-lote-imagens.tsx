@@ -7,6 +7,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { EditorUtmButton } from "@/components/editor-utm";
 import {
   Select,
   SelectContent,
@@ -574,15 +575,23 @@ export function FormularioLoteImagens({
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
                       <label className="text-[11px] text-muted-foreground">Link Campanha</label>
-                      {anuncios.length > 1 && (
-                        <button
-                          type="button"
-                          className="text-[10px] text-primary hover:underline"
-                          onClick={() => replicarCampo(i, "linkCampanha")}
-                        >
-                          <Copy className="h-3 w-3 inline mr-0.5" />replicar
-                        </button>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {anuncio.linkCampanha && (
+                          <EditorUtmButton
+                            valor={anuncio.linkCampanha}
+                            onChange={(v) => updateAnuncio(i, "linkCampanha", v)}
+                          />
+                        )}
+                        {anuncios.length > 1 && (
+                          <button
+                            type="button"
+                            className="text-[10px] text-primary hover:underline"
+                            onClick={() => replicarCampo(i, "linkCampanha")}
+                          >
+                            <Copy className="h-3 w-3 inline mr-0.5" />replicar
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <input
                       value={anuncio.linkCampanha}

@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { EditorUtmButton } from "@/components/editor-utm";
 import {
   Dialog,
   DialogContent,
@@ -634,6 +635,12 @@ export function FormularioLoteVideos({
                         className="h-8 flex-1 rounded-md border border-input bg-background px-2.5 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                         placeholder="Link da campanha (URL)"
                       />
+                      {anuncio.linkCampanha && (
+                        <EditorUtmButton
+                          valor={anuncio.linkCampanha}
+                          onChange={(v) => atualizarAnuncio(anuncio.videoId, "linkCampanha", v)}
+                        />
+                      )}
                       {anuncios.length > 1 && anuncio.linkCampanha && (
                         <button
                           type="button"

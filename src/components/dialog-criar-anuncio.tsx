@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EditorUtmTrigger } from "@/components/editor-utm";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
@@ -817,7 +818,7 @@ export function DialogCriarAnuncio({
                       />
                     </div>
 
-                    <CampoTexto
+                    <EditorUtmTrigger
                       rotulo="Link da campanha"
                       valor={form.link_campanha}
                       placeholder="https://..."
