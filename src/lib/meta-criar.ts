@@ -582,19 +582,19 @@ export async function criarCreativeImagem(
     image_label: { name: labels[placement] },
   }));
 
-  // Cross-channel multi-placement: o `omnichannel_link_spec` precisa
-  // ficar DENTRO de cada entrada de `asset_feed_spec.link_urls[]` —
-  // não no nível do form, não como key direta de asset_feed_spec, não
-  // dentro de object_story_spec. Esse foi o ÚNICO lugar que o Meta
-  // aceitou em testes empíricos contra a conta real (subcode 2446461
-  // dispara em qualquer outra posição).
+  // Cross-channel multi-placement: `deeplink_url` e `object_store_urls`
+  // vão dentro de `link_urls[0]` (campos válidos do schema). Já
+  // `omnichannel_link_spec` precisa ir no FORM level (igual vídeo/imagem
+  // simples) — colocá-lo dentro de `link_urls[]` era silenciosamente
+  // descartado pelo Meta (campo não faz parte do schema de
+  // AdAssetFeedSpecLinkUrl). Confirmado via GET no criativo: o campo
+  // sumia e o deep link ficava vazio.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const linkUrlEntry: Record<string, any> | undefined = params.link
     ? { website_url: params.link }
     : undefined;
   if (linkUrlEntry && isCrossChannelValido(params.crossChannel)) {
     linkUrlEntry.deeplink_url = params.link;
-    linkUrlEntry.omnichannel_link_spec = construirOmnichannelSpec(params.link!, params.crossChannel);
     linkUrlEntry.object_store_urls = params.crossChannel.objectStoreUrls;
   }
 
@@ -628,11 +628,14 @@ export async function criarCreativeImagem(
   if (params.link?.trim()) {
     formData.append("link_url", params.link);
   }
-  // applink_treatment continua no form (subcode 2446455 ainda exige).
-  // Só adiciona quando temos applicationId — sem ele, omnichannel_link_spec
-  // não foi adicionado e applink_treatment sozinho causa erro #100.
+  // Cross-channel: applink_treatment + omnichannel_link_spec vão no FORM
+  // level (igual vídeo/imagem simples). Sem applicationId, omitir ambos —
+  // applink_treatment sozinho causa erro #100.
   if (isCrossChannelValido(params.crossChannel)) {
     formData.append("applink_treatment", "deeplink_with_web_fallback");
+    formData.append("omnichannel_link_spec", JSON.stringify(
+      construirOmnichannelSpec(params.link ?? "", params.crossChannel),
+    ));
   }
   formData.append(
     "degrees_of_freedom_spec",
