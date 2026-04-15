@@ -170,7 +170,7 @@ export function PainelCriacao() {
   const [editarDados, setEditarDados] = useState<{
     ad_name: string; texto_principal: string; titulo: string; descricao: string;
     cta: string; campaign_name: string; campaign_id: string;
-    ad_set_name: string; ad_set_id: string; link_campanha: string;
+    ad_set_name: string; ad_set_id: string; link_anuncio: string;
     tipo?: "video" | "image"; linkVideo?: string; thumbnailLink?: string;
     imageAssets?: { placement: string; url: string }[];
     bloqueiosMeta?: string[]; avisosMeta?: string[];
@@ -944,7 +944,7 @@ export function PainelCriacao() {
                     campaign_id: "",
                     ad_set_name: "",
                     ad_set_id: "",
-                    link_campanha: linha.linkCampanha ?? "",
+                    link_anuncio: linha.linkAnuncio ?? linha.linkCampanha ?? "",
                     tipo: linha.tipo,
                     linkVideo: linha.linkVideo,
                     thumbnailLink: linha.thumbnailLink,
@@ -972,7 +972,7 @@ export function PainelCriacao() {
                 campaign_id: linha.campaignId ?? "",
                 ad_set_name: linha.adSet ?? "",
                 ad_set_id: linha.adSetId ?? "",
-                link_campanha: linha.linkCampanha ?? "",
+                link_anuncio: linha.linkAnuncio ?? linha.linkCampanha ?? "",
                 tipo: linha.tipo,
                 linkVideo: linha.linkVideo,
                 thumbnailLink: linha.thumbnailLink,

@@ -96,6 +96,7 @@ export interface AtualizarAdInput {
   descricao?: string;
   cta?: string;
   link_campanha?: string;
+  link_anuncio?: string;
   link_aux?: string;
   type?: TipoAd;
 }
@@ -299,12 +300,14 @@ export async function atualizarAd(
   const anterior = await buscarAd(id);
   if (!anterior) throw new Error("Ad não encontrado");
 
-  // O link_campanha editado pelo usuário é o link final — usar direto.
-  const linkCampanha = input.link_campanha ?? anterior.link_campanha;
-
   const updateData: Record<string, unknown> = { ...input };
-  if (input.link_campanha !== undefined) {
-    updateData.link_anuncio = linkCampanha;
+
+  // link_anuncio direto (do editor) tem prioridade sobre link_campanha
+  if (input.link_anuncio !== undefined) {
+    // Já é o link final — usar direto
+  } else if (input.link_campanha !== undefined) {
+    // Legado: link_campanha vira link_anuncio direto
+    updateData.link_anuncio = input.link_campanha;
   }
 
   const { error } = await sb.from("ads").update(updateData).eq("id", id);

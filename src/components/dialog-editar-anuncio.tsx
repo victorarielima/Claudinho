@@ -49,7 +49,7 @@ interface DadosEdicao {
   campaign_id: string;
   ad_set_name: string;
   ad_set_id: string;
-  link_campanha: string;
+  link_anuncio: string;
   tipo?: "video" | "image";
   linkVideo?: string;
   thumbnailLink?: string;
@@ -104,7 +104,7 @@ export function DialogEditarAnuncio({
     campaign_id: "",
     ad_set_name: "",
     ad_set_id: "",
-    link_campanha: "",
+    link_anuncio: "",
   });
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -186,7 +186,7 @@ export function DialogEditarAnuncio({
     if (!dadosIniciais) return false;
     const campos: (keyof DadosEdicao)[] = [
       "ad_name", "texto_principal", "titulo", "descricao", "cta",
-      "campaign_name", "campaign_id", "ad_set_name", "ad_set_id", "link_campanha",
+      "campaign_name", "campaign_id", "ad_set_name", "ad_set_id", "link_anuncio",
     ];
     return campos.some((c) => (form[c] ?? "") !== (dadosIniciais[c] ?? ""));
   }, [form, dadosIniciais]);
@@ -199,7 +199,7 @@ export function DialogEditarAnuncio({
       adName: form.ad_name,
       linkVideo: form.linkVideo,
       imageAssets: form.imageAssets,
-      linkAnuncio: form.link_campanha,
+      linkAnuncio: form.link_anuncio,
       texto_principal: form.texto_principal,
       titulo: form.titulo,
       descricao: form.descricao,
@@ -221,7 +221,7 @@ export function DialogEditarAnuncio({
           titulo: form.titulo,
           descricao: form.descricao,
           cta: form.cta,
-          link_campanha: form.link_campanha,
+          link_anuncio: form.link_anuncio,
           campaign_name: form.campaign_name,
           campaign_id: form.campaign_id,
           ad_set_name: form.ad_set_name,
@@ -478,8 +478,9 @@ export function DialogEditarAnuncio({
                   </Select>
                 </div>
                 <EditorUtmTrigger
-                  valor={form.link_campanha ?? ""}
-                  onChange={(v) => atualizar("link_campanha", v)}
+                  rotulo="Link do anúncio"
+                  valor={form.link_anuncio ?? ""}
+                  onChange={(v) => atualizar("link_anuncio", v)}
                 />
               </div>
             </div>
@@ -524,7 +525,7 @@ export function DialogEditarAnuncio({
               titulo={form.titulo}
               descricao={form.descricao}
               cta={form.cta}
-              linkCampanha={form.link_campanha}
+              linkCampanha={form.link_anuncio}
               thumbnailLink={form.thumbnailLink}
               imageAssets={form.imageAssets}
               tipo={form.tipo}
