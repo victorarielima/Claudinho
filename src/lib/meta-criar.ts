@@ -978,18 +978,19 @@ function isCrossChannelValido(cc?: CrossChannelInfo): cc is CrossChannelInfo & {
 }
 
 /**
- * Constrói omnichannel_link_spec com URLs corretas das app stores.
+ * Constrói omnichannel_link_spec usando a mesma URL universal do site
+ * para web/iOS/Android. As URLs de App Store/Play Store continuam em
+ * `object_store_urls` como fallback de instalação, mas não devem ser
+ * enviadas como deep links por plataforma.
  */
 function construirOmnichannelSpec(link: string, cc: CrossChannelInfo & { applicationId: string }) {
-  const androidUrl = cc.objectStoreUrls.find((u) => u.includes("play.google.com")) ?? link;
-  const iosUrl = cc.objectStoreUrls.find((u) => u.includes("apple.com") || u.includes("itunes.apple.com")) ?? link;
   return {
     web: { url: link },
     app: {
       application_id: cc.applicationId,
       platform_specs: {
-        android: { url: androidUrl },
-        ios: { url: iosUrl },
+        android: { url: link },
+        ios: { url: link },
       },
     },
   };
