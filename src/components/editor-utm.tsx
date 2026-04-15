@@ -33,15 +33,13 @@ export function EditorUtmTrigger({
     <div className={className}>
       <div className="flex items-center justify-between mb-1">
         <label className="text-sm font-medium">{rotulo}</label>
-        {valor && (
-          <button
-            type="button"
-            onClick={() => setAberto(true)}
-            className="text-[10px] font-medium text-primary hover:underline"
-          >
-            Editar UTMs
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => setAberto(true)}
+          className="text-[10px] font-medium text-primary hover:underline"
+        >
+          Editar UTMs
+        </button>
       </div>
       <input
         type="text"

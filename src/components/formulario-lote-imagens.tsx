@@ -576,12 +576,10 @@ export function FormularioLoteImagens({
                     <div className="flex items-center justify-between">
                       <label className="text-[11px] text-muted-foreground">Link Campanha</label>
                       <div className="flex items-center gap-2">
-                        {anuncio.linkCampanha && (
-                          <EditorUtmButton
-                            valor={anuncio.linkCampanha}
-                            onChange={(v) => updateAnuncio(i, "linkCampanha", v)}
-                          />
-                        )}
+                        <EditorUtmButton
+                          valor={anuncio.linkCampanha}
+                          onChange={(v) => updateAnuncio(i, "linkCampanha", v)}
+                        />
                         {anuncios.length > 1 && (
                           <button
                             type="button"
