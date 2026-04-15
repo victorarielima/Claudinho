@@ -329,7 +329,6 @@ export function FormularioLoteImagens({
           cta,
           textoPrincipal: "",
           linkCampanha: "",
-          linkAnuncioOverride: null,
           type: "image",
           anuncios: anuncios.map((a) => ({
             adName: a.adName,

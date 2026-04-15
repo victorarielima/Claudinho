@@ -8,6 +8,7 @@ interface AnuncioItem {
   titulo: string;
   textoPrincipal?: string;
   linkCampanha?: string;
+  linkAnuncioOverride?: string;
   // Video flow (backward compat)
   driveUrl?: string;
   videoId?: string;
@@ -106,6 +107,7 @@ export async function POST(request: NextRequest) {
         descricao: descricaoPadrao,
         cta: ctaPadrao,
         link_campanha: item.linkCampanha || body.linkCampanha,
+        link_anuncio_override: item.linkAnuncioOverride,
         assets,
       };
 

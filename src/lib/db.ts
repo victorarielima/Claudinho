@@ -80,6 +80,7 @@ export interface CriarAdInput {
   descricao?: string;
   cta?: string;
   link_campanha?: string;
+  link_anuncio_override?: string;
   link_aux?: string;
   assets: { placement: string; asset_url: string; asset_type: "image" | "video" }[];
 }
@@ -228,10 +229,11 @@ export async function criarAd(input: CriarAdInput, userId: string, userName?: st
     );
   }
 
-  // Gerar UTM automaticamente
-  const linkAnuncio = input.link_campanha
-    ? gerarLinkAnuncio(input.link_campanha, input.campaign_name, input.ad_name)
-    : null;
+  // Usar override se fornecido, senão gerar UTM automaticamente
+  const linkAnuncio = input.link_anuncio_override
+    ?? (input.link_campanha
+      ? gerarLinkAnuncio(input.link_campanha, input.campaign_name, input.ad_name)
+      : null);
 
   const { data: ad, error } = await sb
     .from("ads")

@@ -353,7 +353,6 @@ export function FormularioLoteVideos({
           descricao,
           cta,
           linkCampanha: "",
-        linkAnuncioOverride: null,
           anuncios: anuncios.map((a) => ({
             videoId: a.videoId,
             adName: a.adName,

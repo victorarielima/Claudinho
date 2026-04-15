@@ -51,7 +51,8 @@ export async function PATCH(
         { meta_ad_id: null, meta_creative_id: null, meta_effective_status: null, error_message: null },
         userId
       );
-      return NextResponse.json({ data: ad, excluido: true });
+      const adAtualizado = await buscarAd(id);
+      return NextResponse.json({ data: adAtualizado, excluido: true });
     }
 
     // Salvar campos editados
