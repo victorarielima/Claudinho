@@ -4,7 +4,7 @@ import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { EditorUtmButton } from "@/components/editor-utm";
+import { PreviewLinkAnuncio } from "@/components/editor-utm";
 import {
   Dialog,
   DialogContent,
@@ -59,6 +59,7 @@ interface AnuncioItem {
   nomeArquivo: string;
   /** true se o usuário editou o adName manualmente */
   nomeEditado?: boolean;
+  linkAnuncioOverride: string | null;
 }
 
 export interface FormularioLoteVideosProps {
@@ -198,6 +199,7 @@ export function FormularioLoteVideos({
         titulo: v.nome.replace(/\.[^.]+$/, ""),
         textoPrincipal: "",
         linkCampanha: "",
+        linkAnuncioOverride: null,
         driveUrl: v.driveUrl,
         thumbnailLink: v.thumbnailLink,
         nomeArquivo: v.nome,
@@ -299,14 +301,14 @@ export function FormularioLoteVideos({
 
   // ─── Update individual ad ──────────────────────────────────
   const atualizarAnuncio = useCallback(
-    (videoId: string, campo: "adName" | "titulo" | "textoPrincipal" | "linkCampanha", valor: string) => {
+    (videoId: string, campo: "adName" | "titulo" | "textoPrincipal" | "linkCampanha" | "linkAnuncioOverride", valor: string | null) => {
       setAnuncios((prev) =>
         prev.map((a) => {
           if (a.videoId !== videoId) return a;
           const atualizado = { ...a, [campo]: valor };
           if (campo === "adName") atualizado.nomeEditado = true;
           // Regenerar ad name quando link individual muda (se não editado manualmente)
-          if (campo === "linkCampanha" && !a.nomeEditado) {
+          if (campo === "linkCampanha" && !a.nomeEditado && typeof valor === "string") {
             atualizado.adName = gerarAdName(a.nomeArquivo, valor);
           }
           return atualizado;
@@ -351,12 +353,14 @@ export function FormularioLoteVideos({
           descricao,
           cta,
           linkCampanha: "",
+        linkAnuncioOverride: null,
           anuncios: anuncios.map((a) => ({
             videoId: a.videoId,
             adName: a.adName,
             titulo: a.titulo,
             textoPrincipal: a.textoPrincipal || undefined,
             linkCampanha: a.linkCampanha || undefined,
+            linkAnuncioOverride: a.linkAnuncioOverride || undefined,
             driveUrl: a.driveUrl,
             thumbnailLink: a.thumbnailLink,
             nomeArquivo: a.nomeArquivo,
@@ -635,10 +639,6 @@ export function FormularioLoteVideos({
                         className="h-8 flex-1 rounded-md border border-input bg-background px-2.5 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                         placeholder="Link da campanha (URL)"
                       />
-                      <EditorUtmButton
-                        valor={anuncio.linkCampanha}
-                        onChange={(v) => atualizarAnuncio(anuncio.videoId, "linkCampanha", v)}
-                      />
                       {anuncios.length > 1 && anuncio.linkCampanha && (
                         <button
                           type="button"
@@ -650,6 +650,13 @@ export function FormularioLoteVideos({
                         </button>
                       )}
                     </div>
+                    <PreviewLinkAnuncio
+                      linkCampanha={anuncio.linkCampanha}
+                      campaignName={campanhas.find((c) => c.id === campanhaId)?.nome ?? ""}
+                      adName={anuncio.adName}
+                      override={anuncio.linkAnuncioOverride}
+                      onOverride={(v) => atualizarAnuncio(anuncio.videoId, "linkAnuncioOverride", v)}
+                    />
                   </div>
 
                   {/* Remove button */}

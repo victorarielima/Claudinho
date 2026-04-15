@@ -7,7 +7,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { EditorUtmButton } from "@/components/editor-utm";
+import { PreviewLinkAnuncio } from "@/components/editor-utm";
 import {
   Select,
   SelectContent,
@@ -59,6 +59,7 @@ interface AnuncioForm {
   titulo: string;
   textoPrincipal: string;
   linkCampanha: string;
+  linkAnuncioOverride: string | null;
   attachments: { placement: string; url: string; title: string }[];
 }
 
@@ -158,6 +159,7 @@ export function FormularioLoteImagens({
         titulo: "",
         textoPrincipal: "",
         linkCampanha: "",
+        linkAnuncioOverride: null,
         attachments: card.attachments.map((a) => ({
           placement: a.placement,
           url: a.url,
@@ -241,11 +243,11 @@ export function FormularioLoteImagens({
   );
 
   // ── Update anuncio field ────────────────────────────────
-  const updateAnuncio = useCallback((index: number, field: keyof AnuncioForm, value: string) => {
+  const updateAnuncio = useCallback((index: number, field: keyof AnuncioForm, value: string | null) => {
     setAnuncios((prev) => {
       const next = [...prev];
       const item = { ...next[index], [field]: value };
-      if (field === "linkCampanha" && !item.adNameEditado) {
+      if (field === "linkCampanha" && !item.adNameEditado && typeof value === "string") {
         item.adName = gerarAdName(item.taskName, value);
       }
       if (field === "adName") {
@@ -327,12 +329,14 @@ export function FormularioLoteImagens({
           cta,
           textoPrincipal: "",
           linkCampanha: "",
+          linkAnuncioOverride: null,
           type: "image",
           anuncios: anuncios.map((a) => ({
             adName: a.adName,
             titulo: a.titulo,
             textoPrincipal: a.textoPrincipal || undefined,
             linkCampanha: a.linkCampanha || undefined,
+            linkAnuncioOverride: a.linkAnuncioOverride || undefined,
             assets: a.attachments.map((att) => ({
               placement: att.placement,
               url: att.url,
@@ -575,21 +579,15 @@ export function FormularioLoteImagens({
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
                       <label className="text-[11px] text-muted-foreground">Link Campanha</label>
-                      <div className="flex items-center gap-2">
-                        <EditorUtmButton
-                          valor={anuncio.linkCampanha}
-                          onChange={(v) => updateAnuncio(i, "linkCampanha", v)}
-                        />
-                        {anuncios.length > 1 && (
-                          <button
-                            type="button"
-                            className="text-[10px] text-primary hover:underline"
-                            onClick={() => replicarCampo(i, "linkCampanha")}
-                          >
-                            <Copy className="h-3 w-3 inline mr-0.5" />replicar
-                          </button>
-                        )}
-                      </div>
+                      {anuncios.length > 1 && (
+                        <button
+                          type="button"
+                          className="text-[10px] text-primary hover:underline"
+                          onClick={() => replicarCampo(i, "linkCampanha")}
+                        >
+                          <Copy className="h-3 w-3 inline mr-0.5" />replicar
+                        </button>
+                      )}
                     </div>
                     <input
                       value={anuncio.linkCampanha}
@@ -600,6 +598,13 @@ export function FormularioLoteImagens({
                     {anuncio.linkCampanha.length > 0 && !anuncio.linkCampanha.startsWith("https://") && (
                       <p className="text-[10px] text-amber-600">URL deve começar com https://</p>
                     )}
+                    <PreviewLinkAnuncio
+                      linkCampanha={anuncio.linkCampanha}
+                      campaignName={campanhas.find((c) => c.id === campanhaId)?.nome ?? ""}
+                      adName={anuncio.adName}
+                      override={anuncio.linkAnuncioOverride}
+                      onOverride={(v) => updateAnuncio(i, "linkAnuncioOverride", v)}
+                    />
                   </div>
                 </div>
               </div>

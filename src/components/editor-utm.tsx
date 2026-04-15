@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { gerarLinkAnuncio } from "@/lib/utm";
 import {
   Dialog,
   DialogContent,
@@ -236,5 +237,83 @@ function EditorUtm({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PreviewLinkAnuncio — shows auto-generated link with edit button
+// ---------------------------------------------------------------------------
+
+export function PreviewLinkAnuncio({
+  linkCampanha,
+  campaignName,
+  adName,
+  onOverride,
+  override,
+}: {
+  linkCampanha: string;
+  campaignName: string;
+  adName: string;
+  onOverride: (url: string | null) => void;
+  override: string | null;
+}) {
+  const gerado = useMemo(
+    () => linkCampanha ? gerarLinkAnuncio(linkCampanha, campaignName, adName) : "",
+    [linkCampanha, campaignName, adName]
+  );
+
+  const linkFinal = override ?? gerado;
+  const foiEditado = override !== null && override !== gerado;
+  const [editorAberto, setEditorAberto] = useState(false);
+
+  // Reset override when inputs change and the override matches the old generated
+  useEffect(() => {
+    if (override && !foiEditado) {
+      onOverride(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gerado]);
+
+  if (!linkCampanha) return null;
+
+  return (
+    <div className="mt-1.5 rounded-md border bg-muted/30 px-2.5 py-1.5">
+      <div className="flex items-center justify-between mb-0.5">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          Link final (UTM){foiEditado && <span className="text-amber-600 ml-1">editado</span>}
+        </span>
+        <div className="flex items-center gap-2">
+          {foiEditado && (
+            <button
+              type="button"
+              onClick={() => onOverride(null)}
+              className="text-[10px] text-muted-foreground hover:underline"
+            >
+              resetar
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setEditorAberto(true)}
+            className="text-[10px] font-medium text-primary hover:underline"
+          >
+            editar
+          </button>
+        </div>
+      </div>
+      <p className="text-[10px] text-muted-foreground break-all leading-relaxed select-all">
+        {linkFinal}
+      </p>
+      {editorAberto && (
+        <EditorUtm
+          url={linkFinal}
+          onSalvar={(novaUrl) => {
+            onOverride(novaUrl === gerado ? null : novaUrl);
+            setEditorAberto(false);
+          }}
+          onFechar={() => setEditorAberto(false)}
+        />
+      )}
+    </div>
   );
 }
