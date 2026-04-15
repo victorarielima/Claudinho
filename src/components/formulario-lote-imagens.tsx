@@ -399,8 +399,8 @@ export function FormularioLoteImagens({
           {/* ── Destination ──────────────────────────────── */}
           <div className="space-y-3">
             <h3 className="text-sm font-semibold">Destino</h3>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="space-y-1">
+            <div className="grid grid-cols-[auto_1fr_1fr] gap-3">
+              <div className="space-y-1 min-w-0">
                 <label className="text-xs text-muted-foreground">Marca</label>
                 <Select value={brandId} onValueChange={handleBrandChange} disabled={carregandoBrands}>
                   <SelectTrigger className="h-9 text-sm">
@@ -413,10 +413,10 @@ export function FormularioLoteImagens({
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1">
+              <div className="space-y-1 min-w-0">
                 <label className="text-xs text-muted-foreground">Campanha</label>
                 <Select value={campanhaId} onValueChange={handleCampanhaChange} disabled={!brandId || carregandoCampanhas}>
-                  <SelectTrigger className="h-9 text-sm">
+                  <SelectTrigger className="h-9 text-sm truncate">
                     <SelectValue placeholder={carregandoCampanhas ? "Carregando..." : "Selecione"} />
                   </SelectTrigger>
                   <SelectContent>
@@ -437,10 +437,10 @@ export function FormularioLoteImagens({
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1">
+              <div className="space-y-1 min-w-0">
                 <label className="text-xs text-muted-foreground">Conjunto</label>
                 <Select value={adSetId} onValueChange={setAdSetId} disabled={!campanhaId || carregandoAdsets}>
-                  <SelectTrigger className="h-9 text-sm">
+                  <SelectTrigger className="h-9 text-sm truncate">
                     <SelectValue placeholder={carregandoAdsets ? "Carregando..." : "Selecione"} />
                   </SelectTrigger>
                   <SelectContent>
