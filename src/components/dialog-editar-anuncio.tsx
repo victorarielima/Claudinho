@@ -67,6 +67,7 @@ interface DialogEditarAnuncioProps {
   adId: string | null;
   dadosIniciais: DadosEdicao | null;
   aoSalvar: () => void;
+  recriar?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,6 +80,7 @@ export function DialogEditarAnuncio({
   adId,
   dadosIniciais,
   aoSalvar,
+  recriar = false,
 }: DialogEditarAnuncioProps) {
   const [form, setForm] = useState<DadosEdicao>({
     ad_name: "",
@@ -201,6 +203,7 @@ export function DialogEditarAnuncio({
           campaign_id: form.campaign_id,
           ad_set_name: form.ad_set_name,
           ad_set_id: form.ad_set_id,
+          ...(recriar && { _recriar: true }),
         }),
       });
       const json = await res.json();
@@ -222,7 +225,7 @@ export function DialogEditarAnuncio({
       <DialogContent className="sm:max-w-4xl max-h-[85vh] overflow-y-auto p-0">
         <DialogHeader className="px-6 pt-6 pb-0">
           <div className="flex items-center gap-3">
-            <DialogTitle>Editar Anúncio</DialogTitle>
+            <DialogTitle>{recriar ? "Editar e Recriar" : "Editar Anúncio"}</DialogTitle>
             <Badge variant="secondary" className="text-[10px]">
               {form.tipo === "image" ? "Imagem" : "Vídeo"}
             </Badge>
@@ -243,7 +246,9 @@ export function DialogEditarAnuncio({
             )}
           </div>
           <DialogDescription>
-            Edite os campos do rascunho antes de subir para a Meta.
+            {recriar
+              ? "O anúncio será apagado no Meta e recriado com os novos dados."
+              : "Edite os campos do rascunho antes de subir para a Meta."}
           </DialogDescription>
         </DialogHeader>
 
@@ -455,7 +460,7 @@ export function DialogEditarAnuncio({
               <Button variant="outline" onClick={aoFechar} size="sm">Cancelar</Button>
               <Button onClick={salvar} disabled={salvando} size="sm">
                 {salvando && <Loader2 className="size-3.5 animate-spin" />}
-                Salvar
+                {recriar ? "Salvar e Recriar" : "Salvar"}
               </Button>
             </div>
           </div>

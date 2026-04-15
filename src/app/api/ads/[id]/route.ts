@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { buscarAd, atualizarAd, excluirAd } from "@/lib/db";
+import { buscarAd, atualizarAd, atualizarStatusAd, excluirAd } from "@/lib/db";
+import { deletarAdMeta } from "@/lib/meta-criar";
 
 export async function GET(
   _request: NextRequest,
@@ -33,8 +34,35 @@ export async function PATCH(
 
   try {
     const body = await request.json();
+    const recriar = body._recriar === true;
+    delete body._recriar;
+
+    // Salvar campos editados
     const ad = await atualizarAd(id, body, userId);
-    return NextResponse.json({ data: ad });
+
+    // Se for recriar, deletar ad antigo no Meta e resetar status
+    if (recriar) {
+      if (ad.meta_ad_id) {
+        try {
+          await deletarAdMeta(ad.meta_ad_id);
+        } catch {
+          // Se o ad já não existe no Meta, continuar normalmente
+        }
+      }
+      await atualizarStatusAd(
+        id,
+        "pendente",
+        {
+          meta_ad_id: null,
+          meta_creative_id: null,
+          meta_effective_status: null,
+          error_message: null,
+        },
+        userId
+      );
+    }
+
+    return NextResponse.json({ data: ad, recriado: recriar });
   } catch (error) {
     const mensagem = error instanceof Error ? error.message : "Erro desconhecido";
     const status = mensagem.includes("não encontrado") ? 404 : 500;

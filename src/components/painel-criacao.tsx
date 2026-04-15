@@ -161,6 +161,7 @@ export function PainelCriacao() {
   const [dialogLote, setDialogLote] = useState(false);
   const [videosSelecionados, setVideosSelecionados] = useState<VideoDrive[]>([]);
   const [dialogEditar, setDialogEditar] = useState(false);
+  const [dialogEditarRecriar, setDialogEditarRecriar] = useState(false);
   const [dialogDetalhes, setDialogDetalhes] = useState(false);
   const [linhaDetalhes, setLinhaDetalhes] = useState<LinhaComStatus | null>(null);
   const [editarAdId, setEditarAdId] = useState<string | null>(null);
@@ -952,6 +953,7 @@ export function PainelCriacao() {
             }}
             aoEditar={(linha) => {
               if (!linha.adId) return;
+              const concluido = linha.statusProcessamento === "concluido";
               setEditarAdId(linha.adId);
               setEditarDados({
                 ad_name: linha.adName ?? "",
@@ -973,6 +975,7 @@ export function PainelCriacao() {
                 brand_id: brandSelecionado?.id,
                 meta_account_id: brandSelecionado?.meta_account_id,
               });
+              setDialogEditarRecriar(concluido);
               setDialogEditar(true);
             }}
             aoRenomear={async (adId, novoNome) => {
@@ -1083,12 +1086,14 @@ export function PainelCriacao() {
         aberto={dialogEditar}
         aoFechar={() => {
           setDialogEditar(false);
+          setDialogEditarRecriar(false);
           setEditarAdId(null);
           setEditarDados(null);
         }}
         adId={editarAdId}
         dadosIniciais={editarDados}
         aoSalvar={carregarDados}
+        recriar={dialogEditarRecriar}
       />
 
       <DialogDetalhesAnuncio

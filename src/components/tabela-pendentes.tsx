@@ -614,6 +614,17 @@ function TabelaCompacta({
                             </svg>
                           </button>
                         )}
+                        {aoEditar && (
+                          <button
+                            onClick={() => aoEditar(linha)}
+                            className="inline-flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs font-medium transition-all hover:bg-accent active:scale-[0.98]"
+                            title="Editar e recriar no Meta"
+                          >
+                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z" />
+                            </svg>
+                          </button>
+                        )}
                         {aoDuplicar && (
                           <button
                             onClick={() => aoDuplicar(linha)}
@@ -964,6 +975,17 @@ export function TabelaPendentes({
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
                                   </svg>
                                   Detalhes
+                                </button>
+                              )}
+                              {aoEditar && (
+                                <button
+                                  onClick={() => aoEditar(linha)}
+                                  className="inline-flex h-10 items-center gap-2 rounded-lg border border-input bg-background px-4 text-sm font-medium shadow-sm transition-all hover:bg-accent hover:text-accent-foreground active:scale-[0.98]"
+                                >
+                                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z" />
+                                  </svg>
+                                  Editar
                                 </button>
                               )}
                               {aoDuplicar && (
