@@ -257,10 +257,13 @@ export function PreviewLinkAnuncio({
   onOverride: (url: string | null) => void;
   override: string | null;
 }) {
-  const gerado = useMemo(
-    () => linkCampanha ? gerarLinkAnuncio(linkCampanha, campaignName, adName) : "",
-    [linkCampanha, campaignName, adName]
-  );
+  const gerado = useMemo(() => {
+    try {
+      return linkCampanha ? gerarLinkAnuncio(linkCampanha, campaignName, adName) : "";
+    } catch {
+      return "";
+    }
+  }, [linkCampanha, campaignName, adName]);
 
   const linkFinal = override ?? gerado;
   const foiEditado = override !== null && override !== gerado;
