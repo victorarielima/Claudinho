@@ -173,6 +173,7 @@ export function PainelCriacao() {
     imageAssets?: { placement: string; url: string }[];
     bloqueiosMeta?: string[]; avisosMeta?: string[];
     brand_id?: string; meta_account_id?: string;
+    metaEffectiveStatus?: string | null;
   } | null>(null);
   const [dialogClickUp, setDialogClickUp] = useState(false);
   const [dialogLoteImagens, setDialogLoteImagens] = useState(false);
@@ -974,6 +975,7 @@ export function PainelCriacao() {
                 avisosMeta: linha.avisosMeta,
                 brand_id: brandSelecionado?.id,
                 meta_account_id: brandSelecionado?.meta_account_id,
+                metaEffectiveStatus: linha.metaEffectiveStatus,
               });
               setDialogEditarRecriar(concluido);
               setDialogEditar(true);

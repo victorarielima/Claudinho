@@ -47,6 +47,7 @@ interface DadosEdicao {
   avisosMeta?: string[];
   brand_id?: string;
   meta_account_id?: string;
+  metaEffectiveStatus?: string | null;
 }
 
 interface Campanha {
@@ -257,7 +258,7 @@ export function DialogEditarAnuncio({
           </div>
           <DialogDescription>
             {recriar
-              ? "O anúncio será apagado no Meta e recriado com os novos dados."
+              ? "Edite os campos e salve. Depois clique em \"Subir\" para recriar no Meta."
               : "Edite os campos do rascunho antes de subir para a Meta."}
           </DialogDescription>
         </DialogHeader>
@@ -265,6 +266,30 @@ export function DialogEditarAnuncio({
         <div className="px-6 pb-6 flex gap-6">
         {/* ── Left: Form ─────────────────────────────────────────── */}
         <div className="flex-1 min-w-0 space-y-5">
+          {/* ── Alerta de recriação ────────────────────────────────── */}
+          {recriar && (
+            <div className={`rounded-lg border px-4 py-3 ${
+              dadosIniciais?.metaEffectiveStatus === "ACTIVE"
+                ? "border-destructive/30 bg-destructive/5"
+                : "border-amber-200 bg-amber-50/60"
+            }`}>
+              <p className={`text-xs font-semibold mb-1 ${
+                dadosIniciais?.metaEffectiveStatus === "ACTIVE" ? "text-destructive" : "text-amber-800"
+              }`}>
+                {dadosIniciais?.metaEffectiveStatus === "ACTIVE"
+                  ? "Este anúncio está ativo"
+                  : "Recriação no Meta"}
+              </p>
+              <p className={`text-xs ${
+                dadosIniciais?.metaEffectiveStatus === "ACTIVE" ? "text-destructive/80" : "text-amber-700"
+              }`}>
+                Ao salvar, o anúncio será apagado do Meta e recriado com um novo ID.
+                {dadosIniciais?.metaEffectiveStatus === "ACTIVE" &&
+                  " Como ele está rodando, ficará fora do ar até você clicar \"Subir\" novamente."}
+              </p>
+            </div>
+          )}
+
           {/* ── Alertas ──────────────────────────────────────────── */}
           {temBloqueios && (
             <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">

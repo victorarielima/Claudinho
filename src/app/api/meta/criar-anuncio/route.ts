@@ -135,23 +135,22 @@ async function processarFluxoNovo(body: CorpoNovoFluxo) {
       throw new Error(diagnostico.bloqueios.map((item) => item.mensagem).join(" "));
     }
 
-    // Ao reprocessar após erro, limpar creative E ad anteriores para
-    // forçar recriação. Se o ad anterior foi criado no Meta (mesmo
-    // bugado), deletamos pra liberar slot na campanha (Advantage+ tem
-    // limite de 150 ads) e evitar acumular zumbis.
+    // Limpar ad/creative anteriores quando existem (erro ou recriar).
+    // Deletamos o ad no Meta pra liberar slot na campanha (Advantage+
+    // tem limite de 150 ads) e evitar acumular zumbis. A deleção
+    // acontece aqui (no upload) e não no save, minimizando o tempo
+    // que o ad fica fora do ar.
     const metaOverrides: Record<string, string | null> = {
       meta_account_id: accountId,
       error_message: null,
       meta_effective_status: null,
     };
-    if (ad.status === "erro") {
-      if (ad.meta_ad_id) {
-        await deletarAdMeta(ad.meta_ad_id);
-        metaOverrides.meta_ad_id = null;
-      }
-      if (ad.meta_creative_id) {
-        metaOverrides.meta_creative_id = null;
-      }
+    if (ad.meta_ad_id) {
+      await deletarAdMeta(ad.meta_ad_id);
+      metaOverrides.meta_ad_id = null;
+    }
+    if (ad.meta_creative_id) {
+      metaOverrides.meta_creative_id = null;
     }
 
     // Marcar como processando - store account info for the processar route

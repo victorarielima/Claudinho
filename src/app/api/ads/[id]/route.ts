@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { buscarAd, atualizarAd, atualizarStatusAd, excluirAd } from "@/lib/db";
-import { deletarAdMeta } from "@/lib/meta-criar";
 
 export async function GET(
   _request: NextRequest,
@@ -40,20 +39,14 @@ export async function PATCH(
     // Salvar campos editados
     const ad = await atualizarAd(id, body, userId);
 
-    // Se for recriar, deletar ad antigo no Meta e resetar status
+    // Se for recriar, resetar status mas MANTER meta_ad_id — a deleção
+    // do ad antigo acontece no momento do upload (processarFluxoNovo),
+    // minimizando o tempo fora do ar.
     if (recriar) {
-      if (ad.meta_ad_id) {
-        try {
-          await deletarAdMeta(ad.meta_ad_id);
-        } catch {
-          // Se o ad já não existe no Meta, continuar normalmente
-        }
-      }
       await atualizarStatusAd(
         id,
         "pendente",
         {
-          meta_ad_id: null,
           meta_creative_id: null,
           meta_effective_status: null,
           error_message: null,
