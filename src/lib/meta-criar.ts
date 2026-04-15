@@ -582,13 +582,16 @@ export async function criarCreativeImagem(
     image_label: { name: labels[placement] },
   }));
 
-  // Cross-channel multi-placement: posição dos campos cross-channel:
-  //  - `deeplink_url`, `object_store_urls` → dentro de `link_urls[0]`
-  //    (campos válidos do schema AdAssetFeedSpecLinkUrl)
-  //  - `omnichannel_link_spec` → nível raiz de `asset_feed_spec`
-  //    (Meta exige "within asset_feed_spec" — subcode 2446461 no form
-  //    level, silenciosamente descartado dentro de link_urls[0])
-  //  - `applink_treatment` → form level (subcode 2446455 exige)
+  // Cross-channel multi-placement — posição testada de cada campo:
+  //
+  //  omnichannel_link_spec:
+  //    ✗ form level          → delivery error 2446461
+  //    ✗ asset_feed_spec root → error #100 "Unexpected key"
+  //    ✓ link_urls[0]        → aceito (não aparece no GET, mas funciona)
+  //
+  //  deeplink_url, object_store_urls → link_urls[0] (campos do schema)
+  //  applink_treatment               → form level (subcode 2446455)
+  //
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const linkUrlEntry: Record<string, any> | undefined = params.link
     ? { website_url: params.link }
@@ -596,13 +599,12 @@ export async function criarCreativeImagem(
   if (linkUrlEntry && isCrossChannelValido(params.crossChannel)) {
     linkUrlEntry.deeplink_url = params.link;
     linkUrlEntry.object_store_urls = params.crossChannel.objectStoreUrls;
+    linkUrlEntry.omnichannel_link_spec = construirOmnichannelSpec(params.link!, params.crossChannel);
   }
 
   // optimization_type=PLACEMENT + ad_formats=AUTOMATIC_FORMAT são o
   // padrão usado pela UI do Ads Manager para criativos placement-based.
-  // Validado por inspeção de criativos que funcionam na conta.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const assetFeedSpec: Record<string, any> = limparObjeto({
+  const assetFeedSpec = limparObjeto({
     ad_formats: ["AUTOMATIC_FORMAT"],
     optimization_type: "PLACEMENT",
     images,
@@ -613,9 +615,6 @@ export async function criarCreativeImagem(
     call_to_action_types: params.ctaType ? [params.ctaType] : undefined,
     asset_customization_rules: assetCustomizationRules,
   });
-  if (isCrossChannelValido(params.crossChannel)) {
-    assetFeedSpec.omnichannel_link_spec = construirOmnichannelSpec(params.link ?? "", params.crossChannel);
-  }
 
   if (!params.instagramActorId) {
     throw new Error(`Instagram actor ID não encontrado para page ${params.pageId}. Configure META_INSTAGRAM_ACTOR_ID no .env ou vincule o Instagram Business à página.`);
@@ -633,7 +632,7 @@ export async function criarCreativeImagem(
     formData.append("link_url", params.link);
   }
   // applink_treatment fica no form level (subcode 2446455 exige).
-  // omnichannel_link_spec já foi adicionado dentro de asset_feed_spec.
+  // omnichannel_link_spec já foi adicionado dentro de link_urls[0].
   if (isCrossChannelValido(params.crossChannel)) {
     formData.append("applink_treatment", "deeplink_with_web_fallback");
   }
