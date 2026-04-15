@@ -594,6 +594,7 @@ export async function criarCreativeImagem(
     : undefined;
   if (linkUrlEntry && isCrossChannelValido(params.crossChannel)) {
     linkUrlEntry.omnichannel_link_spec = construirOmnichannelSpec(params.link!, params.crossChannel);
+    linkUrlEntry.object_store_urls = params.crossChannel.objectStoreUrls;
   }
 
   // optimization_type=PLACEMENT + ad_formats=AUTOMATIC_FORMAT são o
