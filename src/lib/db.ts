@@ -297,14 +297,12 @@ export async function atualizarAd(
   const anterior = await buscarAd(id);
   if (!anterior) throw new Error("Ad não encontrado");
 
-  // Recalcular UTM se link_campanha, campaign_name ou ad_name mudou
-  const campaignName = input.campaign_name ?? anterior.campaign_name;
-  const adName = input.ad_name ?? anterior.ad_name;
+  // O link_campanha editado pelo usuário é o link final — usar direto.
   const linkCampanha = input.link_campanha ?? anterior.link_campanha;
 
   const updateData: Record<string, unknown> = { ...input };
-  if (linkCampanha) {
-    updateData.link_anuncio = gerarLinkAnuncio(linkCampanha, campaignName, adName);
+  if (input.link_campanha !== undefined) {
+    updateData.link_anuncio = linkCampanha;
   }
 
   const { error } = await sb.from("ads").update(updateData).eq("id", id);
