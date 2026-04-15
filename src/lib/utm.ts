@@ -16,8 +16,16 @@ export function gerarLinkAnuncio(
   url.searchParams.set("utm_source", "Facebook");
   url.searchParams.set("utm_medium", "Ads");
   url.searchParams.set("utm_campaign", campaignName);
-  url.searchParams.set("utm_content", adName);
+  url.searchParams.set("utm_content", limparNomeParaUtm(adName));
   url.searchParams.set("openShop", "true");
 
   return url.toString();
+}
+
+/**
+ * Remove sufixos "(cópia)" e numeração que se acumulam ao duplicar ads.
+ * Ex: "MeuAd (cópia) (cópia) 2 (cópia)" → "MeuAd"
+ */
+function limparNomeParaUtm(nome: string): string {
+  return nome.replace(/(\s*\(cópia\)\s*\d*)+$/i, "").trim();
 }
