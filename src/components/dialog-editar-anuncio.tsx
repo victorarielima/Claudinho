@@ -168,6 +168,16 @@ export function DialogEditarAnuncio({
     []
   );
 
+  // Detecta se houve alteração nos campos editáveis
+  const temAlteracao = useMemo(() => {
+    if (!dadosIniciais) return false;
+    const campos: (keyof DadosEdicao)[] = [
+      "ad_name", "texto_principal", "titulo", "descricao", "cta",
+      "campaign_name", "campaign_id", "ad_set_name", "ad_set_id", "link_campanha",
+    ];
+    return campos.some((c) => (form[c] ?? "") !== (dadosIniciais[c] ?? ""));
+  }, [form, dadosIniciais]);
+
   // Live validation
   const diagnostico = useMemo(() => {
     return analisarProntidaoAnuncio({
@@ -458,7 +468,7 @@ export function DialogEditarAnuncio({
             </p>
             <div className="flex gap-2">
               <Button variant="outline" onClick={aoFechar} size="sm">Cancelar</Button>
-              <Button onClick={salvar} disabled={salvando} size="sm">
+              <Button onClick={salvar} disabled={salvando || (recriar && !temAlteracao)} size="sm">
                 {salvando && <Loader2 className="size-3.5 animate-spin" />}
                 {recriar ? "Salvar e Recriar" : "Salvar"}
               </Button>
