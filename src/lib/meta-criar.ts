@@ -582,13 +582,13 @@ export async function criarCreativeImagem(
     image_label: { name: labels[placement] },
   }));
 
-  // Cross-channel multi-placement: `deeplink_url` e `object_store_urls`
-  // vão dentro de `link_urls[0]` (campos válidos do schema). Já
-  // `omnichannel_link_spec` precisa ir no FORM level (igual vídeo/imagem
-  // simples) — colocá-lo dentro de `link_urls[]` era silenciosamente
-  // descartado pelo Meta (campo não faz parte do schema de
-  // AdAssetFeedSpecLinkUrl). Confirmado via GET no criativo: o campo
-  // sumia e o deep link ficava vazio.
+  // Cross-channel multi-placement: posição dos campos cross-channel:
+  //  - `deeplink_url`, `object_store_urls` → dentro de `link_urls[0]`
+  //    (campos válidos do schema AdAssetFeedSpecLinkUrl)
+  //  - `omnichannel_link_spec` → nível raiz de `asset_feed_spec`
+  //    (Meta exige "within asset_feed_spec" — subcode 2446461 no form
+  //    level, silenciosamente descartado dentro de link_urls[0])
+  //  - `applink_treatment` → form level (subcode 2446455 exige)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const linkUrlEntry: Record<string, any> | undefined = params.link
     ? { website_url: params.link }
@@ -601,7 +601,8 @@ export async function criarCreativeImagem(
   // optimization_type=PLACEMENT + ad_formats=AUTOMATIC_FORMAT são o
   // padrão usado pela UI do Ads Manager para criativos placement-based.
   // Validado por inspeção de criativos que funcionam na conta.
-  const assetFeedSpec = limparObjeto({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const assetFeedSpec: Record<string, any> = limparObjeto({
     ad_formats: ["AUTOMATIC_FORMAT"],
     optimization_type: "PLACEMENT",
     images,
@@ -612,6 +613,9 @@ export async function criarCreativeImagem(
     call_to_action_types: params.ctaType ? [params.ctaType] : undefined,
     asset_customization_rules: assetCustomizationRules,
   });
+  if (isCrossChannelValido(params.crossChannel)) {
+    assetFeedSpec.omnichannel_link_spec = construirOmnichannelSpec(params.link ?? "", params.crossChannel);
+  }
 
   if (!params.instagramActorId) {
     throw new Error(`Instagram actor ID não encontrado para page ${params.pageId}. Configure META_INSTAGRAM_ACTOR_ID no .env ou vincule o Instagram Business à página.`);
@@ -628,14 +632,10 @@ export async function criarCreativeImagem(
   if (params.link?.trim()) {
     formData.append("link_url", params.link);
   }
-  // Cross-channel: applink_treatment + omnichannel_link_spec vão no FORM
-  // level (igual vídeo/imagem simples). Sem applicationId, omitir ambos —
-  // applink_treatment sozinho causa erro #100.
+  // applink_treatment fica no form level (subcode 2446455 exige).
+  // omnichannel_link_spec já foi adicionado dentro de asset_feed_spec.
   if (isCrossChannelValido(params.crossChannel)) {
     formData.append("applink_treatment", "deeplink_with_web_fallback");
-    formData.append("omnichannel_link_spec", JSON.stringify(
-      construirOmnichannelSpec(params.link ?? "", params.crossChannel),
-    ));
   }
   formData.append(
     "degrees_of_freedom_spec",
