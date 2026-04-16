@@ -2,9 +2,7 @@ import { classificarPlacementImagem } from "@/lib/ad-media";
 
 // ─── Config ────────────────────────────────────────────────
 const CLICKUP_BASE = "https://api.clickup.com/api/v2";
-const CLICKUP_LIST_ID = "11430929"; // Externos Evino
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
-const CONCURRENCY = 10;
 const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "gif"]);
 
 function getToken(): string {
@@ -47,7 +45,11 @@ export interface ClickUpIndice {
 
 // ─── Cache ─────────────────────────────────────────────────
 
-let cacheIndice: { data: ClickUpIndice; timestamp: number; diasAtras: number } | null = null;
+const cacheIndice = new Map<string, { data: ClickUpIndice; timestamp: number }>();
+
+function cacheKey(listId: string, diasAtras: number): string {
+  return `${listId}:${diasAtras}`;
+}
 
 // ─── Helpers ───────────────────────────────────────────────
 
@@ -97,8 +99,8 @@ interface CustomFieldDef {
 
 type DropdownMap = Map<number, string>;
 
-async function carregarDropdowns(): Promise<{ tipo: DropdownMap; ym: DropdownMap }> {
-  const data = await clickupGet<{ fields: CustomFieldDef[] }>(`/list/${CLICKUP_LIST_ID}/field`);
+async function carregarDropdowns(listId: string): Promise<{ tipo: DropdownMap; ym: DropdownMap }> {
+  const data = await clickupGet<{ fields: CustomFieldDef[] }>(`/list/${listId}/field`);
   const tipo = new Map<number, string>();
   const ym = new Map<number, string>();
 
@@ -145,7 +147,7 @@ interface RawListTask {
   custom_fields: { name: string; type: string; value: unknown }[];
 }
 
-async function listarTasks(diasAtras?: number): Promise<RawListTask[]> {
+async function listarTasks(listId: string, diasAtras?: number): Promise<RawListTask[]> {
   const tasks: RawListTask[] = [];
   let page = 0;
   let hasMore = true;
@@ -157,7 +159,7 @@ async function listarTasks(diasAtras?: number): Promise<RawListTask[]> {
 
   while (hasMore) {
     const data = await clickupGet<{ tasks: RawListTask[] }>(
-      `/list/${CLICKUP_LIST_ID}/task?page=${page}&include_closed=false&subtasks=false${dateFilter}`
+      `/list/${listId}/task?page=${page}&include_closed=false&subtasks=false${dateFilter}`
     );
     tasks.push(...data.tasks);
     hasMore = data.tasks.length === 100;
@@ -217,19 +219,19 @@ function mapearTask(
 
 // ─── Main: carregarIndiceClickUp ───────────────────────────
 
-export async function carregarIndiceClickUp(diasAtras = 7): Promise<ClickUpIndice> {
-  // Use diasAtras as part of cache key — different ranges get different caches
-  if (
-    cacheIndice &&
-    cacheIndice.diasAtras === diasAtras &&
-    Date.now() - cacheIndice.timestamp < CACHE_TTL_MS
-  ) {
-    return cacheIndice.data;
+export async function carregarIndiceClickUp(
+  listId: string,
+  diasAtras = 7
+): Promise<ClickUpIndice> {
+  const key = cacheKey(listId, diasAtras);
+  const cached = cacheIndice.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    return cached.data;
   }
 
   const [dropdowns, listedTasks] = await Promise.all([
-    carregarDropdowns(),
-    listarTasks(diasAtras),
+    carregarDropdowns(listId),
+    listarTasks(listId, diasAtras),
   ]);
 
   // Only fetch details (for attachments) for tasks in statuses that typically have images
@@ -259,6 +261,6 @@ export async function carregarIndiceClickUp(diasAtras = 7): Promise<ClickUpIndic
     carregadoEm: new Date().toISOString(),
   };
 
-  cacheIndice = { data: indice, timestamp: Date.now(), diasAtras };
+  cacheIndice.set(key, { data: indice, timestamp: Date.now() });
   return indice;
 }

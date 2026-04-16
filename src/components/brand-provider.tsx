@@ -14,6 +14,7 @@ export interface Brand {
   name: string;
   meta_account_id: string;
   meta_page_id: string;
+  clickup_list_id: string | null;
 }
 
 interface BrandContextType {

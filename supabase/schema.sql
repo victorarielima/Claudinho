@@ -9,12 +9,13 @@ CREATE TABLE brands (
   meta_account_id TEXT NOT NULL,
   meta_page_id TEXT NOT NULL,
   sheet_name TEXT,
+  clickup_list_id TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
-INSERT INTO brands (name, meta_account_id, meta_page_id, sheet_name) VALUES
-  ('Evino',    'act_775254035944122',  '250970455039152', 'Evino_Anuncios_Novos'),
-  ('GrandCru', 'act_1020013451372159', '211248702248642', 'GrandCru_Anuncios_Novos');
+INSERT INTO brands (name, meta_account_id, meta_page_id, sheet_name, clickup_list_id) VALUES
+  ('Evino',    'act_775254035944122',  '250970455039152', 'Evino_Anuncios_Novos',    '11430929'),
+  ('GrandCru', 'act_1020013451372159', '211248702248642', 'GrandCru_Anuncios_Novos', '901103289485');
 
 -- Anuncios
 CREATE TABLE ads (

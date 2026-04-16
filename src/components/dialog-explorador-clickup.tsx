@@ -25,6 +25,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import type { ClickUpTask, ClickUpIndice } from "@/lib/clickup";
+import { useBrand } from "@/components/brand-provider";
 
 // ─── Props ─────────────────────────────────────────────────
 
@@ -242,13 +243,15 @@ export function DialogExploradorClickUp({
   aoFechar,
   aoConfirmar,
 }: DialogExploradorClickUpProps) {
+  const { selectedBrand } = useBrand();
+
   // Data
   const [indice, setIndice] = useState<ClickUpIndice | null>(null);
   const [carregando, setCarregando] = useState(false);
   const [erroCarregamento, setErroCarregamento] = useState<string | null>(null);
 
   // Filters
-  const [filtroStatus, setFiltroStatus] = useState<Set<string>>(new Set(["revisado", "finalizada"]));
+  const [filtroStatus, setFiltroStatus] = useState<Set<string>>(new Set(["revisado", "finalizada", "revisão"]));
   const [filtroTipo, setFiltroTipo] = useState<string>("todos");
   const [filtroYM, setFiltroYM] = useState<string>("todos");
   const [busca, setBusca] = useState("");
@@ -262,20 +265,21 @@ export function DialogExploradorClickUp({
 
   // ── Load index ──────────────────────────────────────────
   const carregar = useCallback(async (dias?: number) => {
+    if (!selectedBrand) return;
     const d = dias ?? diasAtras;
     setCarregando(true);
     setErroCarregamento(null);
     try {
-      const res = await fetch(`/api/clickup/tasks?dias=${d}`);
-      if (!res.ok) throw new Error("Erro ao carregar tasks do ClickUp");
-      const data: ClickUpIndice = await res.json();
-      setIndice(data);
+      const res = await fetch(`/api/clickup/tasks?brandId=${selectedBrand.id}&dias=${d}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.erro ?? "Erro ao carregar tasks do ClickUp");
+      setIndice(data as ClickUpIndice);
     } catch (e) {
       setErroCarregamento(e instanceof Error ? e.message : "Erro desconhecido");
     } finally {
       setCarregando(false);
     }
-  }, [diasAtras]);
+  }, [diasAtras, selectedBrand]);
 
   const carregarMais = useCallback(() => {
     const novoDias = diasAtras === 7 ? 30 : diasAtras === 30 ? 90 : 365;
@@ -287,6 +291,14 @@ export function DialogExploradorClickUp({
   useEffect(() => {
     if (aberto && !indice) carregar();
   }, [aberto, indice, carregar]);
+
+  // Re-fetch when brand changes while dialog is open
+  useEffect(() => {
+    if (aberto && selectedBrand) {
+      setIndice(null);
+      setSelecionados(new Map());
+    }
+  }, [selectedBrand?.id, aberto]);
 
   // ── Reset on close ──────────────────────────────────────
   useEffect(() => {
@@ -347,7 +359,7 @@ export function DialogExploradorClickUp({
         {/* Header */}
         <div className="flex items-center justify-between border-b px-4 py-3">
           <DialogTitle className="text-base font-semibold">
-            Explorador ClickUp — Externos Evino
+            Explorador ClickUp — Externos {selectedBrand?.name ?? ""}
           </DialogTitle>
           <div className="flex items-center gap-2">
             <Button

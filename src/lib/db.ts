@@ -62,6 +62,7 @@ export interface Brand {
   meta_account_id: string;
   meta_page_id: string;
   sheet_name: string | null;
+  clickup_list_id: string | null;
   created_at: string;
 }
 
