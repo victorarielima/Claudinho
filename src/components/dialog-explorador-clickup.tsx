@@ -243,7 +243,7 @@ export function DialogExploradorClickUp({
   aoFechar,
   aoConfirmar,
 }: DialogExploradorClickUpProps) {
-  const { selectedBrand } = useBrand();
+  const { brands, selectedBrand, setSelectedBrand } = useBrand();
 
   // Data
   const [indice, setIndice] = useState<ClickUpIndice | null>(null);
@@ -358,9 +358,27 @@ export function DialogExploradorClickUp({
       <DialogContent className="flex h-[90vh] max-w-6xl sm:max-w-6xl flex-col gap-0 p-0 overflow-hidden" showCloseButton={false}>
         {/* Header */}
         <div className="flex items-center justify-between border-b px-4 py-3">
-          <DialogTitle className="text-base font-semibold">
-            Explorador ClickUp — Externos {selectedBrand?.name ?? ""}
-          </DialogTitle>
+          <div className="flex items-center gap-3 min-w-0">
+            <DialogTitle className="text-base font-semibold shrink-0">
+              Explorador ClickUp — Externos
+            </DialogTitle>
+            <Select
+              value={selectedBrand?.id ?? ""}
+              onValueChange={(id) => {
+                const b = brands.find((x) => x.id === id);
+                if (b) setSelectedBrand(b);
+              }}
+            >
+              <SelectTrigger className="h-7 w-[130px] text-xs">
+                <SelectValue placeholder="Marca" />
+              </SelectTrigger>
+              <SelectContent>
+                {brands.map((b) => (
+                  <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <div className="flex items-center gap-2">
             <Button
               variant="ghost"
