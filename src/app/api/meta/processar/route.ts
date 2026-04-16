@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { baixarArquivoDrive } from "@/lib/drive";
-import { safeResponseJson } from "@/lib/meta-retry";
+import { metaFetchWithRetry, safeResponseJson } from "@/lib/meta-retry";
+import { META_API_BASE, getAccessToken, extrairErroMeta } from "@/lib/meta-config";
 import {
   uploadImage,
   criarCreativeVideo,
@@ -25,39 +26,6 @@ import {
 import { normalizarPlacementImagem } from "@/lib/ad-media";
 import { getSupabase } from "@/lib/supabase";
 import { logger } from "@/lib/logger";
-
-// --- Meta API helpers (video upload without polling, status check) ---
-
-const META_API_BASE = "https://graph.facebook.com/v23.0";
-
-function getAccessToken(): string {
-  const token = process.env.META_ACCESS_TOKEN;
-  if (!token) throw new Error("META_ACCESS_TOKEN nao configurado");
-  return token;
-}
-
-function extrairErroMeta(json: Record<string, unknown>): string {
-  const err = json.error as
-    | {
-        message?: string;
-        error_user_msg?: string;
-        type?: string;
-        code?: number;
-        error_subcode?: number;
-        fbtrace_id?: string;
-      }
-    | undefined;
-  if (!err) return JSON.stringify(json);
-
-  const parts: string[] = [];
-  if (err.error_user_msg) parts.push(err.error_user_msg);
-  else if (err.message) parts.push(err.message);
-  if (err.code) parts.push(`[code ${err.code}]`);
-  if (err.error_subcode) parts.push(`[subcode ${err.error_subcode}]`);
-  if (err.fbtrace_id) parts.push(`[trace ${err.fbtrace_id}]`);
-
-  return parts.join(" ") || "Erro desconhecido";
-}
 
 // Threshold for chunked upload (50 MB)
 const CHUNKED_UPLOAD_THRESHOLD = 50 * 1024 * 1024;
@@ -91,7 +59,7 @@ async function uploadVideoSemAguardar(
   formData.append("title", fileName);
   formData.append("access_token", token);
 
-  const res = await fetch(url, {
+  const res = await metaFetchWithRetry(url, {
     method: "POST",
     body: formData,
   });
@@ -129,7 +97,7 @@ async function uploadVideoChunkedSemAguardar(
     access_token: token,
   });
 
-  const startRes = await fetch(url, {
+  const startRes = await metaFetchWithRetry(url, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: startParams.toString(),
@@ -161,7 +129,7 @@ async function uploadVideoChunkedSemAguardar(
     formData.append("video_file_chunk", new Blob([new Uint8Array(chunk)], { type: mimeType }), fileName);
     formData.append("access_token", token);
 
-    const chunkRes = await fetch(url, {
+    const chunkRes = await metaFetchWithRetry(url, {
       method: "POST",
       body: formData,
     });
@@ -181,7 +149,7 @@ async function uploadVideoChunkedSemAguardar(
     access_token: token,
   });
 
-  const finishRes = await fetch(url, {
+  const finishRes = await metaFetchWithRetry(url, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: finishParams.toString(),
@@ -203,7 +171,7 @@ async function verificarStatusVideo(
 ): Promise<{ ready: boolean; status: string }> {
   const token = getAccessToken();
   const url = `${META_API_BASE}/${videoId}?fields=status&access_token=${token}`;
-  const res = await fetch(url);
+  const res = await metaFetchWithRetry(url);
   const json = await safeResponseJson(res);
 
   if (json.error) {
