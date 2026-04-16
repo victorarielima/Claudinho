@@ -1,57 +1,96 @@
-# 01. Visao geral
+# 01. Visão geral
 
-## O que e
+## O que é
 
-A Meta Ads API e documentada oficialmente pela Meta como **Marketing API**. Ela faz parte do ecossistema da Graph API e permite criar, configurar, automatizar e medir anuncios em propriedades como Facebook, Instagram, Messenger e, em alguns casos, superficies relacionadas pela Meta.
+A **Meta Marketing API** (também conhecida como Meta Ads API ou
+Facebook Ads API) faz parte do ecossistema da Graph API e permite
+criar, configurar, automatizar e medir anúncios nas superfícies da
+Meta: Facebook, Instagram, Messenger, Audience Network e formatos
+associados (Reels, Stories, Feed, etc.).
 
-## Pagina oficial
+É uma API REST sobre HTTPS, com versionamento explícito. Toda chamada
+passa por `https://graph.facebook.com/v{N.0}/...` com um
+`access_token` válido.
 
-- https://developers.facebook.com/docs/marketing-api/
-- https://developers.facebook.com/docs/marketing-api/overview
+## Páginas oficiais
 
-## O que essa documentacao cobre
+- Hub: https://developers.facebook.com/docs/marketing-api/
+- Visão geral: https://developers.facebook.com/docs/marketing-api/overview
 
-- Estrutura de objetos de anuncios
-- Fluxos de criacao e gerenciamento de campanhas
-- Criativos
-- Lances
-- Regras automatizadas
-- Publicos
-- Insights e relatorios
-- Brand safety e suitability
-- Boas praticas
-- Troubleshooting
-- Referencia da API
-- Changelog
+## Hierarquia de objetos
 
-## Modelo conceitual principal
+Em termos práticos, a hierarquia central costuma girar em torno
+destes objetos:
 
-Em termos praticos, a hierarquia central costuma girar em torno destes objetos:
+```
+Business Manager (BM)
+└── Ad Account (act_<id>)
+    ├── Campaign                       (objetivo, categoria especial, special_ad_categories)
+    │   └── Ad Set / Ad Group          (orçamento, público, placements, optimization_goal, bid_strategy)
+    │       └── Ad                     (relaciona creative ↔ adset, status)
+    │           └── Ad Creative        (conteúdo: vídeo/imagem, copy, CTA, link, Instagram identity)
+    │               ├── AdVideo        (upload de vídeo — /{accountId}/advideos)
+    │               └── AdImage        (upload de imagem — /{accountId}/adimages)
+    └── Insights                       (edge que retorna métricas em qualquer nível acima)
+```
 
-- `Ad Account`
-- `Campaign`
-- `Ad Set` / `Ad Group`
-- `Ad`
-- `Ad Creative`
+**Terminologia**: no console web do Meta, a nomenclatura é
+"Campanha / Conjunto de anúncios / Anúncio". Na API, alguns endpoints
+usam `adgroup` como alias de `adset` (legado). Um `ad creative` pode
+ser reaproveitado em múltiplos ads; um `ad` aponta para exatamente um
+creative.
 
-## Quando usar
+### No código do Claudinho
 
-Use a Marketing API quando voce precisa:
+- `brands` na tabela do Supabase mapeia para Business Manager / conta
+  de anúncio.
+- `campaigns` e `adsets` **não** são armazenados localmente — são
+  sempre lidos via
+  `GET /{accountId}/campaigns` e `GET /{campaignId}/adsets` nas rotas
+  `src/app/api/meta/{campanhas,adsets}/route.ts`.
+- `ads` (tabela Supabase) ↔ cada registro gera **1 AdCreative + 1 Ad**
+  no Meta.
+- `ad_assets` (tabela Supabase) armazena as URLs dos vídeos/imagens e
+  o `meta_asset_id` retornado após upload.
 
-- Criar campanhas em escala
-- Gerenciar anuncios de forma programatica
-- Atualizar orcamentos, status e segmentacao
-- Ler performance por conta, campanha, conjunto e anuncio
-- Sincronizar dados com CRM, BI ou plataformas internas
-- Automatizar regras operacionais
+## Quando usar a API (vs. Ads Manager web)
 
-## Pontos de atencao
+Use a Marketing API quando precisa:
 
-- A Meta trabalha com **versionamento explicito** da API.
-- Permissoes, acessos e revisoes de app podem ser necessarios dependendo do caso.
-- Nem todo recurso esta disponivel para toda conta, app ou tipo de negocio.
-- Muitos problemas praticos decorrem de tokens, roles, permissao insuficiente, limite de taxa ou configuracao da conta de anuncios.
+- Criar campanhas **em escala** ou de forma programática
+- Gerenciar anúncios via automação / planilha / ferramenta interna
+- Atualizar orçamentos, status e segmentação sem entrar no Ads Manager
+- Ler performance por conta, campanha, conjunto e anúncio para BI/CRM
+- Aplicar regras operacionais automatizadas
+- Importar criativos com pipelines específicos (deep linking,
+  cross-channel, omnichannel)
 
-## Leitura recomendada
+## Pontos de atenção permanentes
 
-- Proximo arquivo: `02-primeiros-passos.md`
+1. **Versão da API**: a Meta versiona explicitamente. Uma chamada com
+   versão deprecada pode continuar funcionando por um tempo mas
+   retorna comportamento inconsistente. Sempre fixe a versão —
+   veja `08-versao-e-changelog.md`.
+2. **Permissões**: grande parte dos problemas reais vem de **token
+   sem a permissão certa** (ver `02-primeiros-passos.md`).
+3. **Rate limits**: a Meta aplica limites por usuário, por app e por
+   conta de anúncio. O Claudinho usa `metaFetchWithRetry()` em
+   `src/lib/meta-retry.ts` com backoff exponencial para códigos 4,
+   17, 32, 100, 429, 613 e 80004.
+4. **Nem todo recurso está disponível para toda conta**: por tipo de
+   negócio, por categoria especial (crédito, política, emprego,
+   habitação), por país, por versão do App.
+5. **Validação assíncrona**: criar um Ad retorna imediatamente, mas o
+   Meta valida em background. Um ad pode ficar `IN_PROCESS` →
+   `PENDING_REVIEW` → `WITH_ISSUES`/`ACTIVE`/`PAUSED`/`DISAPPROVED`.
+   Sempre verifique `effective_status` + `issues_info`.
+
+## Leitura recomendada em sequência
+
+1. `02-primeiros-passos.md` — tokens, permissões, setup do app.
+2. `07-referencia-api.md` — mapa dos objetos centrais.
+3. `12-upload-midia.md` + `13-adcreative-payloads.md` — se o objetivo
+   é criar ads.
+4. `05-insights-e-relatorios.md` — se o objetivo é ler performance.
+5. `10-cross-channel-omnichannel.md` — **obrigatório** antes de mexer
+   em qualquer fluxo cross-channel.

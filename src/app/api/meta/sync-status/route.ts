@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { META_API_BASE } from "@/lib/meta-config";
+import { META_API_BASE, getAccessToken } from "@/lib/meta-config";
 import { metaFetchWithRetry, safeResponseJson } from "@/lib/meta-retry";
 import { listarAdsSincronizaveis, atualizarMetaEffectiveStatus } from "@/lib/db";
 import { logger } from "@/lib/logger";
@@ -13,12 +13,6 @@ const STATUS_QUE_VOLTAM_PARA_ERRO = new Set([
   "DISAPPROVED",
   "WITH_ISSUES",
 ]);
-
-function getAccessToken(): string {
-  const token = process.env.META_ACCESS_TOKEN;
-  if (!token) throw new Error("META_ACCESS_TOKEN não configurado");
-  return token;
-}
 
 interface IssueInfo {
   level?: string;
