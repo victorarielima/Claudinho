@@ -292,7 +292,7 @@ async function processarFluxoLegado(body: CorpoLegado) {
         accountId,
         arquivo.buffer,
         arquivo.fileName,
-        arquivo.mimeType
+        { mimeType: arquivo.mimeType }
       );
 
       creativeId = await criarCreativeVideo(accountId, {

@@ -51,6 +51,26 @@ Retry do Claudinho: 4, 17, 32, 100, 613, 80004, HTTP 429.
 | **1359187** | "Object store URLs are required" | `object_store_urls` ausente | Adicionar no local correto |
 | **1487006** | Política (álcool/farmacêutico/etc) | Categoria/copy | Rever copy, targeting |
 | **1487748** | "not eligible for this placement" | Asset formato errado | Reenviar no formato correto |
+| **1363024** | "format that isn't supported" (acompanha `[code 352]`) | **Filename sem extensão `.mp4`/`.mov`/`.m4v`**. Meta usa a extensão pra inferir o container e, sem ela, rejeita com mensagem genérica de formato. Bytes podem estar perfeitamente válidos. | `uploadVideo()` em `src/lib/meta-criar.ts` sanitiza via `ensureVideoExtension()` — adiciona `.mp4` se faltar. Se ainda aparecer, é mesmo um codec/container não-H.264. |
+
+### War story 2026-04-30 — isolamento da causa de 1363024
+
+Ad `VID-0-IlMondoItalia-W18-2026`, brand GrandCru. Vídeo H.264 Main 1080×1920 60fps, 31.8 Mbps, AAC LC, faststart OK — todas as specs publicadas do Meta atendidas. Mesmo assim recebia 352/1363024.
+
+Matriz de testes feita upando o mesmo arquivo de bytes com filenames diferentes:
+
+| Filename | Extensão? | Espaço? | Acento? | Resultado |
+|---|---|---|---|---|
+| `30_ABR_GC_MOTION IL MONDO ITÁLIA ` (original) | ❌ | ✅ | ✅ | ❌ 352/1363024 |
+| `MONDO_ITALIA` | ❌ | ❌ | ❌ | ❌ 352/1363024 |
+| `MONDO_ITALIA.mp4` | ✅ | ❌ | ❌ | ✅ |
+| `MONDO ITALIA.mp4` | ✅ | ✅ | ❌ | ✅ |
+| `MONDO ITÁLIA.mp4` | ✅ | ✅ | ✅ | ✅ |
+| `MONDO_ITÁLIA.mp4` | ✅ | ❌ | ✅ | ✅ |
+
+**Conclusão:** a única variável que importa é a extensão do arquivo. Espaços e acentos são irrelevantes. Hipóteses iniciais de bitrate alto e codec não suportado eram falsas — vídeos a 37 Mbps subiam normal na conta de Evino.
+
+A correção (`ensureVideoExtension` em `meta-criar.ts`) detecta filenames sem `.mp4`/`.mov`/`.m4v` e adiciona a extensão correta com base no `mimeType` (default `.mp4`).
 
 ## Mapeamento erro → regra em `erros-meta.ts`
 
@@ -61,6 +81,7 @@ Retry do Claudinho: 4, 17, 32, 100, 613, 80004, HTTP 429.
 | `2446455` / "applink_treatment is required" | "Cross-channel sem applink" |
 | `2446461` / "omnichannel_link_spec needs to be within" | "omnichannel_link_spec mal posicionado" |
 | regex `video.*processing` / `video_status` | "Vídeo ainda processando" |
+| `1363024` / `[code 352]` / "format that isn't supported" | "Formato de vídeo não suportado" |
 | "não conseguiu processar o vídeo" | "Vídeo rejeitado pelo Meta" |
 | "Falha ao baixar video do Drive" | "Vídeo sem acesso no Drive" |
 | `OAuthException` / `(#190)` | "Token Meta inválido" |

@@ -10,35 +10,77 @@ const CHUNKED_UPLOAD_THRESHOLD = 50 * 1024 * 1024;
 // Chunk size for transfer phase (4 MB — Meta recommends between 1–50 MB)
 const CHUNK_SIZE = 4 * 1024 * 1024;
 
+// Timeouts: video uploads moved a lot of bytes per request, so they need
+// a larger ceiling than the default 30s used by metaFetchWithRetry.
+const UPLOAD_SIMPLES_TIMEOUT_MS = 120_000; // single POST up to ~50 MB
+const UPLOAD_CHUNK_TIMEOUT_MS = 60_000;    // per 4 MB chunk
+
+export interface UploadVideoOpts {
+  mimeType?: string;
+  /**
+   * Whether to block until Meta finishes processing the video (polls
+   * /{video-id}?fields=status). Default `true` (safer for one-shot flows).
+   * The Supabase-driven pipeline in /api/meta/processar passes `false`
+   * and polls separately between Steps A/B so the HTTP request can return
+   * quickly.
+   */
+  waitForReady?: boolean;
+}
+
+/**
+ * Meta's /advideos parser uses the filename extension to infer the
+ * container format. Files without `.mp4`/`.mov`/`.m4v` are rejected with
+ * the misleading "format isn't supported" (code 352 / subcode 1363024)
+ * even when the bytes are valid H.264/AAC MP4. After Effects/Premiere
+ * exports occasionally land in Drive without an extension, which is what
+ * this protects against. War story: 2026-04-30, ad VID-0-IlMondoItalia
+ * (Drive name "30_ABR_GC_MOTION IL MONDO ITÁLIA " — trailing space, no
+ * extension). Test matrix in `.claude/skills/meta-ads-api/references/
+ * errors-subcodes.md` confirmed it's the missing extension, not spaces
+ * or accents.
+ */
+function ensureVideoExtension(fileName: string, mimeType: string): string {
+  const trimmed = fileName.trim();
+  if (/\.(mp4|mov|m4v)$/i.test(trimmed)) return trimmed;
+  const ext = mimeType === "video/quicktime" ? ".mov" : ".mp4";
+  return `${trimmed}${ext}`;
+}
+
 export async function uploadVideo(
   accountId: string,
   videoBuffer: Buffer,
   fileName: string,
-  mimeType: string = "video/mp4"
+  opts: UploadVideoOpts = {}
 ): Promise<string> {
+  const { mimeType = "video/mp4", waitForReady = true } = opts;
+  const safeFileName = ensureVideoExtension(fileName, mimeType);
+
   logger.info("Uploading video to Meta", {
     fn: "uploadVideo",
     accountId,
     fileName,
+    safeFileName,
     sizeBytes: videoBuffer.byteLength,
+    waitForReady,
   });
   const startMs = Date.now();
 
   const videoId = videoBuffer.byteLength >= CHUNKED_UPLOAD_THRESHOLD
-    ? await uploadVideoChunked(accountId, videoBuffer, fileName, mimeType)
-    : await uploadVideoSimples(accountId, videoBuffer, fileName, mimeType);
+    ? await uploadVideoChunked(accountId, videoBuffer, safeFileName, mimeType)
+    : await uploadVideoSimples(accountId, videoBuffer, safeFileName, mimeType);
 
   const elapsedMs = Date.now() - startMs;
   logger.info("Video uploaded successfully", {
     fn: "uploadVideo",
     accountId,
-    fileName,
+    fileName: safeFileName,
     videoId,
     elapsedMs,
   });
 
-  // Aguardar o Meta processar o vídeo antes de prosseguir
-  await aguardarProcessamentoVideo(videoId);
+  if (waitForReady) {
+    await aguardarProcessamentoVideo(videoId);
+  }
 
   return videoId;
 }
@@ -62,10 +104,11 @@ async function uploadVideoSimples(
   formData.append("title", fileName);
   formData.append("access_token", token);
 
-  const res = await metaFetchWithRetry(url, {
-    method: "POST",
-    body: formData,
-  });
+  const res = await metaFetchWithRetry(
+    url,
+    { method: "POST", body: formData },
+    { timeoutMs: UPLOAD_SIMPLES_TIMEOUT_MS }
+  );
 
   const json = await safeResponseJson(res);
   if (!res.ok || json.error) {
@@ -146,10 +189,11 @@ async function uploadVideoChunked(
     formData.append("video_file_chunk", new Blob([new Uint8Array(chunk)], { type: mimeType }), fileName);
     formData.append("access_token", token);
 
-    const chunkRes = await metaFetchWithRetry(url, {
-      method: "POST",
-      body: formData,
-    });
+    const chunkRes = await metaFetchWithRetry(
+      url,
+      { method: "POST", body: formData },
+      { timeoutMs: UPLOAD_CHUNK_TIMEOUT_MS }
+    );
     const chunkJson = await safeResponseJson(chunkRes);
     if (!chunkRes.ok || chunkJson.error) {
       throw new Error(`Erro no chunk ${chunkIndex} do upload: ${extrairErroMeta(chunkJson)}`);
@@ -257,6 +301,36 @@ async function aguardarProcessamentoVideo(videoId: string): Promise<void> {
   throw new Error(
     "Timeout: o vídeo não ficou pronto após 5 minutos. Tente novamente mais tarde."
   );
+}
+
+/**
+ * Single-check variant of `aguardarProcessamentoVideo` used by the
+ * pipeline in /api/meta/processar — the client polls, so we return
+ * immediately instead of blocking the HTTP request.
+ */
+export async function verificarStatusVideo(
+  videoId: string
+): Promise<{ ready: boolean; status: string }> {
+  const token = getAccessToken();
+  const url = `${META_API_BASE}/${videoId}?fields=status&access_token=${token}`;
+  const res = await metaFetchWithRetry(url);
+  const json = await safeResponseJson(res);
+
+  if (json.error) {
+    throw new Error(
+      `Erro ao verificar status do vídeo: ${extrairErroMeta(json)}`
+    );
+  }
+
+  const status: string = json.status?.video_status ?? "unknown";
+
+  if (status === "error") {
+    throw new Error(
+      "O Meta não conseguiu processar o vídeo. Verifique o formato e tente novamente."
+    );
+  }
+
+  return { ready: status === "ready", status };
 }
 
 async function buscarThumbnailVideo(videoId: string): Promise<string> {

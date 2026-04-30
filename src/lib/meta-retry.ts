@@ -4,6 +4,7 @@ interface RetryOptions {
   maxRetries?: number      // default 3
   baseDelayMs?: number     // default 1000
   maxDelayMs?: number      // default 30000
+  timeoutMs?: number       // default 30000 — per-attempt fetch timeout
 }
 
 /**
@@ -38,10 +39,49 @@ export async function metaFetchWithRetry(
   options?: RequestInit,
   retryOptions?: RetryOptions
 ): Promise<Response> {
-  const { maxRetries = 3, baseDelayMs = 1000, maxDelayMs = 30000 } = retryOptions ?? {}
+  const {
+    maxRetries = 3,
+    baseDelayMs = 1000,
+    maxDelayMs = 30000,
+    timeoutMs = 30000,
+  } = retryOptions ?? {}
+
+  const sanitizedUrl = url.replace(/access_token=[^&]+/, 'access_token=***')
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const response = await fetch(url, options)
+    let response: Response
+    try {
+      response = await fetch(url, {
+        ...options,
+        signal: options?.signal ?? AbortSignal.timeout(timeoutMs),
+      })
+    } catch (err) {
+      const isTimeout =
+        err instanceof DOMException && err.name === 'TimeoutError'
+      const isAbort =
+        err instanceof DOMException && err.name === 'AbortError'
+
+      if (isTimeout && attempt < maxRetries) {
+        const delay = Math.min(baseDelayMs * Math.pow(2, attempt), maxDelayMs)
+        logger.warn('Meta API timeout, retrying', {
+          attempt: attempt + 1,
+          maxRetries,
+          timeoutMs,
+          delayMs: delay,
+          url: sanitizedUrl,
+        })
+        await new Promise(resolve => setTimeout(resolve, delay))
+        continue
+      }
+
+      if (isTimeout) {
+        throw new Error(
+          `Meta API timeout após ${timeoutMs}ms em ${maxRetries + 1} tentativas`
+        )
+      }
+      if (isAbort) throw err
+      throw err
+    }
 
     if (response.ok) return response
 
@@ -70,7 +110,7 @@ export async function metaFetchWithRetry(
         attempt: attempt + 1,
         maxRetries,
         delayMs: delay,
-        url: url.replace(/access_token=[^&]+/, 'access_token=***'),
+        url: sanitizedUrl,
       })
       await new Promise(resolve => setTimeout(resolve, delay))
       continue

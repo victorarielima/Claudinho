@@ -60,6 +60,12 @@ const REGRAS: RegraErro[] = [
     marcadores: [/video.*processing/i, "video_status"],
   },
   {
+    tipo: "Filename do vídeo sem extensão (code 352)",
+    explicacao:
+      "O Meta rejeita uploads quando o filename não tem extensão de vídeo (.mp4/.mov/.m4v) — a mensagem de 'formato não suportado' é enganosa: o problema é só o nome do arquivo, não os bytes. Confirmado por matriz de testes em 2026-04-30: mesmo arquivo aceito com 'video.mp4' e rejeitado com 'video' sem extensão. O upload no Claudinho já sanitiza o filename automaticamente; se esse erro aparecer mesmo assim, verifique se o nome no Drive realmente termina sem .mp4/.mov e renomeie. Causas alternativas (raras): codec não-H.264 (HEVC/ProRes) ou container .webm/.mkv/.avi.",
+    marcadores: ["1363024", "[code 352]", "format that isn't supported", "in a supported format"],
+  },
+  {
     tipo: "Vídeo rejeitado pelo Meta",
     explicacao:
       "O Meta não conseguiu processar o vídeo. Verifique formato (recomendado MP4 H.264), resolução e tamanho, e reenvie.",
