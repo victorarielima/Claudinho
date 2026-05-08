@@ -25,8 +25,14 @@ Marcado no **AdSet**, não no creative — via `promoted_object.omnichannel_obje
 ## Como detectar (no AdSet)
 
 ```http
-GET /{adsetId}?fields=promoted_object&access_token=<token>
+GET /{adsetId}?fields=promoted_object{application_id,omnichannel_object{app{application_id,object_store_urls}}}&access_token=<token>
 ```
+
+⚠️ **Field expansion explícita é obrigatória.** Sem o `{application_id,
+omnichannel_object{app{application_id,object_store_urls}}}`, o Graph
+API ocasionalmente omite `application_id` aninhado mesmo quando o
+adset é cross-channel — o resultado é um ad com "URL do site" mas
+"Deep link" vazio, e #100/#1885876 quando o operador edita manualmente.
 
 Response quando é cross-channel:
 
@@ -45,6 +51,18 @@ Response quando é cross-channel:
   }
 }
 ```
+
+### Fallbacks de `application_id` (no projeto)
+
+`buscarCrossChannelInfo(adsetId, accountId?)` tenta em ordem:
+
+1. `promoted_object.omnichannel_object.app[0].application_id` (canônico)
+2. `promoted_object.application_id` (top-level)
+3. `GET /{accountId}?fields=connected_apps,mobile_app_data` (heurística)
+4. Env: `META_APP_ID_<numericAccountId>` → `META_APP_ID`
+
+A env é o escape hatch — configure `META_APP_ID_<id>` por marca quando
+o token não enxergar o app via Graph API.
 
 ## Regra de ativação (no projeto)
 

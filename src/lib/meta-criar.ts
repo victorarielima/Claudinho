@@ -1163,22 +1163,143 @@ export async function buscarInstagramActorId(
   return null;
 }
 
+/**
+ * Resolve cross-channel info do AdSet — `objectStoreUrls` e `applicationId`.
+ *
+ * O `applicationId` é necessário para `omnichannel_link_spec.app.application_id`
+ * no creative. Sem ele, o ad sai sem `applink_treatment`/`omnichannel_link_spec`,
+ * o Meta preenche apenas "URL do site (Destino de Backup)" e o "Deep link
+ * (Destino padrão)" fica vazio. Quando o operador cola manualmente, a
+ * tentativa de publicar quebra com #100 ("application_id is required") e
+ * #1885876 ("recreate the ad").
+ *
+ * Estratégia em camadas (cada uma loga em qual tier resolveu):
+ *
+ *   1. Field expansion explícita no AdSet:
+ *      `promoted_object{application_id,omnichannel_object{app{application_id,object_store_urls}}}`
+ *      — o Graph API não retorna sub-campos aninhados sem expansion.
+ *   2. Top-level `promoted_object.application_id` (presente em campanhas
+ *      app-install que também viram cross-channel).
+ *   3. Derivação via account: `GET /{accountId}?fields=connected_apps,mobile_app_data`
+ *      como heurística — útil quando o promoted_object não traz nada útil.
+ *   4. Env override: `META_APP_ID_<accountIdNumeric>` ou `META_APP_ID`.
+ *
+ * Se `objectStoreUrls.length > 0` mas nenhuma camada resolveu, loga `warn`
+ * pedindo configuração da env.
+ */
 export async function buscarCrossChannelInfo(
-  adsetId: string
+  adsetId: string,
+  accountId?: string
 ): Promise<CrossChannelInfo> {
   const token = getAccessToken();
-  const url = `${META_API_BASE}/${adsetId}?fields=promoted_object&access_token=${token}`;
+  const fields = "promoted_object{application_id,omnichannel_object{app{application_id,object_store_urls}}}";
+  const url = `${META_API_BASE}/${adsetId}?fields=${fields}&access_token=${token}`;
 
   const res = await metaFetchWithRetry(url);
   const json = await safeResponseJson(res);
 
   if (!res.ok || json.error) return { objectStoreUrls: [], applicationId: null };
 
-  const apps = json.promoted_object?.omnichannel_object?.app;
-  if (!Array.isArray(apps) || apps.length === 0) return { objectStoreUrls: [], applicationId: null };
+  const promotedObject = json.promoted_object;
+  const apps = promotedObject?.omnichannel_object?.app;
+  const hasApps = Array.isArray(apps) && apps.length > 0;
+  if (!promotedObject || !hasApps) {
+    return { objectStoreUrls: [], applicationId: null };
+  }
 
-  return {
-    objectStoreUrls: apps[0].object_store_urls ?? [],
-    applicationId: apps[0].application_id ?? null,
-  };
+  const objectStoreUrls: string[] = apps[0].object_store_urls ?? [];
+  let applicationId: string | null = apps[0].application_id ?? null;
+  let resolvedFrom = applicationId ? "omnichannel_object.app[0]" : null;
+
+  if (!applicationId && promotedObject.application_id) {
+    applicationId = String(promotedObject.application_id);
+    resolvedFrom = "promoted_object.application_id";
+  }
+
+  if (!applicationId && objectStoreUrls.length > 0 && accountId) {
+    applicationId = await resolverApplicationIdViaAccount(accountId);
+    if (applicationId) resolvedFrom = "account.connected_apps";
+  }
+
+  if (!applicationId && objectStoreUrls.length > 0) {
+    const envOverride = resolverApplicationIdViaEnv(accountId);
+    if (envOverride) {
+      applicationId = envOverride;
+      resolvedFrom = "env";
+    }
+  }
+
+  if (objectStoreUrls.length > 0) {
+    if (applicationId) {
+      logger.info("Cross-channel application_id resolved", {
+        fn: "buscarCrossChannelInfo",
+        adsetId,
+        accountId,
+        resolvedFrom,
+      });
+    } else {
+      logger.warn(
+        "Cross-channel signals present (object_store_urls) but application_id could not be resolved — set META_APP_ID_<numericAccountId> or META_APP_ID env. Ad will be created without applink_treatment/omnichannel_link_spec and the Deep Link field will stay empty.",
+        { fn: "buscarCrossChannelInfo", adsetId, accountId }
+      );
+    }
+  }
+
+  return { objectStoreUrls, applicationId };
+}
+
+/**
+ * Tenta derivar o FB app id a partir do ad account quando o adset não
+ * expõe `application_id`. Heurística de melhor esforço — falhas são
+ * silenciadas (logger.debug) porque a próxima camada (env) cobre.
+ */
+async function resolverApplicationIdViaAccount(
+  accountId: string
+): Promise<string | null> {
+  const token = getAccessToken();
+  const idWithPrefix = accountId.startsWith("act_") ? accountId : `act_${accountId}`;
+  const url = `${META_API_BASE}/${idWithPrefix}?fields=connected_apps,mobile_app_data&access_token=${token}`;
+
+  try {
+    const res = await metaFetchWithRetry(url);
+    const json = await safeResponseJson(res);
+    if (!res.ok || json.error) {
+      logger.debug("Account-level app derivation failed", {
+        fn: "resolverApplicationIdViaAccount",
+        accountId,
+        error: extrairErroMeta(json),
+      });
+      return null;
+    }
+    const fromConnected = Array.isArray(json.connected_apps?.data) && json.connected_apps.data.length > 0
+      ? json.connected_apps.data[0].id ?? json.connected_apps.data[0].application_id ?? null
+      : null;
+    const fromMobile = Array.isArray(json.mobile_app_data?.data) && json.mobile_app_data.data.length > 0
+      ? json.mobile_app_data.data[0].application_id ?? null
+      : null;
+    return (fromConnected ?? fromMobile) ? String(fromConnected ?? fromMobile) : null;
+  } catch (err) {
+    logger.debug("Exception during account-level app derivation", {
+      fn: "resolverApplicationIdViaAccount",
+      accountId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+/**
+ * Env overrides na ordem mais específica → menos específica:
+ *   `META_APP_ID_<numericAccountId>` (ex.: META_APP_ID_775254035944122)
+ *   `META_APP_ID` (global)
+ */
+function resolverApplicationIdViaEnv(accountId?: string): string | null {
+  if (accountId) {
+    const numeric = accountId.replace(/^act_/, "");
+    const specific = process.env[`META_APP_ID_${numeric}`];
+    if (specific && specific.trim()) return specific.trim();
+  }
+  const global = process.env.META_APP_ID;
+  if (global && global.trim() && global !== "your_meta_app_id") return global.trim();
+  return null;
 }

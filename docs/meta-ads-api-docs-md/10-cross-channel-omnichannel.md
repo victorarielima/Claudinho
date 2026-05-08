@@ -23,7 +23,7 @@ não tem o app, e para o deeplink quando tem.
 ## Como saber se um AdSet é cross-channel
 
 ```
-GET /{adsetId}?fields=promoted_object&access_token=...
+GET /{adsetId}?fields=promoted_object{application_id,omnichannel_object{app{application_id,object_store_urls}}}&access_token=...
 
 Retorno quando é cross-channel:
 {
@@ -42,6 +42,29 @@ Retorno quando é cross-channel:
 ```
 
 Se `omnichannel_object` não existir, **não é** cross-channel.
+
+> **⚠️ Field expansion explícita é obrigatória.** Sem o
+> `{application_id,omnichannel_object{app{application_id,object_store_urls}}}`,
+> o Graph API às vezes devolve `apps[0]` sem `application_id`, e aí o
+> creative sai sem `applink_treatment`/`omnichannel_link_spec`. O ad
+> aparece no Ads Manager com "URL do site (Destino de Backup)"
+> preenchida mas "Deep link (Destino padrão)" vazio. Quando o operador
+> cola manualmente e tenta publicar, dispara erros **#100**
+> ("application_id is required") e **#1885876** ("recreate the ad").
+
+### Fallback de `application_id`
+
+Quando, mesmo com expansão explícita, `application_id` continua
+ausente, `buscarCrossChannelInfo()` tenta em ordem:
+
+1. `promoted_object.omnichannel_object.app[0].application_id` (canônico)
+2. `promoted_object.application_id` (top-level, presente em campanhas
+   app-install que viram cross-channel)
+3. `GET /{accountId}?fields=connected_apps,mobile_app_data` (heurística)
+4. Env: `META_APP_ID_<accountIdNumeric>` → `META_APP_ID`
+
+A env é o escape hatch bullet-proof — quando configurada por marca,
+nunca falha.
 
 O Claudinho implementa em `buscarCrossChannelInfo()` em
 `src/lib/meta-criar.ts`:
