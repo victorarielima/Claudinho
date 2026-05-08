@@ -54,17 +54,16 @@ Se `omnichannel_object` não existir, **não é** cross-channel.
 
 ### Fallback de `application_id`
 
-Quando, mesmo com expansão explícita, `application_id` continua
-ausente, `buscarCrossChannelInfo()` tenta em ordem:
+`buscarCrossChannelInfo()` tenta em ordem:
 
 1. `promoted_object.omnichannel_object.app[0].application_id` (canônico)
 2. `promoted_object.application_id` (top-level, presente em campanhas
    app-install que viram cross-channel)
-3. `GET /{accountId}?fields=connected_apps,mobile_app_data` (heurística)
-4. Env: `META_APP_ID_<accountIdNumeric>` → `META_APP_ID`
 
-A env é o escape hatch bullet-proof — quando configurada por marca,
-nunca falha.
+Se nenhum dos dois resolver mas `objectStoreUrls.length > 0`, loga
+`warn` com um snippet do `promoted_object` recebido — esse log é o
+ponto de partida pra decidir uma derivação alternativa baseada no
+que a API de fato devolve, em vez de chutar.
 
 O Claudinho implementa em `buscarCrossChannelInfo()` em
 `src/lib/meta-criar.ts`:

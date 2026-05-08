@@ -251,7 +251,7 @@ async function processarFluxoLegado(body: CorpoLegado) {
 
     // Buscar cross-channel info e Instagram actor ID em paralelo
     const [crossChannel, instagramActorId] = await Promise.all([
-      buscarCrossChannelInfo(body.adSetId, accountId),
+      buscarCrossChannelInfo(body.adSetId),
       buscarInstagramActorId(pageId),
     ]);
 

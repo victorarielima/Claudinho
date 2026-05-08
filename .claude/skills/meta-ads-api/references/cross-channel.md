@@ -54,15 +54,15 @@ Response quando é cross-channel:
 
 ### Fallbacks de `application_id` (no projeto)
 
-`buscarCrossChannelInfo(adsetId, accountId?)` tenta em ordem:
+`buscarCrossChannelInfo(adsetId)` tenta em ordem:
 
 1. `promoted_object.omnichannel_object.app[0].application_id` (canônico)
 2. `promoted_object.application_id` (top-level)
-3. `GET /{accountId}?fields=connected_apps,mobile_app_data` (heurística)
-4. Env: `META_APP_ID_<numericAccountId>` → `META_APP_ID`
 
-A env é o escape hatch — configure `META_APP_ID_<id>` por marca quando
-o token não enxergar o app via Graph API.
+Se ambos vierem null e `objectStoreUrls` existir, loga `warn` com
+snippet do `promoted_object`. Não há derivação adicional codificada —
+intencionalmente. A próxima derivação deve ser baseada no JSON
+observado no log, não em chute.
 
 ## Regra de ativação (no projeto)
 

@@ -1170,26 +1170,23 @@ export async function buscarInstagramActorId(
  * no creative. Sem ele, o ad sai sem `applink_treatment`/`omnichannel_link_spec`,
  * o Meta preenche apenas "URL do site (Destino de Backup)" e o "Deep link
  * (Destino padrão)" fica vazio. Quando o operador cola manualmente, a
- * tentativa de publicar quebra com #100 ("application_id is required") e
- * #1885876 ("recreate the ad").
+ * publicação quebra com #100 ("application_id is required") e #1885876
+ * ("recreate the ad").
  *
- * Estratégia em camadas (cada uma loga em qual tier resolveu):
+ * Estratégia (cada nível loga em qual tier resolveu):
  *
  *   1. Field expansion explícita no AdSet:
  *      `promoted_object{application_id,omnichannel_object{app{application_id,object_store_urls}}}`
- *      — o Graph API não retorna sub-campos aninhados sem expansion.
- *   2. Top-level `promoted_object.application_id` (presente em campanhas
- *      app-install que também viram cross-channel).
- *   3. Derivação via account: `GET /{accountId}?fields=connected_apps,mobile_app_data`
- *      como heurística — útil quando o promoted_object não traz nada útil.
- *   4. Env override: `META_APP_ID_<accountIdNumeric>` ou `META_APP_ID`.
+ *      — defesa contra Graph API não retornar sub-campos aninhados.
+ *   2. Top-level `promoted_object.application_id` (raro, mas presente em
+ *      campanhas app-install que viram cross-channel).
  *
- * Se `objectStoreUrls.length > 0` mas nenhuma camada resolveu, loga `warn`
- * pedindo configuração da env.
+ * Se `objectStoreUrls.length > 0` mas nada resolveu o applicationId, loga
+ * `warn` com o JSON parcial do `promoted_object` recebido — isso permite
+ * decidir o próximo passo de derivação baseado no que a API de fato devolve.
  */
 export async function buscarCrossChannelInfo(
-  adsetId: string,
-  accountId?: string
+  adsetId: string
 ): Promise<CrossChannelInfo> {
   const token = getAccessToken();
   const fields = "promoted_object{application_id,omnichannel_object{app{application_id,object_store_urls}}}";
@@ -1209,24 +1206,11 @@ export async function buscarCrossChannelInfo(
 
   const objectStoreUrls: string[] = apps[0].object_store_urls ?? [];
   let applicationId: string | null = apps[0].application_id ?? null;
-  let resolvedFrom = applicationId ? "omnichannel_object.app[0]" : null;
+  let resolvedFrom: string | null = applicationId ? "omnichannel_object.app[0]" : null;
 
   if (!applicationId && promotedObject.application_id) {
     applicationId = String(promotedObject.application_id);
     resolvedFrom = "promoted_object.application_id";
-  }
-
-  if (!applicationId && objectStoreUrls.length > 0 && accountId) {
-    applicationId = await resolverApplicationIdViaAccount(accountId);
-    if (applicationId) resolvedFrom = "account.connected_apps";
-  }
-
-  if (!applicationId && objectStoreUrls.length > 0) {
-    const envOverride = resolverApplicationIdViaEnv(accountId);
-    if (envOverride) {
-      applicationId = envOverride;
-      resolvedFrom = "env";
-    }
   }
 
   if (objectStoreUrls.length > 0) {
@@ -1234,72 +1218,18 @@ export async function buscarCrossChannelInfo(
       logger.info("Cross-channel application_id resolved", {
         fn: "buscarCrossChannelInfo",
         adsetId,
-        accountId,
         resolvedFrom,
       });
     } else {
+      // Inclui o JSON do promoted_object pra decidir a derivacao real
+      // baseado em fato (qual estrutura a API devolveu) na proxima rodada.
+      const promotedObjectSample = JSON.stringify(promotedObject).slice(0, 1000);
       logger.warn(
-        "Cross-channel signals present (object_store_urls) but application_id could not be resolved — set META_APP_ID_<numericAccountId> or META_APP_ID env. Ad will be created without applink_treatment/omnichannel_link_spec and the Deep Link field will stay empty.",
-        { fn: "buscarCrossChannelInfo", adsetId, accountId }
+        "Cross-channel signals present (object_store_urls) but application_id missing from promoted_object. Ad will be created without applink_treatment/omnichannel_link_spec — Deep Link field will stay empty.",
+        { fn: "buscarCrossChannelInfo", adsetId, promotedObjectSample }
       );
     }
   }
 
   return { objectStoreUrls, applicationId };
-}
-
-/**
- * Tenta derivar o FB app id a partir do ad account quando o adset não
- * expõe `application_id`. Heurística de melhor esforço — falhas são
- * silenciadas (logger.debug) porque a próxima camada (env) cobre.
- */
-async function resolverApplicationIdViaAccount(
-  accountId: string
-): Promise<string | null> {
-  const token = getAccessToken();
-  const idWithPrefix = accountId.startsWith("act_") ? accountId : `act_${accountId}`;
-  const url = `${META_API_BASE}/${idWithPrefix}?fields=connected_apps,mobile_app_data&access_token=${token}`;
-
-  try {
-    const res = await metaFetchWithRetry(url);
-    const json = await safeResponseJson(res);
-    if (!res.ok || json.error) {
-      logger.debug("Account-level app derivation failed", {
-        fn: "resolverApplicationIdViaAccount",
-        accountId,
-        error: extrairErroMeta(json),
-      });
-      return null;
-    }
-    const fromConnected = Array.isArray(json.connected_apps?.data) && json.connected_apps.data.length > 0
-      ? json.connected_apps.data[0].id ?? json.connected_apps.data[0].application_id ?? null
-      : null;
-    const fromMobile = Array.isArray(json.mobile_app_data?.data) && json.mobile_app_data.data.length > 0
-      ? json.mobile_app_data.data[0].application_id ?? null
-      : null;
-    return (fromConnected ?? fromMobile) ? String(fromConnected ?? fromMobile) : null;
-  } catch (err) {
-    logger.debug("Exception during account-level app derivation", {
-      fn: "resolverApplicationIdViaAccount",
-      accountId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
-  }
-}
-
-/**
- * Env overrides na ordem mais específica → menos específica:
- *   `META_APP_ID_<numericAccountId>` (ex.: META_APP_ID_775254035944122)
- *   `META_APP_ID` (global)
- */
-function resolverApplicationIdViaEnv(accountId?: string): string | null {
-  if (accountId) {
-    const numeric = accountId.replace(/^act_/, "");
-    const specific = process.env[`META_APP_ID_${numeric}`];
-    if (specific && specific.trim()) return specific.trim();
-  }
-  const global = process.env.META_APP_ID;
-  if (global && global.trim() && global !== "your_meta_app_id") return global.trim();
-  return null;
 }

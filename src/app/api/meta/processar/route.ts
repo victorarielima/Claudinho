@@ -309,7 +309,7 @@ async function stepCriarCreative(
 
   // Buscar info cross-channel e Instagram actor ID em paralelo
   const [crossChannel, instagramActorId] = await Promise.all([
-    ad.ad_set_id ? buscarCrossChannelInfo(ad.ad_set_id, accountId) : Promise.resolve(undefined),
+    ad.ad_set_id ? buscarCrossChannelInfo(ad.ad_set_id) : Promise.resolve(undefined),
     buscarInstagramActorId(pageId),
   ]);
 
