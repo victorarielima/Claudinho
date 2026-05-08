@@ -30,6 +30,17 @@ interface RegraErro {
 
 const REGRAS: RegraErro[] = [
   {
+    // Aviso (não erro fatal): o ad foi criado com sucesso mas sem
+    // applink_treatment/omnichannel_link_spec porque o adset cross-channel
+    // não devolveu application_id na API. O Deep Link no Ads Manager fica
+    // vazio. A mensagem inclui um sample do JSON do promoted_object — print
+    // e mande pro dev pra ele decidir a derivação correta.
+    tipo: "Aviso: Deep Link vazio (cross-channel)",
+    explicacao:
+      "O anúncio foi criado mas saiu sem cross-channel: o campo Deep Link no Ads Manager fica em branco. A causa é que o Meta não devolveu o app id desse adset pela API — não é erro do Claudinho. Tira print desta mensagem inteira (com o JSON do promoted_object lá no fim) e manda pro dev pra ele acertar a derivação.",
+    marcadores: ["[AVISO Cross-Channel]"],
+  },
+  {
     tipo: "Identidade do Instagram",
     explicacao:
       "O criativo precisa de uma conta do Instagram vinculada à página do Facebook para rodar nos placements do IG. Verifique se a página tem um IG Business Account conectado em Meta Business Suite → Configurações → Contas conectadas.",

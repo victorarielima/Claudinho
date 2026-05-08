@@ -520,7 +520,7 @@ function TabelaCompacta({
                     />
                   )}
                 </td>
-                <td className="px-2 py-2 whitespace-nowrap w-[110px] max-w-[110px]" title={temErro && linha.mensagemErro ? linha.mensagemErro : linha.metaEffectiveStatus ? `Meta: ${linha.metaEffectiveStatus}` : undefined}>
+                <td className="px-2 py-2 whitespace-nowrap w-[110px] max-w-[110px]" title={linha.mensagemErro ? linha.mensagemErro : linha.metaEffectiveStatus ? `Meta: ${linha.metaEffectiveStatus}` : undefined}>
                   <div className="flex items-center gap-1 overflow-hidden">
                     <StatusDot status={linha.statusProcessamento} />
                     {linha.metaEffectiveStatus && (
@@ -565,7 +565,7 @@ function TabelaCompacta({
                       </button>
                     )}
                   </div>
-                  {temErro && linha.mensagemErro && (
+                  {linha.mensagemErro && (
                     <BotaoErroMeta mensagem={linha.mensagemErro} adName={linha.adName} />
                   )}
                 </td>
@@ -1179,8 +1179,9 @@ export function TabelaPendentes({
                         </div>
                       )}
 
-                      {/* Mensagem de erro */}
-                      {temErro && linha.mensagemErro && (() => {
+                      {/* Mensagem de erro/aviso (mostrado tambem em ads concluidos
+                          com diagnostic warning gravado em error_message) */}
+                      {linha.mensagemErro && (() => {
                         const erro = interpretarErroMeta(linha.mensagemErro);
                         if (!erro) return null;
                         return (
