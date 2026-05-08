@@ -40,9 +40,28 @@ export function extrairUrlsDeAssets(valor: string): string[] {
 }
 
 export function classificarPlacementImagem(url: string, indice = 0): string {
+  // 1. Dimensoes em pixel sao o sinal mais preciso quando aparecem.
   if (url.includes("1080x1080")) return "feed";
   if (url.includes("1080x1920")) return "stories";
   if (url.includes("1200x628")) return "horizontal";
+
+  // 2. Convencao do time de design da Evino/GrandCru: o nome do arquivo
+  //    indica o corte ("kit_horizontal.jpg", "vertical-xyz.png",
+  //    "EST-quadrado.png"). Sem essa deteccao, o readiness reportava
+  //    "Faltam cortes recomendados" mesmo com 3 imagens corretamente
+  //    nomeadas, e fotos de referencia entravam misturadas com o
+  //    placement "formato_X" — o operador via "ele nao sabia qual subir".
+  const normalizado = normalizarTexto(url);
+  if (normalizado.includes("horizontal") || normalizado.includes("landscape")) {
+    return "horizontal";
+  }
+  if (normalizado.includes("vertical") || normalizado.includes("stories")) {
+    return "stories";
+  }
+  if (normalizado.includes("quadrado") || normalizado.includes("square")) {
+    return "feed";
+  }
+
   return `formato_${indice + 1}`;
 }
 
