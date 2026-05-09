@@ -520,7 +520,7 @@ function TabelaCompacta({
                     />
                   )}
                 </td>
-                <td className="px-2 py-2 whitespace-nowrap w-[110px] max-w-[110px]" title={(temErro || linha.mensagemErro?.startsWith("[AVISO")) && linha.mensagemErro ? linha.mensagemErro : linha.metaEffectiveStatus ? `Meta: ${linha.metaEffectiveStatus}` : undefined}>
+                <td className="px-2 py-2 whitespace-nowrap w-[110px] max-w-[110px]" title={temErro && linha.mensagemErro ? linha.mensagemErro : linha.metaEffectiveStatus ? `Meta: ${linha.metaEffectiveStatus}` : undefined}>
                   <div className="flex items-center gap-1 overflow-hidden">
                     <StatusDot status={linha.statusProcessamento} />
                     {linha.metaEffectiveStatus && (
@@ -565,7 +565,7 @@ function TabelaCompacta({
                       </button>
                     )}
                   </div>
-                  {(temErro || linha.mensagemErro?.startsWith("[AVISO")) && linha.mensagemErro && (
+                  {temErro && linha.mensagemErro && (
                     <BotaoErroMeta mensagem={linha.mensagemErro} adName={linha.adName} />
                   )}
                 </td>
@@ -1179,11 +1179,8 @@ export function TabelaPendentes({
                         </div>
                       )}
 
-                      {/* Mensagem de erro (status=erro) ou aviso intencional
-                          (concluido com prefixo "[AVISO ..."). Outros
-                          error_message em ads concluidos sao stale (sync,
-                          retry) e ficam fora pra evitar falso positivo. */}
-                      {(temErro || linha.mensagemErro?.startsWith("[AVISO")) && linha.mensagemErro && (() => {
+                      {/* Mensagem de erro */}
+                      {temErro && linha.mensagemErro && (() => {
                         const erro = interpretarErroMeta(linha.mensagemErro);
                         if (!erro) return null;
                         return (

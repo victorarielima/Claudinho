@@ -359,17 +359,11 @@ async function stepCriarCreative(
     });
   }
 
-  // Persist creative id, plus any cross-channel diagnostic warning
-  // produzido em buscarCrossChannelInfo. O warning fica em error_message
-  // mesmo com status "processando" — Step D nao sobrescreve no caminho
-  // de sucesso, entao o aviso continua visivel no ad concluido.
+  // Store creative ID on the ad
   await atualizarStatusAd(
     ad.id,
     "processando",
-    {
-      meta_creative_id: creativeId,
-      ...(crossChannel?.diagnosticWarning ? { error_message: crossChannel.diagnosticWarning } : {}),
-    },
+    { meta_creative_id: creativeId },
     userId ?? "system"
   );
 

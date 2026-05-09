@@ -1015,13 +1015,6 @@ export async function buscarAccountIdDoAdSet(
 export interface CrossChannelInfo {
   objectStoreUrls: string[];
   applicationId: string | null;
-  /**
-   * Mensagem de diagnóstico para surfaceamento na UI quando o adset
-   * é cross-channel mas não conseguimos resolver `applicationId`. Inclui
-   * snippet do JSON do `promoted_object` recebido — operador tira print
-   * e manda pro dev decidir a derivação certa.
-   */
-  diagnosticWarning?: string;
 }
 
 /**
@@ -1220,7 +1213,6 @@ export async function buscarCrossChannelInfo(
     resolvedFrom = "promoted_object.application_id";
   }
 
-  let diagnosticWarning: string | undefined;
   if (objectStoreUrls.length > 0) {
     if (applicationId) {
       logger.info("Cross-channel application_id resolved", {
@@ -1229,19 +1221,15 @@ export async function buscarCrossChannelInfo(
         resolvedFrom,
       });
     } else {
-      // Snippet do JSON do promoted_object — base pra decidir a derivacao
-      // real na proxima rodada, em vez de chutar.
+      // Snippet do promoted_object pra debug futuro via Vercel logs ou
+      // via /api/meta/diagnostico-adset?adsetId=X (endpoint mais comodo).
       const promotedObjectSample = JSON.stringify(promotedObject).slice(0, 1000);
       logger.warn(
         "Cross-channel signals present (object_store_urls) but application_id missing from promoted_object. Ad will be created without applink_treatment/omnichannel_link_spec — Deep Link field will stay empty.",
         { fn: "buscarCrossChannelInfo", adsetId, promotedObjectSample }
       );
-      // Mesma info, persistida no ad pra surfacear na UI (operador
-      // tira print e manda pro dev). Prefixo identifica como aviso
-      // pra interpretarErroMeta classificar diferente de erro fatal.
-      diagnosticWarning = `[AVISO Cross-Channel] O Deep Link ficou vazio: o adset ${adsetId} é cross-channel mas a API do Meta não devolveu o application_id. Print esta mensagem e mande pro dev. Sample do promoted_object: ${promotedObjectSample}`;
     }
   }
 
-  return { objectStoreUrls, applicationId, diagnosticWarning };
+  return { objectStoreUrls, applicationId };
 }
