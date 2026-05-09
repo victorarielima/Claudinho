@@ -676,10 +676,23 @@ export async function criarCreativeImagem(
   if (params.link?.trim()) {
     formData.append("link_url", params.link);
   }
-  // applink_treatment fica no form level (subcode 2446455 exige).
-  // omnichannel_link_spec já foi adicionado dentro de link_urls[0].
+  // Cross-channel multi-placement precisa de TRES envios coordenados:
+  //   1. applink_treatment no form level (sem ele: subcode 2446455).
+  //   2. omnichannel_link_spec dentro de link_urls[0] (sem isso: subcode
+  //      2446461 "needs to be within asset_feed_spec").
+  //   3. omnichannel_link_spec TAMBEM no form level — sem isso o ad
+  //      passa validacao mas o Ads Manager UI mostra o "Deep link" vazio.
+  //      Confirmado em teste controlado 2026-05-09 (id 1852024642104426
+  //      vs 1626451038655980): mesma asset_feed_spec, so com vs sem
+  //      form-level omnichannel_link_spec — UI exibe Deep Link no
+  //      primeiro caso, fica em branco no segundo.
+  //   Isso parece duplicacao mas Meta exige os dois canais (delivery
+  //   le do nested, UI de edicao le do form-level).
   if (isCrossChannelValido(params.crossChannel)) {
     formData.append("applink_treatment", "deeplink_with_web_fallback");
+    formData.append("omnichannel_link_spec", JSON.stringify(
+      construirOmnichannelSpec(params.link ?? "", params.crossChannel),
+    ));
   }
   formData.append(
     "degrees_of_freedom_spec",

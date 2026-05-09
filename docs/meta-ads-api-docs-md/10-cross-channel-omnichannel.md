@@ -150,14 +150,26 @@ Essa é a combinação que mais deu problema. Posição correta:
 | `object_store_urls` | **Dentro de `asset_feed_spec.link_urls[0]`** |
 | `deeplink_url` | **Dentro de `asset_feed_spec.link_urls[0]`** |
 | `website_url` | **Dentro de `asset_feed_spec.link_urls[0]`** |
-| `omnichannel_link_spec` | **Dentro de `asset_feed_spec.link_urls[0]`** |
+| `omnichannel_link_spec` | **Form level + `asset_feed_spec.link_urls[0]` (AMBOS)** |
 | `applink_treatment` | **Form level** |
+
+> **🔁 Por que `omnichannel_link_spec` em dois lugares?**
+> Confirmado em teste controlado 2026-05-09 contra v23.0:
+> - Só `link_urls[0]` → ad passa validação MAS o Ads Manager UI mostra
+>   o "Deep link" vazio. Operador acha que está quebrado, cola manual
+>   e dispara #100/#1885876.
+> - Só form level → quebra com `2446461` em ~40s.
+> - Ambos → passa validação E o UI exibe o Deep Link corretamente.
+>
+> Hipótese: pipeline de delivery lê do nested; UI de edição lê do
+> form-level. São dois canais que leem fontes diferentes.
 
 ### Posições ERRADAS (confirmadas em prod)
 
 | Tentativa | O que quebra |
 |---|---|
-| `omnichannel_link_spec` no form level (multi-placement) | Delivery error subcode **2446461**: *"omnichannel_link_spec needs to be within your asset_feed_spec"* |
+| `omnichannel_link_spec` **só** no form level (multi-placement) | Delivery error subcode **2446461**: *"omnichannel_link_spec needs to be within your asset_feed_spec"* |
+| `omnichannel_link_spec` **só** em `link_urls[0]` (multi-placement) | Passa validação mas Ads Manager UI mostra "Deep link" vazio (operador cola manual → #100/#1885876) |
 | `omnichannel_link_spec` na raiz do `asset_feed_spec` | Erro **#100** *"Unexpected key"* |
 | `omnichannel_link_spec` dentro de `object_story_spec` (multi-placement) | Silenciosamente ignorado |
 | `applink_treatment` omitido quando cross-channel | Subcode **2446455**: *"applink_treatment is required in ad's creative"* |
@@ -188,11 +200,12 @@ Essa é a combinação que mais deu problema. Posição correta:
            call_to_action.value.object_store_urls = [...]
        - IMAGEM MULTI-PLACEMENT (asset_feed_spec):
            form: applink_treatment = "deeplink_with_web_fallback"
+           form: omnichannel_link_spec = { web, app{...} }   <-- pra UI exibir
            asset_feed_spec.link_urls[0] = {
              website_url,
              deeplink_url,
              object_store_urls,
-             omnichannel_link_spec
+             omnichannel_link_spec    <-- pra delivery (sem isso: 2446461)
            }
 ```
 
@@ -204,6 +217,17 @@ Content-Type: application/x-www-form-urlencoded
 
 name=Creative - EST-Prod-3CabernetsSauvignons
 applink_treatment=deeplink_with_web_fallback
+
+omnichannel_link_spec={
+  "web": { "url": "https://www.evino.com.br/combos/3-cabernets" },
+  "app": {
+    "application_id": "987654321",
+    "platform_specs": {
+      "android": { "url": "https://www.evino.com.br/combos/3-cabernets" },
+      "ios":     { "url": "https://www.evino.com.br/combos/3-cabernets" }
+    }
+  }
+}
 
 object_story_spec={
   "page_id": "PAGE_ID",

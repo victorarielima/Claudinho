@@ -80,10 +80,23 @@ Isso causa erro #100 porque `applink_treatment` sem
 | Campo | VÍDEO (`video_data`) | IMAGEM SIMPLES (`link_data`) | IMAGEM MULTI (`asset_feed_spec`) |
 |---|---|---|---|
 | `applink_treatment` | **Form level** | **Form level** | **Form level** |
-| `omnichannel_link_spec` | **Form level** | **Form level** | **`asset_feed_spec.link_urls[0]`** |
+| `omnichannel_link_spec` | **Form level** | **Form level** | **Form level + `asset_feed_spec.link_urls[0]` (AMBOS)** |
 | `object_store_urls` | `video_data.call_to_action.value.object_store_urls` | `link_data.call_to_action.value.object_store_urls` | **`asset_feed_spec.link_urls[0].object_store_urls`** |
 | `deeplink_url` | N/A | N/A | **`asset_feed_spec.link_urls[0].deeplink_url`** |
 | `website_url` | N/A (`link`) | N/A (`link`) | **`asset_feed_spec.link_urls[0].website_url`** |
+
+> **🔁 Multi-placement exige `omnichannel_link_spec` nos DOIS lugares.**
+> Confirmado em teste controlado 2026-05-09 contra v23.0:
+> - **Só `link_urls[0]`** → ad passa validação (sem `issues_info`) MAS o
+>   "Deep link" no editor do Ads Manager fica vazio. Operador acha que
+>   está quebrado e tenta colar manual → dispara #100/#1885876.
+> - **Só form level** → quebra com subcode `2446461`
+>   ("needs to be within your asset_feed_spec") em ~40s no `issues_info`.
+> - **Ambos** → passa validação E o Ads Manager UI exibe o Deep Link.
+>
+> Hipótese: pipeline de delivery do Meta lê o nested; UI de edição lê
+> o form-level. Os dois canais leem fontes diferentes — por isso a
+> duplicação.
 
 ## Estrutura do `omnichannel_link_spec`
 
@@ -112,7 +125,8 @@ Corresponding helper: `construirOmnichannelSpec()` em
 
 | Tentativa | Resultado |
 |---|---|
-| `omnichannel_link_spec` no form level (multi-placement) | Delivery error subcode **2446461** ("needs to be within asset_feed_spec") |
+| `omnichannel_link_spec` no form level **sem** `link_urls[0]` (multi) | Delivery error subcode **2446461** ("needs to be within asset_feed_spec") |
+| `omnichannel_link_spec` **só** em `link_urls[0]` (multi) | Passa validação mas Ads Manager UI mostra "Deep link" vazio — operador cola manual → #100/#1885876 |
 | `omnichannel_link_spec` na raiz do `asset_feed_spec` | Erro **#100** ("Unexpected key") |
 | `omnichannel_link_spec` dentro de `object_story_spec` (multi) | Silenciosamente ignorado |
 | `applink_treatment` ausente quando cross-channel | Subcode **2446455** |
