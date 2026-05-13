@@ -52,6 +52,7 @@ Retry do Claudinho: 4, 17, 32, 100, 613, 80004, HTTP 429.
 | **1487006** | Política (álcool/farmacêutico/etc) | Categoria/copy | Rever copy, targeting |
 | **1487748** | "not eligible for this placement" | Asset formato errado | Reenviar no formato correto |
 | **1363024** | "format that isn't supported" (acompanha `[code 352]`) | **Filename sem extensão `.mp4`/`.mov`/`.m4v`**. Meta usa a extensão pra inferir o container e, sem ela, rejeita com mensagem genérica de formato. Bytes podem estar perfeitamente válidos. | `uploadVideo()` em `src/lib/meta-criar.ts` sanitiza via `ensureVideoExtension()` — adiciona `.mp4` se faltar. Se ainda aparecer, é mesmo um codec/container não-H.264. |
+| **1363047** | "There was a problem uploading your video. Please try again." (acompanha `[code 2]`) | **Indisponibilidade transitória do `/advideos`** — arquivo, token e payload estão OK; o serviço de upload do Meta ficou intermitente. | `metaFetchWithRetry` em `src/lib/meta-retry.ts` retenta automaticamente (até 3x, backoff exponencial). Se chegar até a UI mesmo assim, esperar 1 min e clicar "Tentar de novo". |
 
 ### War story 2026-04-30 — isolamento da causa de 1363024
 

@@ -66,6 +66,12 @@ const REGRAS: RegraErro[] = [
     marcadores: ["1363024", "[code 352]", "format that isn't supported", "in a supported format"],
   },
   {
+    tipo: "Falha temporária no upload do vídeo (Meta)",
+    explicacao:
+      "Erro transitório do serviço de upload de vídeo do Meta — o /advideos ficou indisponível por alguns instantes. Não tem problema com o arquivo, token ou payload. O retry automático já cobre esse subcode; se chegou aqui é porque persistiu mesmo após retentativas. Espere um minuto e clique em 'Tentar de novo'.",
+    marcadores: ["1363047", "There was a problem uploading your video"],
+  },
+  {
     tipo: "Vídeo rejeitado pelo Meta",
     explicacao:
       "O Meta não conseguiu processar o vídeo. Verifique formato (recomendado MP4 H.264), resolução e tamanho, e reenvie.",

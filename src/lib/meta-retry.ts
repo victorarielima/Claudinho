@@ -89,11 +89,13 @@ export async function metaFetchWithRetry(
     const isRateLimit = response.status === 429
     let isMetaRateLimit = false
 
+    let isTransientMeta = false
     if (!response.ok && !isRateLimit) {
       // Check Meta-specific rate limit error codes
       try {
         const body = await response.clone().json()
         const errorCode = body?.error?.code
+        const errorSubcode = body?.error?.error_subcode
         isMetaRateLimit =
           errorCode === 17 ||
           errorCode === 32 ||
@@ -101,16 +103,21 @@ export async function metaFetchWithRetry(
           errorCode === 100 ||
           errorCode === 613 ||
           errorCode === 80004
+        // Transient Meta service hiccups on video upload (/advideos).
+        // Subcode 1363047 ("There was a problem uploading your video.
+        // Please try again.") is documented as temporary unavailability.
+        isTransientMeta = errorSubcode === 1363047
       } catch {}
     }
 
-    if ((isRateLimit || isMetaRateLimit) && attempt < maxRetries) {
+    if ((isRateLimit || isMetaRateLimit || isTransientMeta) && attempt < maxRetries) {
       const delay = Math.min(baseDelayMs * Math.pow(2, attempt), maxDelayMs)
-      logger.warn('Meta API rate limit hit, retrying', {
+      logger.warn('Meta API transient error, retrying', {
         attempt: attempt + 1,
         maxRetries,
         delayMs: delay,
         url: sanitizedUrl,
+        reason: isTransientMeta ? 'transient_meta_subcode' : 'rate_limit',
       })
       await new Promise(resolve => setTimeout(resolve, delay))
       continue
