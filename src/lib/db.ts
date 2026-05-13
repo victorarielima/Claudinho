@@ -201,6 +201,24 @@ export async function buscarAd(id: string, tentativas = 3): Promise<Ad | null> {
   return null;
 }
 
+export async function listarAdNamesAtivosNoAdSet(
+  brandId: string,
+  campaignName: string,
+  adSetName: string
+): Promise<string[]> {
+  const sb = getSupabase();
+  const { data, error } = await sb
+    .from("ads")
+    .select("ad_name")
+    .eq("brand_id", brandId)
+    .eq("campaign_name", campaignName)
+    .eq("ad_set_name", adSetName)
+    .in("status", ["pendente", "processando", "concluido"]);
+
+  if (error) throw new Error(`Erro ao listar ads do ad set: ${error.message}`);
+  return (data as { ad_name: string }[]).map((r) => r.ad_name);
+}
+
 export async function criarAd(input: CriarAdInput, userId: string, userName?: string): Promise<Ad> {
   const sb = getSupabase();
 
