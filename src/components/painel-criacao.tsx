@@ -121,7 +121,7 @@ export function PainelCriacao() {
 
   const [selecionados, setSelecionados] = useState<Set<number>>(new Set());
   const [filtroStatus, setFiltroStatus] = useState<string>("todos");
-  const [filtroData, setFiltroData] = useState<string>("todas");
+  const [filtroData, setFiltroData] = useState<"30d" | "todos">("30d");
   const [filtroCampanha, setFiltroCampanha] = useState<string>("todas");
   const [filtroAdSet, setFiltroAdSet] = useState<string>("todos");
   const [busca, setBusca] = useState<string>("");
@@ -633,17 +633,34 @@ export function PainelCriacao() {
   const total = linhas.length;
 
   // ─── Filtros ───────────────────────────────────────────────
-  const datasUnicas = Array.from(new Set(linhas.map((l) => l.data).filter(Boolean))).sort((a, b) => {
-    const parseData = (s: string) => { const p = s.split("/"); return p.length === 3 ? new Date(`${p[2]}-${p[1]}-${p[0]}`).getTime() : new Date(s).getTime(); };
-    return parseData(b) - parseData(a);
-  });
+  // Aceita "dd/mm/yyyy" (pt-BR, vindo de toLocaleDateString) e ISO. Retorna
+  // null se não conseguir parsear — nesses casos o filtro de período deixa
+  // a linha passar (não esconde linha por causa de data ausente/quebrada).
+  const parseDataBr = (s: string): number | null => {
+    if (!s) return null;
+    const p = s.split("/");
+    const ms = p.length === 3
+      ? new Date(`${p[2]}-${p[1]}-${p[0]}`).getTime()
+      : new Date(s).getTime();
+    return Number.isNaN(ms) ? null : ms;
+  };
+  const limiteUltimos30Dias = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  })();
+
   const campanhasUnicas = Array.from(new Set(linhas.map((l) => l.campaign).filter(Boolean))).sort();
   const adSetsUnicos = Array.from(new Set(linhas.filter((l) => filtroCampanha === "todas" || l.campaign === filtroCampanha).map((l) => l.adSet).filter(Boolean))).sort();
 
   const buscaLower = busca.toLowerCase();
   const linhasFiltradas = linhas.filter((l) => {
     if (filtroStatus !== "todos" && l.statusProcessamento !== filtroStatus) return false;
-    if (filtroData !== "todas" && l.data !== filtroData) return false;
+    if (filtroData === "30d") {
+      const t = parseDataBr(l.data);
+      if (t !== null && t < limiteUltimos30Dias) return false;
+    }
     if (filtroCampanha !== "todas" && l.campaign !== filtroCampanha) return false;
     if (filtroAdSet !== "todos" && l.adSet !== filtroAdSet) return false;
     if (buscaLower && !(l.adName.toLowerCase().includes(buscaLower) || l.textoPrincipal.toLowerCase().includes(buscaLower) || l.campaign.toLowerCase().includes(buscaLower))) return false;
@@ -652,7 +669,7 @@ export function PainelCriacao() {
 
   const resetFiltros = () => {
     setLinhas([]); setJaCarregou(false); setSelecionados(new Set()); setErro(null); setFeedback(null); setDiagnosticoPlanilha(null);
-    setFiltroStatus("todos"); setFiltroData("todas"); setFiltroCampanha("todas"); setFiltroAdSet("todos"); setBusca("");
+    setFiltroStatus("todos"); setFiltroData("30d"); setFiltroCampanha("todas"); setFiltroAdSet("todos"); setBusca("");
   };
 
   return (
@@ -854,13 +871,11 @@ export function PainelCriacao() {
               </select>
             )}
 
-            {datasUnicas.length > 1 && (
-              <select value={filtroData} onChange={(e) => setFiltroData(e.target.value)}
-                className="h-9 rounded-lg border border-input bg-background px-3 text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
-                <option value="todas">Todas as datas</option>
-                {datasUnicas.map((d) => <option key={d} value={d}>{d}</option>)}
-              </select>
-            )}
+            <select value={filtroData} onChange={(e) => setFiltroData(e.target.value as "30d" | "todos")}
+              className="h-9 rounded-lg border border-input bg-background px-3 text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
+              <option value="30d">Últimos 30 dias</option>
+              <option value="todos">Todos</option>
+            </select>
 
             <div className="relative">
               <svg className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
