@@ -114,6 +114,32 @@ function gerarAdName(taskName: string, linkCampanha?: string): string {
   return partes.join("-");
 }
 
+function escaparRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Retorna o próximo nome disponível para um ad_name base, considerando os
+// nomes já em uso no ad set. Se `base` ainda não existe → retorna `base`.
+// Caso contrário acrescenta -V2, -V3, ... pulando versões já tomadas.
+function calcularProximaVersao(base: string, existentes: Set<string>): string {
+  if (!existentes.has(base)) {
+    let i = 2;
+    while (existentes.has(`${base}-V${i}`)) i += 1;
+    if (i === 2) return base;
+    return `${base}-V${i}`;
+  }
+  const re = new RegExp(`^${escaparRegex(base)}-V(\\d+)$`);
+  let maiorV = 1;
+  for (const nome of existentes) {
+    const m = nome.match(re);
+    if (m) {
+      const v = parseInt(m[1], 10);
+      if (v > maiorV) maiorV = v;
+    }
+  }
+  return `${base}-V${maiorV + 1}`;
+}
+
 // ─── Main Component ────────────────────────────────────────
 
 export function FormularioLoteImagens({
@@ -146,6 +172,10 @@ export function FormularioLoteImagens({
   const [salvando, setSalvando] = useState(false);
   const [mensagemErro, setMensagemErro] = useState<string | null>(null);
   const [mensagemSucesso, setMensagemSucesso] = useState<string | null>(null);
+
+  // ── Duplicate detection ─────────────────────────────────
+  const [adNamesExistentes, setAdNamesExistentes] = useState<Set<string>>(() => new Set());
+  const [confirmandoVersao, setConfirmandoVersao] = useState(false);
 
   // ── Init anuncios from cards ────────────────────────────
   useEffect(() => {
@@ -308,9 +338,73 @@ export function FormularioLoteImagens({
     return anuncios.every((a) => a.adName.trim() && a.attachments.length > 0);
   }, [brandId, campanhaId, adSetId, anuncios]);
 
+  // ── Fetch existing ad names for selected destino ────────
+  const campanhaNome = useMemo(
+    () => campanhas.find((c) => c.id === campanhaId)?.nome ?? "",
+    [campanhas, campanhaId]
+  );
+  const adSetNome = useMemo(
+    () => adsets.find((a) => a.id === adSetId)?.nome ?? "",
+    [adsets, adSetId]
+  );
+
+  useEffect(() => {
+    if (!brandId || !campanhaNome || !adSetNome) {
+      setAdNamesExistentes(new Set());
+      return;
+    }
+    let cancelado = false;
+    fetch("/api/ads/lote/checar-duplicatas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ brandId, campaignName: campanhaNome, adSetName: adSetNome }),
+    })
+      .then((r) => r.json())
+      .then((json) => {
+        if (cancelado) return;
+        const lista: string[] = Array.isArray(json.existentes) ? json.existentes : [];
+        setAdNamesExistentes(new Set(lista));
+      })
+      .catch(() => {
+        if (!cancelado) setAdNamesExistentes(new Set());
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, [brandId, campanhaNome, adSetNome]);
+
+  // Mapa: index do anuncio → próximo ad_name disponível (igual ao atual se não há conflito)
+  const proximosNomes = useMemo(() => {
+    return anuncios.map((a) => calcularProximaVersao(a.adName, adNamesExistentes));
+  }, [anuncios, adNamesExistentes]);
+
+  const conflitos = useMemo(
+    () => anuncios.map((a, i) => proximosNomes[i] !== a.adName),
+    [anuncios, proximosNomes]
+  );
+
+  const totalConflitos = useMemo(
+    () => conflitos.filter(Boolean).length,
+    [conflitos]
+  );
+
+  // Reset o estado de confirmação quando o conjunto de conflitos mudar
+  useEffect(() => {
+    setConfirmandoVersao(false);
+  }, [totalConflitos, brandId, campanhaId, adSetId]);
+
   // ── Save handler ────────────────────────────────────────
   const salvar = useCallback(async () => {
     if (!podeSalvar) return;
+
+    // Se há conflitos e o usuário ainda não confirmou, mostrar banner
+    // de confirmação em vez de salvar.
+    if (totalConflitos > 0 && !confirmandoVersao) {
+      setConfirmandoVersao(true);
+      setMensagemErro(null);
+      return;
+    }
+
     setSalvando(true);
     setMensagemErro(null);
     setMensagemSucesso(null);
@@ -321,17 +415,17 @@ export function FormularioLoteImagens({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           brandId,
-          campaignName: campanhas.find((c) => c.id === campanhaId)?.nome ?? "",
+          campaignName: campanhaNome,
           campaignId: campanhaId,
-          adSetName: adsets.find((a) => a.id === adSetId)?.nome ?? "",
+          adSetName: adSetNome,
           adSetId,
           descricao,
           cta,
           textoPrincipal: "",
           linkCampanha: "",
           type: "image",
-          anuncios: anuncios.map((a) => ({
-            adName: a.adName,
+          anuncios: anuncios.map((a, i) => ({
+            adName: proximosNomes[i],
             titulo: a.titulo,
             textoPrincipal: a.textoPrincipal || undefined,
             linkCampanha: a.linkCampanha || undefined,
@@ -360,7 +454,7 @@ export function FormularioLoteImagens({
     } finally {
       setSalvando(false);
     }
-  }, [podeSalvar, brandId, campanhaId, adSetId, campanhas, adsets, descricao, cta, anuncios, aoSalvar, aoFechar]);
+  }, [podeSalvar, totalConflitos, confirmandoVersao, brandId, campanhaId, adSetId, campanhaNome, adSetNome, descricao, cta, anuncios, proximosNomes, aoSalvar, aoFechar]);
 
   // ── Reset on close ──────────────────────────────────────
   useEffect(() => {
@@ -373,6 +467,8 @@ export function FormularioLoteImagens({
       setAnuncios([]);
       setMensagemErro(null);
       setMensagemSucesso(null);
+      setAdNamesExistentes(new Set());
+      setConfirmandoVersao(false);
     }
   }, [aberto]);
 
@@ -531,8 +627,16 @@ export function FormularioLoteImagens({
                       value={anuncio.adName}
                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateAnuncio(i, "adName", e.target.value)}
                       placeholder="Nome do anúncio"
-                      className="h-8 text-xs font-mono w-full rounded-md border border-input bg-background px-3 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className={`h-8 text-xs font-mono w-full rounded-md border bg-background px-3 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                        conflitos[i] ? "border-amber-500" : "border-input"
+                      }`}
                     />
+                    {conflitos[i] && (
+                      <p className="text-[10px] text-amber-600">
+                        Já existe neste ad set — será criado como{" "}
+                        <span className="font-mono">{proximosNomes[i]}</span>
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -612,32 +716,79 @@ export function FormularioLoteImagens({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between border-t px-4 py-3 bg-background">
-          <div>
-            {mensagemErro && (
-              <p className="text-sm text-destructive flex items-center gap-1">
-                <AlertCircle className="h-4 w-4" />{mensagemErro}
+        <div className="border-t bg-background">
+          {confirmandoVersao && totalConflitos > 0 && (
+            <div className="border-b bg-amber-50 px-4 py-3 text-xs text-amber-900">
+              <p className="font-semibold mb-1 flex items-center gap-1">
+                <AlertCircle className="h-3.5 w-3.5" />
+                {totalConflitos} card{totalConflitos !== 1 ? "s" : ""} já {totalConflitos !== 1 ? "foram usados" : "foi usado"} neste ad set
               </p>
-            )}
-            {mensagemSucesso && (
-              <p className="text-sm text-green-600 flex items-center gap-1">
-                <CheckCircle2 className="h-4 w-4" />{mensagemSucesso}
+              <p className="mb-2">
+                Confirme para subir como nova versão — os nomes em conflito serão renomeados automaticamente (V2, V3, …).
+                Para editar manualmente, cancele e ajuste o nome de cada anúncio.
               </p>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={aoFechar} disabled={salvando}>Cancelar</Button>
-            <Button
-              size="sm"
-              disabled={!podeSalvar || salvando}
-              onClick={salvar}
-            >
-              {salvando ? (
-                <><Loader2 className="h-4 w-4 animate-spin mr-1" />Salvando...</>
-              ) : (
-                `Salvar ${anuncios.length} rascunho${anuncios.length !== 1 ? "s" : ""}`
+              <ul className="space-y-0.5 max-h-24 overflow-y-auto">
+                {anuncios.map((a, i) =>
+                  conflitos[i] ? (
+                    <li key={a.taskId} className="font-mono text-[11px]">
+                      {a.adName} → {proximosNomes[i]}
+                    </li>
+                  ) : null
+                )}
+              </ul>
+            </div>
+          )}
+          <div className="flex items-center justify-between px-4 py-3">
+            <div>
+              {mensagemErro && (
+                <p className="text-sm text-destructive flex items-center gap-1">
+                  <AlertCircle className="h-4 w-4" />{mensagemErro}
+                </p>
               )}
-            </Button>
+              {mensagemSucesso && (
+                <p className="text-sm text-green-600 flex items-center gap-1">
+                  <CheckCircle2 className="h-4 w-4" />{mensagemSucesso}
+                </p>
+              )}
+            </div>
+            <div className="flex gap-2">
+              {confirmandoVersao ? (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setConfirmandoVersao(false)}
+                    disabled={salvando}
+                  >
+                    Voltar e editar
+                  </Button>
+                  <Button size="sm" disabled={!podeSalvar || salvando} onClick={salvar}>
+                    {salvando ? (
+                      <><Loader2 className="h-4 w-4 animate-spin mr-1" />Salvando...</>
+                    ) : (
+                      `Confirmar — criar como nova versão`
+                    )}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button variant="outline" size="sm" onClick={aoFechar} disabled={salvando}>Cancelar</Button>
+                  <Button
+                    size="sm"
+                    disabled={!podeSalvar || salvando}
+                    onClick={salvar}
+                  >
+                    {salvando ? (
+                      <><Loader2 className="h-4 w-4 animate-spin mr-1" />Salvando...</>
+                    ) : totalConflitos > 0 ? (
+                      `Salvar ${anuncios.length} rascunho${anuncios.length !== 1 ? "s" : ""} (${totalConflitos} em nova versão)`
+                    ) : (
+                      `Salvar ${anuncios.length} rascunho${anuncios.length !== 1 ? "s" : ""}`
+                    )}
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </DialogContent>
