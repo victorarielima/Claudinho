@@ -67,6 +67,7 @@ Retry do Claudinho (`src/lib/meta-retry.ts`) considera retryable:
 | **1359187** | *"Object store URLs are required for cross-channel"* | `object_store_urls` ausente no creative | Adicionar dentro de `call_to_action.value` (vídeo/imagem simples) ou `link_urls[0]` (imagem multi) |
 | **1487006** | Restrição de política (álcool, farmacêutico, etc) | Categoria do produto / copy inadequado | Revisar copy, target, ajustar categoria especial |
 | **1487748** | *"The ad creative is not eligible for this placement"* | Asset incompatível (aspect ratio, tamanho) | Reenviar asset no formato correto |
+| **1885876** | *"Estamos com problemas para adicionar mais posicionamentos a esse anúncio."* | Bug do editor do Ads Manager com `asset_feed_spec` em campanha Advantage+ (ASC). Dois gatilhos: **(a)** `asset_customization_rules` não cobre todos os placements implícitos do ASC (Audience Network, Messenger, Threads); **(b)** cross-channel ghost link — Deep Link vazio na UI e operador cola manual. | **(a)** Default rule sem `customization_spec` em `asset_customization_rules` — commit `e4f2294`. **(b)** `omnichannel_link_spec` form-level + `link_urls[0]` — commit `6ba3c85`. **Ads pré-fix**: precisam ser recriados. |
 
 ## Matriz de erro → arquivo do projeto
 

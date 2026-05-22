@@ -177,6 +177,39 @@ Essa é a combinação que mais deu problema. Posição correta:
 | `applink_treatment` adicionado **sem** `omnichannel_link_spec` | Erro **#100** |
 | `applink_treatment` adicionado quando `applicationId` é null | Erro **#100** |
 | `object_store_urls` ausente em creative cross-channel multi-placement | Erro **#1359187** ao criar o ad |
+| `asset_customization_rules` sem default rule (multi-placement em ASC) | **#1885876** ao editar **QUALQUER** campo no Ads Manager (até 1 letra na legenda). Ver detalhes em `11-catalogo-erros-subcodes.md` e o capítulo § "Default rule" abaixo. |
+
+### Default rule em `asset_customization_rules` (mandatório em ASC)
+
+Pra anúncio multi-imagem subir em campanha Advantage+ Shopping (ASC) e
+continuar **editável** no Ads Manager, o `asset_customization_rules`
+precisa de uma regra default (sem `customization_spec`).
+
+**Por quê.** Campanhas ASC ativam *Advantage+ Placements* implicitamente:
+o adset não tem `publisher_platforms`/`facebook_positions`/etc explícitos,
+e o Meta entrega em **todos** os ~25 placements disponíveis (Audience
+Network, Messenger, Threads, IG Reels Overlay, IG Explore Home, FB
+Instream Video etc). Nosso `asset_customization_rules` típico cobre só
+~14 desses (FB+IG feed/stories/reels/horizontal). A criação tolera o
+gap, mas o editor da UI re-valida ao salvar e tenta "expandir" o
+`asset_feed_spec` pra cobrir o que falta — falha com #1885876.
+
+**Como.** Append uma rule sem `customization_spec`, com priority mais
+baixa, usando a imagem feed (1:1, mais universal) como fallback:
+
+```jsonc
+asset_customization_rules: [
+  { customization_spec: {...feed...},       image_label: {...feed},       priority: 1 },
+  { customization_spec: {...stories...},    image_label: {...vertical},   priority: 2 },
+  { customization_spec: {...horizontal...}, image_label: {...horizontal}, priority: 3 },
+  // catch-all (sem customization_spec)
+  { image_label: { name: "IMAGE_FEED" }, priority: 4 }
+]
+```
+
+Documentado como recomendação oficial nas docs Meta de *Asset
+Customization Rules*. Implementado em `criarCreativeImagem()` em
+`src/lib/meta-criar.ts` (commit `e4f2294`).
 
 ## Árvore de decisão (o que fazer no código)
 

@@ -64,6 +64,12 @@ description: |
 8. **Advantage+ creative enhancements**: OPT_OUT individual em
    `degrees_of_freedom_spec.creative_features_spec` (não
    `standard_enhancements` agregado — deprecado desde v22).
+9. **Multi-placement em ASC precisa de default rule** em
+   `asset_customization_rules` (sem `customization_spec`, fallback
+   feed). Sem ela, qualquer edit no Ads Manager dispara #1885876.
+   Ver [references/creatives.md](./references/creatives.md) §3 +
+   [references/errors-subcodes.md](./references/errors-subcodes.md)
+   §1885876.
 
 ---
 
@@ -146,11 +152,30 @@ Caso 3: objectStoreUrls + applicationId → isCrossChannelValido = true
 |---|---|---|---|
 | **Vídeo** | Form level | Form level | Em `video_data.call_to_action.value` |
 | **Imagem simples** | Form level | Form level | Em `link_data.call_to_action.value` |
-| **Imagem multi-placement** | **Form level** | **`asset_feed_spec.link_urls[0]`** | **`asset_feed_spec.link_urls[0]`** |
+| **Imagem multi-placement** | **Form level** | **Form level + `asset_feed_spec.link_urls[0]` (AMBOS)** | **`asset_feed_spec.link_urls[0]`** |
 
 **Regra trincada**: posição errada no multi-placement é subcode
 **2446461** (delivery error) ou erro #100. Não invente — copie da
 matriz. Detalhes em [references/cross-channel.md](./references/cross-channel.md).
+
+### 3.3b Editabilidade em Ads Manager (multi-placement em ASC)
+
+Pra ad multi-imagem em campanha Advantage+ Shopping (ASC) ser editável
+diretamente no Ads Manager (mudar legenda, link etc), o
+`asset_customization_rules` precisa de uma **default rule** sem
+`customization_spec`. Sem ela, qualquer edit dispara #1885876.
+
+```jsonc
+asset_customization_rules: [
+  { customization_spec: {...feed...},       image_label: {...}, priority: 1 },
+  { customization_spec: {...stories...},    image_label: {...}, priority: 2 },
+  { customization_spec: {...horizontal...}, image_label: {...}, priority: 3 },
+  // catch-all (Audience Network, Messenger, Threads, IG Reels Overlay/Explore Home, etc.)
+  { image_label: { name: "IMAGE_FEED" }, priority: 4 }
+]
+```
+
+Já implementado em `criarCreativeImagem()` (commit `e4f2294`).
 
 ### 3.4 Ad novo, subir de vez ou dar retry?
 
@@ -231,6 +256,10 @@ Receitas específicas em [`references/debugging-playbook.md`](./references/debug
 10. **SEMPRE** armazenar `meta_account_id` com prefixo `act_`.
 11. **SEMPRE** ler a atual versão da API (`META_API_VERSION`)
     antes de citar campos ou usar endpoints.
+12. **SEMPRE** incluir default rule (sem `customization_spec`) em
+    `asset_customization_rules` quando o ad for multi-placement em
+    campanha Advantage+. Caso contrário, edits no Ads Manager
+    quebram com #1885876.
 
 ---
 

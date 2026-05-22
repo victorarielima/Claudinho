@@ -34,6 +34,12 @@ API ocasionalmente omite `application_id` aninhado mesmo quando o
 adset é cross-channel — o resultado é um ad com "URL do site" mas
 "Deep link" vazio, e #100/#1885876 quando o operador edita manualmente.
 
+> Nota: #1885876 tem **dois gatilhos distintos**. O cenário acima
+> (cross-channel ghost link) é um. O outro é gap de cobertura de
+> `asset_customization_rules` em campanha ASC — ver
+> [errors-subcodes.md](./errors-subcodes.md), war story de 2026-05-22.
+> Fix do gap é a default rule (commit `e4f2294`).
+
 Response quando é cross-channel:
 
 ```jsonc
@@ -166,3 +172,6 @@ Ver [creatives.md § 3](./creatives.md) para o payload completo.
 | `135c4b3` | `isCrossChannelValido()` + URLs corretas |
 | `aba1d95` | URL universal do site para iOS/Android |
 | `aacfe13` | `verificarIssuesAd()` + `deletarAdMeta()` |
+| `6ba3c85` | `omnichannel_link_spec` form-level + `link_urls[0]` (ambos) |
+| `e4f2294` | Default rule em `asset_customization_rules` — destrava edits em ASC (#1885876, gatilho de gap de placements) |
+| `46a29ed` | Classifica #1885876 em `interpretarErroMeta()` |

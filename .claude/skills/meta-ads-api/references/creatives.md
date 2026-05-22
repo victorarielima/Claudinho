@@ -121,17 +121,23 @@ asset_feed_spec = {
         "publisher_platforms": ["facebook","instagram"],
         "facebook_positions": ["feed","marketplace","search"],
         "instagram_positions": ["stream","explore","profile_feed"]
-      }, "image_label": { "name": "IMAGE_FEED" } },
+      }, "image_label": { "name": "IMAGE_FEED" }, "priority": 1 },
     { "customization_spec": {
         "publisher_platforms": ["facebook","instagram"],
         "facebook_positions": ["story","facebook_reels"],
         "instagram_positions": ["story","reels"]
-      }, "image_label": { "name": "IMAGE_VERTICAL" } },
+      }, "image_label": { "name": "IMAGE_VERTICAL" }, "priority": 2 },
     { "customization_spec": {
         "publisher_platforms": ["facebook"],
         "facebook_positions": ["instant_article","right_hand_column",
                                "suggested_video","video_feeds"]
-      }, "image_label": { "name": "IMAGE_HORIZONTAL" } }
+      }, "image_label": { "name": "IMAGE_HORIZONTAL" }, "priority": 3 },
+    // Default rule (catch-all) — OBRIGATÓRIA pra editabilidade em ASC.
+    // Sem customization_spec, pega qualquer placement do Advantage+ que
+    // nao caiu nas regras acima (Audience Network, Messenger, Threads,
+    // IG Reels Overlay/Explore Home, FB Instream Video). Sem ela, edits
+    // manuais no Ads Manager disparam #1885876.
+    { "image_label": { "name": "IMAGE_FEED" }, "priority": 4 }
   ]
 }
 

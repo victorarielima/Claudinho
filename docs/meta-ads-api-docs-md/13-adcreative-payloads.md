@@ -169,7 +169,8 @@ asset_feed_spec = {
         "facebook_positions": ["feed", "marketplace", "search"],
         "instagram_positions": ["stream", "explore", "profile_feed"]
       },
-      "image_label": { "name": "IMAGE_FEED" }
+      "image_label": { "name": "IMAGE_FEED" },
+      "priority": 1
     },
     {
       "customization_spec": {
@@ -177,7 +178,8 @@ asset_feed_spec = {
         "facebook_positions": ["story", "facebook_reels"],
         "instagram_positions": ["story", "reels"]
       },
-      "image_label": { "name": "IMAGE_VERTICAL" }
+      "image_label": { "name": "IMAGE_VERTICAL" },
+      "priority": 2
     },
     {
       "customization_spec": {
@@ -185,7 +187,18 @@ asset_feed_spec = {
         "facebook_positions": ["instant_article", "right_hand_column",
                               "suggested_video", "video_feeds"]
       },
-      "image_label": { "name": "IMAGE_HORIZONTAL" }
+      "image_label": { "name": "IMAGE_HORIZONTAL" },
+      "priority": 3
+    },
+    // ⚠ Default rule (catch-all, sem customization_spec) — OBRIGATÓRIA
+    // em ASC. Cobre placements implícitos do Advantage+ (Audience
+    // Network, Messenger, Threads, IG Reels Overlay/Explore Home, FB
+    // Instream Video). Sem ela, edits no Ads Manager disparam #1885876
+    // ao tentar salvar qualquer alteração. Detalhes em
+    // 10-cross-channel-omnichannel.md § "Default rule".
+    {
+      "image_label": { "name": "IMAGE_FEED" },
+      "priority": 4
     }
   ]
 }
