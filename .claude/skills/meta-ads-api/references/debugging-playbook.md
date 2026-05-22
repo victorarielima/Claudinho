@@ -75,6 +75,35 @@ curl -X DELETE "https://graph.facebook.com/v23.0/{ad_id}?access_token=$TOKEN"
 Cleanup obrigatório: ads em teste deixam lixo na conta Advantage+
 (limite 150). Sempre deletar após confirmar.
 
+## Fluxo: "edição no Ads Manager quebra com #1885876"
+
+Sintoma: operador edita qualquer campo (até 1 letra na legenda) num ad
+publicado pelo Claudinho e o Ads Manager rejeita com *"Estamos com
+problemas para adicionar mais posicionamentos a esse anúncio..."*.
+
+Procedimento de diagnóstico (replicável via curl, sem precisar de
+script dedicado):
+
+```sh
+# 1) Inspecionar o creative — qual path foi usado?
+curl "https://graph.facebook.com/v23.0/{ad_id}?fields=creative{id,object_type,asset_feed_spec,applink_treatment,omnichannel_link_spec}&access_token=$TOKEN"
+
+# 2) Inspecionar o adset — é ASC com Advantage+ Placements?
+curl "https://graph.facebook.com/v23.0/{adset_id}?fields=targeting{publisher_platforms,facebook_positions,instagram_positions,audience_network_positions,messenger_positions},promoted_object,bid_strategy,optimization_goal&access_token=$TOKEN"
+```
+
+Decisão:
+
+| Combinação | Gatilho | Fix |
+|---|---|---|
+| `creative.object_type = SHARE` (asset_feed_spec) + adset sem `publisher_platforms` explícito | **(a) Gap de placements em ASC.** Customization rules cobrem só FB/IG; Advantage+ ativa Audience Network/Messenger/Threads também. | Default rule (já em `criarCreativeImagem()` desde commit `e4f2294`). Ad pré-fix precisa ser recriado. |
+| `creative.omnichannel_link_spec` vazio mas adset tem `promoted_object.omnichannel_object` | **(b) Cross-channel ghost link.** Ad subiu sem applink/spec. | `omnichannel_link_spec` form-level + `link_urls[0]` (commit `6ba3c85`). Ad pré-fix precisa ser recriado. |
+| Creative completo (asset_feed_spec com default rule + omnichannel_link_spec em ambos) | **Bug residual do editor da Meta.** Sem fix de código. | Operacional: duplicar o ad no Ads Manager e editar a cópia, OU recriar pelo Claudinho. |
+
+Confirmado ao vivo em 2026-05-22 contra creative `927204320375938`
+(ad `6934174404797`, Evino ASCPremium): gatilho (a), `asset_customization_rules`
+cobrindo 14 placements vs ASC implicitamente cobrindo ~25.
+
 ## Fluxo: "pipeline trava em processing"
 
 1. Ver no banco: `SELECT * FROM ads WHERE status='processando' AND
