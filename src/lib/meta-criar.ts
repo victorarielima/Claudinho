@@ -622,10 +622,33 @@ export async function criarCreativeImagem(
     adlabels: [{ name: labels[placement] }],
   }));
 
-  const assetCustomizationRules = Array.from(imagensPorPlacement.entries()).map(([placement]) => ({
+  // Default rule (sem `customization_spec`) age como catch-all pra qualquer
+  // placement que nao caia nas regras explicitas — Audience Network,
+  // Messenger, Threads, IG Reels Overlay/Explore Home, FB Instream Video,
+  // etc. Sem ela, edits manuais no Ads Manager em campanhas Advantage+ (ASC)
+  // disparam #1885876 ("trouble adding more placements"): a UI tenta
+  // expandir o asset_feed_spec pra cobrir todos os placements implicitos do
+  // adset, nao acha rule pra eles, e quebra. Recomendacao oficial em Meta
+  // Asset Customization Rules docs. Fallback usa a imagem de feed (1:1, mais
+  // universal); cai pra stories ou horizontal se feed nao existir.
+  const fallbackPlacement: PlacementImagemNormalizado = imagensPorPlacement.has("feed")
+    ? "feed"
+    : imagensPorPlacement.has("stories")
+    ? "stories"
+    : "horizontal";
+  const assetCustomizationRules: Array<{
+    customization_spec?: Record<string, unknown>;
+    image_label: { name: string };
+    priority: number;
+  }> = Array.from(imagensPorPlacement.entries()).map(([placement], idx) => ({
     customization_spec: PLACEMENT_RULES[placement],
     image_label: { name: labels[placement] },
+    priority: idx + 1,
   }));
+  assetCustomizationRules.push({
+    image_label: { name: labels[fallbackPlacement] },
+    priority: assetCustomizationRules.length + 1,
+  });
 
   // Cross-channel multi-placement — posição testada de cada campo:
   //
