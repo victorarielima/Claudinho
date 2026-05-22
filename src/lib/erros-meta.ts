@@ -54,6 +54,12 @@ const REGRAS: RegraErro[] = [
     marcadores: ["2446461", "omnichannel_link_spec needs to be within"],
   },
   {
+    tipo: "Edição manual quebrou o anúncio no Ads Manager",
+    explicacao:
+      "Esse erro aparece quando alguém edita um anúncio (mesmo 1 letra na legenda) direto no Ads Manager da Meta, em campanha Advantage+ (ASC). A UI da Meta tenta re-validar todos os posicionamentos do criativo e falha. Não é problema do Claudinho — é uma limitação do editor da Meta. Para corrigir: recrie o anúncio pelo Claudinho com o texto novo, ou duplique no Ads Manager e edite a cópia.",
+    marcadores: ["1885876", "adicionar mais posicionamentos", "having trouble adding more placements"],
+  },
+  {
     tipo: "Vídeo ainda processando",
     explicacao:
       "O Meta ainda está processando o vídeo. Aguarde alguns instantes e tente novamente; vídeos grandes podem levar até alguns minutos.",
