@@ -622,22 +622,31 @@ export async function criarCreativeImagem(
     adlabels: [{ name: labels[placement] }],
   }));
 
-  // Default rule (sem `customization_spec`) age como catch-all pra qualquer
-  // placement que nao caia nas regras explicitas — Audience Network,
-  // Messenger, Threads, IG Reels Overlay/Explore Home, FB Instream Video,
-  // etc. Sem ela, edits manuais no Ads Manager em campanhas Advantage+ (ASC)
-  // disparam #1885876 ("trouble adding more placements"): a UI tenta
-  // expandir o asset_feed_spec pra cobrir todos os placements implicitos do
-  // adset, nao acha rule pra eles, e quebra. Recomendacao oficial em Meta
-  // Asset Customization Rules docs. Fallback usa a imagem de feed (1:1, mais
-  // universal); cai pra stories ou horizontal se feed nao existir.
+  // Default rule (catch-all com `customization_spec: {}`) cobre placements
+  // que nao caem nas regras explicitas — Audience Network, Messenger,
+  // Threads, IG Reels Overlay/Explore Home, FB Instream Video, etc. Sem ela,
+  // edits manuais no Ads Manager em campanhas Advantage+ (ASC) disparam
+  // #1885876 ("trouble adding more placements"): a UI tenta expandir o
+  // asset_feed_spec pra cobrir todos os placements implicitos do adset, nao
+  // acha rule pra eles, e quebra.
+  //
+  // ⚠️  IMPORTANTE: a chave `customization_spec` precisa estar presente
+  //     (mesmo que vazia `{}`). Ate ~27/05/2026 a Meta aceitava a chave
+  //     omissa; depois disso comecou a rejeitar com `code 100 / subcode
+  //     1487390` ("Adcreative Create Failed: Something went wrong") — erro
+  //     generico que mascara a validacao real. Confirmado por bisseccao
+  //     via `execution_options=[validate_only]` no /adcreatives (war story
+  //     2026-05-27, ads EST-Prod-LupoMeravigliaTreDiTre114*-W21-2026).
+  //     `customization_spec: {}` significa "match anything" — preserva o
+  //     intent do catch-all original. Fallback usa a imagem de feed (1:1,
+  //     mais universal); cai pra stories ou horizontal se feed nao existir.
   const fallbackPlacement: PlacementImagemNormalizado = imagensPorPlacement.has("feed")
     ? "feed"
     : imagensPorPlacement.has("stories")
     ? "stories"
     : "horizontal";
   const assetCustomizationRules: Array<{
-    customization_spec?: Record<string, unknown>;
+    customization_spec: Record<string, unknown>;
     image_label: { name: string };
     priority: number;
   }> = Array.from(imagensPorPlacement.entries()).map(([placement], idx) => ({
@@ -646,6 +655,7 @@ export async function criarCreativeImagem(
     priority: idx + 1,
   }));
   assetCustomizationRules.push({
+    customization_spec: {}, // catch-all — NAO omitir esta chave (ver acima)
     image_label: { name: labels[fallbackPlacement] },
     priority: assetCustomizationRules.length + 1,
   });

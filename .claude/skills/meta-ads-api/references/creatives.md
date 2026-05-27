@@ -133,11 +133,16 @@ asset_feed_spec = {
                                "suggested_video","video_feeds"]
       }, "image_label": { "name": "IMAGE_HORIZONTAL" }, "priority": 3 },
     // Default rule (catch-all) — OBRIGATÓRIA pra editabilidade em ASC.
-    // Sem customization_spec, pega qualquer placement do Advantage+ que
-    // nao caiu nas regras acima (Audience Network, Messenger, Threads,
-    // IG Reels Overlay/Explore Home, FB Instream Video). Sem ela, edits
-    // manuais no Ads Manager disparam #1885876.
-    { "image_label": { "name": "IMAGE_FEED" }, "priority": 4 }
+    // `customization_spec: {}` (vazio) pega qualquer placement do
+    // Advantage+ que nao caiu nas regras acima (Audience Network,
+    // Messenger, Threads, IG Reels Overlay/Explore Home, FB Instream
+    // Video). Sem ela, edits manuais no Ads Manager disparam #1885876.
+    //
+    // ⚠️  NAO OMITIR `customization_spec`. Ate ~27/05/2026 a Meta aceitava
+    //     a chave omissa; depois passou a rejeitar com code 100 / subcode
+    //     1487390 ("Adcreative Create Failed: Something went wrong",
+    //     is_transient=false). Ver war story em errors-subcodes.md.
+    { "customization_spec": {}, "image_label": { "name": "IMAGE_FEED" }, "priority": 4 }
   ]
 }
 

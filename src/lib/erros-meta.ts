@@ -60,6 +60,12 @@ const REGRAS: RegraErro[] = [
     marcadores: ["1885876", "adicionar mais posicionamentos", "having trouble adding more placements"],
   },
   {
+    tipo: "Default rule no asset_customization_rules sem customization_spec",
+    explicacao:
+      "O Meta passou a rejeitar (~27/05/2026) regras de catch-all em asset_customization_rules quando a chave customization_spec é OMISSA, em vez de presente-mas-vazia ({}). O erro vem mascarado como 'Adcreative Create Failed: Something went wrong. Please try again later' (code 100 / subcode 1487390 / is_transient=false). Isolado por bissecção via execution_options=[validate_only]. Fix em meta-criar.ts: a default rule agora envia customization_spec: {} explicitamente. Se você está vendo essa mensagem em ad novo após o fix subir, abra issue — é regressão.",
+    marcadores: ["1487390", "Adcreative Create Failed", /Something went wrong\. Please try again later/i],
+  },
+  {
     tipo: "Vídeo ainda processando",
     explicacao:
       "O Meta ainda está processando o vídeo. Aguarde alguns instantes e tente novamente; vídeos grandes podem levar até alguns minutos.",
