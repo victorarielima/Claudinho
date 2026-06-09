@@ -1,0 +1,488 @@
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
+import { baixarArquivoDrive } from "@/lib/drive";
+import {
+  uploadVideo,
+  uploadImage,
+  verificarStatusVideo,
+  criarCreativeVideo,
+  criarCreativeImagem,
+  criarAnuncio,
+  buscarAccountIdDoAdSet,
+  buscarCrossChannelInfo,
+  buscarInstagramActorId,
+  verificarIssuesAd,
+  deletarAdMeta,
+  type ImagemPlacement,
+} from "@/lib/meta-criar";
+import {
+  buscarAd,
+  buscarBrand,
+  atualizarStatusAd,
+  atualizarMetaAssetId,
+  type Ad,
+  type AdAsset,
+} from "@/lib/db";
+import { normalizarPlacementImagem } from "@/lib/ad-media";
+import { getSupabase } from "@/lib/supabase";
+import { logger } from "@/lib/logger";
+
+// --- Page ID resolution ---
+
+const PAGE_IDS_POR_CONTA: Record<string, string | undefined> = {
+  [process.env.META_AD_ACCOUNT_EVINO ?? ""]: process.env.META_PAGE_ID_EVINO,
+  [process.env.META_AD_ACCOUNT_GRANDCRU ?? ""]: process.env.META_PAGE_ID_GRANDCRU,
+};
+
+function resolverPageId(pageIdExplicito: string | null, accountId: string): string | null {
+  if (pageIdExplicito && pageIdExplicito.trim()) {
+    return pageIdExplicito.trim();
+  }
+  return PAGE_IDS_POR_CONTA[accountId] ?? null;
+}
+
+// --- Types ---
+
+type ProcessarStep =
+  | "uploaded"
+  | "processing_video"
+  | "creative_created"
+  | "completed"
+  | "error";
+
+interface ProcessarResponse {
+  step: ProcessarStep;
+  status: string;
+  adId: string;
+  meta_ad_id?: string;
+  accountId?: string;
+  progress?: string;
+  message?: string;
+}
+
+// --- POST handler ---
+
+export async function POST(request: NextRequest) {
+  const { userId } = await auth();
+  const body = await request.json();
+  const adId = body.adId as string | undefined;
+
+  if (!adId) {
+    return NextResponse.json({ erro: "adId e obrigatorio" }, { status: 400 });
+  }
+
+  try {
+    const ad = await buscarAd(adId);
+    if (!ad) {
+      return NextResponse.json({ erro: "Ad nao encontrado" }, { status: 404 });
+    }
+
+    // Already completed
+    if (ad.status === "concluido") {
+      return NextResponse.json({
+        step: "completed",
+        status: "concluido",
+        adId: ad.id,
+        meta_ad_id: ad.meta_ad_id ?? undefined,
+      } satisfies ProcessarResponse);
+    }
+
+    // Error state
+    if (ad.status === "erro") {
+      return NextResponse.json({
+        step: "error",
+        status: "erro",
+        adId: ad.id,
+        message: ad.error_message ?? "Erro desconhecido",
+      } satisfies ProcessarResponse);
+    }
+
+    // Not in processando state - shouldn't be called
+    if (ad.status !== "processando") {
+      return NextResponse.json(
+        { erro: "Ad nao esta em estado de processamento" },
+        { status: 400 }
+      );
+    }
+
+    // Resolve account ID - use stored one or fetch from adset
+    const accountId = ad.meta_account_id
+      ? (ad.meta_account_id.startsWith("act_") ? ad.meta_account_id : `act_${ad.meta_account_id}`)
+      : await buscarAccountIdDoAdSet(ad.ad_set_id!);
+
+    // Ensure meta_account_id is stored with act_ prefix (QW-13)
+    if (!ad.meta_account_id || !ad.meta_account_id.startsWith("act_")) {
+      await atualizarStatusAd(
+        ad.id,
+        "processando",
+        { meta_account_id: accountId },
+        userId ?? "system"
+      );
+    }
+
+    const assets = ad.ad_assets ?? [];
+
+    // --- Step determination based on current state ---
+
+    // Step D: Has creative, needs ad creation
+    if (ad.meta_creative_id && !ad.meta_ad_id) {
+      return await stepCriarAnuncio(ad, accountId, userId);
+    }
+
+    // Step A/B/C: No creative yet
+    if (!ad.meta_creative_id) {
+      const allAssetsUploaded = checkAllAssetsUploaded(ad.type, assets);
+
+      // Step A: Assets not uploaded yet - download and upload
+      if (!allAssetsUploaded) {
+        return await stepUploadAssets(ad, accountId, assets, userId);
+      }
+
+      // Step B: Video type - check if Meta finished processing
+      if (ad.type === "video") {
+        const videoAsset = assets.find((a) => a.asset_type === "video");
+        if (videoAsset?.meta_asset_id) {
+          const videoStatus = await verificarStatusVideo(videoAsset.meta_asset_id);
+          if (!videoStatus.ready) {
+            return NextResponse.json({
+              step: "processing_video",
+              status: "processando",
+              adId: ad.id,
+              progress: videoStatus.status,
+            } satisfies ProcessarResponse);
+          }
+        }
+      }
+
+      // Step C: All assets uploaded (and video ready if applicable) - create creative
+      return await stepCriarCreative(ad, accountId, assets, userId);
+    }
+
+    // Fallback - already completed
+    return NextResponse.json({
+      step: "completed",
+      status: "concluido",
+      adId: ad.id,
+      meta_ad_id: ad.meta_ad_id ?? undefined,
+    } satisfies ProcessarResponse);
+  } catch (error) {
+    const mensagem = error instanceof Error ? error.message : "Erro desconhecido";
+
+    logger.error("Erro no pipeline de processamento", {
+      fn: "processar",
+      adId,
+      error: mensagem,
+    });
+
+    try {
+      await atualizarStatusAd(
+        adId,
+        "erro",
+        { error_message: mensagem },
+        userId ?? "system"
+      );
+    } catch (dbError) {
+      logger.error("Falha ao gravar erro no banco — ad pode ficar preso em 'processando'", {
+        fn: "processar",
+        adId,
+        originalError: mensagem,
+        dbError: dbError instanceof Error ? dbError.message : "Erro DB desconhecido",
+      });
+    }
+
+    return NextResponse.json(
+      {
+        step: "error",
+        status: "erro",
+        adId,
+        message: mensagem,
+      } satisfies ProcessarResponse,
+      { status: 500 }
+    );
+  }
+}
+
+// --- Step A: Upload assets to Meta ---
+
+async function stepUploadAssets(
+  ad: Ad,
+  accountId: string,
+  assets: AdAsset[],
+  _userId: string | null
+): Promise<NextResponse> {
+  logger.info("Step A: Upload assets", { fn: "stepUploadAssets", adId: ad.id, type: ad.type, accountId });
+
+  if (ad.type === "video") {
+    const videoAsset = assets.find((a) => a.asset_type === "video");
+    if (!videoAsset) throw new Error("Asset de video nao encontrado no banco. Verifique se o anuncio foi criado corretamente.");
+
+    // Idempotency: skip if already uploaded
+    if (videoAsset.meta_asset_id) {
+      return NextResponse.json({
+        step: "uploaded",
+        status: "processando",
+        adId: ad.id,
+      } satisfies ProcessarResponse);
+    }
+
+    if (!videoAsset.asset_url || !videoAsset.asset_url.includes("drive.google.com")) {
+      throw new Error(`URL de video invalida: '${videoAsset.asset_url}'. Esperado um link do Google Drive.`);
+    }
+
+    let arquivo;
+    try {
+      arquivo = await baixarArquivoDrive(videoAsset.asset_url);
+    } catch (driveError) {
+      const msg = driveError instanceof Error ? driveError.message : "Erro desconhecido";
+      throw new Error(`Falha ao baixar video do Drive: ${msg}. Verifique se o arquivo existe e esta compartilhado.`);
+    }
+
+    const videoId = await uploadVideo(accountId, arquivo.buffer, arquivo.fileName, {
+      mimeType: arquivo.mimeType,
+      waitForReady: false,
+    });
+    await atualizarMetaAssetId(videoAsset.id, videoId);
+
+    return NextResponse.json({
+      step: "uploaded",
+      status: "processando",
+      adId: ad.id,
+    } satisfies ProcessarResponse);
+  } else {
+    // Image flow: upload all images that don't have meta_asset_id yet
+    const imageAssets = assets.filter((a) => a.asset_type === "image");
+    if (imageAssets.length === 0) throw new Error("Nenhum asset de imagem encontrado no banco. Verifique se o anuncio foi criado corretamente.");
+
+    const pendentes = imageAssets.filter((asset) => !asset.meta_asset_id);
+    const resultados = await Promise.allSettled(
+      pendentes.map(async (asset) => {
+        const hash = await uploadImage(accountId, asset.asset_url);
+        await atualizarMetaAssetId(asset.id, hash);
+      })
+    );
+
+    const falhas = resultados
+      .map((r, i) => r.status === "rejected" ? `${pendentes[i].placement}: ${r.reason instanceof Error ? r.reason.message : "erro"}` : null)
+      .filter(Boolean);
+
+    if (falhas.length > 0 && falhas.length === pendentes.length) {
+      throw new Error(`Falha ao enviar todas as imagens: ${falhas.join("; ")}`);
+    }
+    if (falhas.length > 0) {
+      logger.warn("Algumas imagens falharam no upload", { fn: "stepUploadAssets", adId: ad.id, falhas });
+    }
+
+    return NextResponse.json({
+      step: "uploaded",
+      status: "processando",
+      adId: ad.id,
+    } satisfies ProcessarResponse);
+  }
+}
+
+// --- Step C: Create creative ---
+
+async function stepCriarCreative(
+  ad: Ad,
+  accountId: string,
+  assets: AdAsset[],
+  userId: string | null
+): Promise<NextResponse> {
+  logger.info("Step C: Criar creative", { fn: "stepCriarCreative", adId: ad.id, type: ad.type });
+
+  // Idempotency: skip if already created
+  if (ad.meta_creative_id) {
+    return NextResponse.json({
+      step: "creative_created",
+      status: "processando",
+      adId: ad.id,
+    } satisfies ProcessarResponse);
+  }
+
+  const brand = await buscarBrand(ad.brand_id);
+  if (!brand) throw new Error(`Brand '${ad.brand_id}' nao encontrado. Verifique se a marca ainda existe.`);
+
+  const pageId = resolverPageId(brand.meta_page_id, accountId);
+  if (!pageId) throw new Error(`Page ID nao encontrado para a conta ${accountId}. Configure na brand ou nas variaveis de ambiente.`);
+
+  let creativeId: string;
+
+  // Buscar info cross-channel e Instagram actor ID em paralelo
+  const [crossChannel, instagramActorId] = await Promise.all([
+    ad.ad_set_id ? buscarCrossChannelInfo(ad.ad_set_id) : Promise.resolve(undefined),
+    buscarInstagramActorId(pageId),
+  ]);
+
+  if (ad.type === "video") {
+    const videoAsset = assets.find((a) => a.asset_type === "video");
+    if (!videoAsset?.meta_asset_id) throw new Error("Video nao foi enviado para o Meta. Tente subir novamente.");
+
+    creativeId = await criarCreativeVideo(accountId, {
+      pageId,
+      videoId: videoAsset.meta_asset_id,
+      message: ad.texto_principal || "",
+      title: ad.titulo || "",
+      linkDescription: ad.descricao || "",
+      ctaType: ad.cta || "SHOP_NOW",
+      link: ad.link_anuncio || "",
+      name: `Creative - ${ad.ad_name}`,
+      crossChannel,
+      instagramActorId,
+    });
+  } else {
+    // Re-fetch assets from DB to get updated meta_asset_id values
+    const freshAssets = await fetchFreshAssets(ad.id);
+    const freshImageAssets = freshAssets.filter((a) => a.asset_type === "image");
+
+    const imagensComHash: ImagemPlacement[] = freshImageAssets
+      .filter((asset) => asset.meta_asset_id)
+      .map((asset) => ({
+        imageHash: asset.meta_asset_id!,
+        placement: normalizarPlacementImagem(asset.placement, asset.asset_url),
+      }));
+
+    if (imagensComHash.length === 0) {
+      throw new Error("Nenhuma imagem com hash encontrada");
+    }
+
+    creativeId = await criarCreativeImagem(accountId, {
+      pageId,
+      imagens: imagensComHash,
+      message: ad.texto_principal || "",
+      title: ad.titulo || "",
+      linkDescription: ad.descricao || "",
+      ctaType: ad.cta || "SHOP_NOW",
+      link: ad.link_anuncio || "",
+      name: `Creative - ${ad.ad_name}`,
+      crossChannel,
+      instagramActorId,
+    });
+  }
+
+  // Store creative ID on the ad
+  await atualizarStatusAd(
+    ad.id,
+    "processando",
+    { meta_creative_id: creativeId },
+    userId ?? "system"
+  );
+
+  return NextResponse.json({
+    step: "creative_created",
+    status: "processando",
+    adId: ad.id,
+  } satisfies ProcessarResponse);
+}
+
+// --- Step D: Create ad on Meta ---
+
+async function stepCriarAnuncio(
+  ad: Ad,
+  accountId: string,
+  userId: string | null
+): Promise<NextResponse> {
+  logger.info("Step D: Criar anuncio no Meta", { fn: "stepCriarAnuncio", adId: ad.id, creativeId: ad.meta_creative_id });
+
+  // Idempotency: skip if already created
+  if (ad.meta_ad_id) {
+    return NextResponse.json({
+      step: "completed",
+      status: "concluido",
+      adId: ad.id,
+      meta_ad_id: ad.meta_ad_id,
+    } satisfies ProcessarResponse);
+  }
+
+  if (!ad.meta_creative_id) {
+    throw new Error("Creative ID nao encontrado. O passo anterior (criar creative) pode ter falhado.");
+  }
+
+  if (!ad.ad_set_id) {
+    throw new Error("Ad Set ID e obrigatorio para criar o anuncio na Meta.");
+  }
+
+  const metaAdId = await criarAnuncio(accountId, ad.ad_set_id, ad.ad_name, ad.meta_creative_id);
+
+  // Validação pós-criação: o Meta valida o ad asincronamente. Se houver
+  // delivery error (ex: cross-channel mal configurado), surge em
+  // issues_info dentro de alguns segundos. Pegando aqui evitamos que o
+  // ad fique "concluido" no banco mas quebrado no Meta — o usuário
+  // antes só descobriria ao rodar o sync depois.
+  const issueMessage = await verificarIssuesAd(metaAdId);
+  if (issueMessage) {
+    logger.error("Ad criado com delivery issue detectado em pós-validação", {
+      fn: "stepCriarAnuncio",
+      adId: ad.id,
+      metaAdId,
+      issue: issueMessage,
+    });
+    await atualizarStatusAd(
+      ad.id,
+      "erro",
+      {
+        meta_ad_id: metaAdId,
+        meta_creative_id: ad.meta_creative_id,
+        meta_account_id: accountId,
+        meta_effective_status: "WITH_ISSUES",
+        error_message: `Meta WITH_ISSUES: ${issueMessage}`,
+      },
+      userId ?? "system"
+    );
+    return NextResponse.json({
+      step: "error",
+      status: "erro",
+      adId: ad.id,
+      message: `Meta WITH_ISSUES: ${issueMessage}`,
+    } satisfies ProcessarResponse);
+  }
+
+  // Mark as completed with all meta IDs - keep act_ prefix (QW-13)
+  await atualizarStatusAd(
+    ad.id,
+    "concluido",
+    {
+      meta_ad_id: metaAdId,
+      meta_creative_id: ad.meta_creative_id,
+      meta_account_id: accountId,
+    },
+    userId ?? "system"
+  );
+
+  logger.info("Anuncio criado com sucesso na Meta", {
+    fn: "stepCriarAnuncio",
+    adId: ad.id,
+    metaAdId,
+    accountId,
+  });
+
+  return NextResponse.json({
+    step: "completed",
+    status: "concluido",
+    adId: ad.id,
+    meta_ad_id: metaAdId,
+    accountId: accountId.replace("act_", ""),
+  } satisfies ProcessarResponse);
+}
+
+// --- Helpers ---
+
+function checkAllAssetsUploaded(type: string, assets: AdAsset[]): boolean {
+  if (type === "video") {
+    const videoAsset = assets.find((a) => a.asset_type === "video");
+    return Boolean(videoAsset?.meta_asset_id);
+  }
+  // Image: all image assets must have meta_asset_id
+  const imageAssets = assets.filter((a) => a.asset_type === "image");
+  return imageAssets.length > 0 && imageAssets.every((a) => a.meta_asset_id);
+}
+
+async function fetchFreshAssets(adId: string): Promise<AdAsset[]> {
+  const sb = getSupabase();
+  const { data, error } = await sb
+    .from("ad_assets")
+    .select("*")
+    .eq("ad_id", adId);
+
+  if (error) throw new Error(`Erro ao buscar assets: ${error.message}`);
+  return (data ?? []) as AdAsset[];
+}

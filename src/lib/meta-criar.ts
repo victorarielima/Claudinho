@@ -1,0 +1,1271 @@
+import { normalizarPlacementImagem } from "./ad-media";
+import { META_API_BASE, getAccessToken, extrairErroMeta } from "./meta-config";
+import { logger } from "./logger";
+import { metaFetchWithRetry, safeResponseJson } from "./meta-retry";
+
+// ─── Video Upload ───────────────────────────────────────────
+
+// Threshold for chunked upload (50 MB)
+const CHUNKED_UPLOAD_THRESHOLD = 50 * 1024 * 1024;
+// Chunk size for transfer phase (4 MB — Meta recommends between 1–50 MB)
+const CHUNK_SIZE = 4 * 1024 * 1024;
+
+// Timeouts: video uploads moved a lot of bytes per request, so they need
+// a larger ceiling than the default 30s used by metaFetchWithRetry.
+const UPLOAD_SIMPLES_TIMEOUT_MS = 120_000; // single POST up to ~50 MB
+const UPLOAD_CHUNK_TIMEOUT_MS = 60_000;    // per 4 MB chunk
+
+export interface UploadVideoOpts {
+  mimeType?: string;
+  /**
+   * Whether to block until Meta finishes processing the video (polls
+   * /{video-id}?fields=status). Default `true` (safer for one-shot flows).
+   * The Supabase-driven pipeline in /api/meta/processar passes `false`
+   * and polls separately between Steps A/B so the HTTP request can return
+   * quickly.
+   */
+  waitForReady?: boolean;
+}
+
+/**
+ * Meta's /advideos parser uses the filename extension to infer the
+ * container format. Files without `.mp4`/`.mov`/`.m4v` are rejected with
+ * the misleading "format isn't supported" (code 352 / subcode 1363024)
+ * even when the bytes are valid H.264/AAC MP4. After Effects/Premiere
+ * exports occasionally land in Drive without an extension, which is what
+ * this protects against. War story: 2026-04-30, ad VID-0-IlMondoItalia
+ * (Drive name "30_ABR_GC_MOTION IL MONDO ITÁLIA " — trailing space, no
+ * extension). Test matrix in `.claude/skills/meta-ads-api/references/
+ * errors-subcodes.md` confirmed it's the missing extension, not spaces
+ * or accents.
+ */
+function ensureVideoExtension(fileName: string, mimeType: string): string {
+  const trimmed = fileName.trim();
+  if (/\.(mp4|mov|m4v)$/i.test(trimmed)) return trimmed;
+  const ext = mimeType === "video/quicktime" ? ".mov" : ".mp4";
+  return `${trimmed}${ext}`;
+}
+
+export async function uploadVideo(
+  accountId: string,
+  videoBuffer: Buffer,
+  fileName: string,
+  opts: UploadVideoOpts = {}
+): Promise<string> {
+  const { mimeType = "video/mp4", waitForReady = true } = opts;
+  const safeFileName = ensureVideoExtension(fileName, mimeType);
+
+  logger.info("Uploading video to Meta", {
+    fn: "uploadVideo",
+    accountId,
+    fileName,
+    safeFileName,
+    sizeBytes: videoBuffer.byteLength,
+    waitForReady,
+  });
+  const startMs = Date.now();
+
+  const videoId = videoBuffer.byteLength >= CHUNKED_UPLOAD_THRESHOLD
+    ? await uploadVideoChunked(accountId, videoBuffer, safeFileName, mimeType)
+    : await uploadVideoSimples(accountId, videoBuffer, safeFileName, mimeType);
+
+  const elapsedMs = Date.now() - startMs;
+  logger.info("Video uploaded successfully", {
+    fn: "uploadVideo",
+    accountId,
+    fileName: safeFileName,
+    videoId,
+    elapsedMs,
+  });
+
+  if (waitForReady) {
+    await aguardarProcessamentoVideo(videoId);
+  }
+
+  return videoId;
+}
+
+async function uploadVideoSimples(
+  accountId: string,
+  videoBuffer: Buffer,
+  fileName: string,
+  mimeType: string
+): Promise<string> {
+  const token = getAccessToken();
+  const url = `${META_API_BASE}/${accountId}/advideos`;
+
+  const formData = new FormData();
+  const arrayBuffer = videoBuffer.buffer.slice(
+    videoBuffer.byteOffset,
+    videoBuffer.byteOffset + videoBuffer.byteLength
+  ) as ArrayBuffer;
+  const blob = new Blob([arrayBuffer], { type: mimeType });
+  formData.append("source", blob, fileName);
+  formData.append("title", fileName);
+  formData.append("access_token", token);
+
+  const res = await metaFetchWithRetry(
+    url,
+    { method: "POST", body: formData },
+    { timeoutMs: UPLOAD_SIMPLES_TIMEOUT_MS }
+  );
+
+  const json = await safeResponseJson(res);
+  if (!res.ok || json.error) {
+    logger.error("Video upload failed", {
+      fn: "uploadVideoSimples",
+      accountId,
+      fileName,
+      error: extrairErroMeta(json),
+    });
+    throw new Error(`Erro ao fazer upload do vídeo: ${extrairErroMeta(json)}`);
+  }
+
+  return json.id;
+}
+
+/**
+ * Chunked upload using Meta's 3-phase protocol:
+ * 1. Start — declares file size, gets upload_session_id
+ * 2. Transfer — sends chunks sequentially
+ * 3. Finish — finalises upload, returns video_id
+ */
+async function uploadVideoChunked(
+  accountId: string,
+  videoBuffer: Buffer,
+  fileName: string,
+  mimeType: string
+): Promise<string> {
+  const token = getAccessToken();
+  const url = `${META_API_BASE}/${accountId}/advideos`;
+  const fileSize = videoBuffer.byteLength;
+
+  logger.info("Using chunked upload", {
+    fn: "uploadVideoChunked",
+    accountId,
+    fileName,
+    fileSize,
+    chunkSize: CHUNK_SIZE,
+    chunks: Math.ceil(fileSize / CHUNK_SIZE),
+  });
+
+  // Phase 1: Start
+  const startParams = new URLSearchParams({
+    upload_phase: "start",
+    file_size: String(fileSize),
+    access_token: token,
+  });
+
+  const startRes = await metaFetchWithRetry(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: startParams.toString(),
+  });
+  const startJson = await safeResponseJson(startRes);
+  if (!startRes.ok || startJson.error) {
+    throw new Error(`Erro ao iniciar upload chunked: ${extrairErroMeta(startJson)}`);
+  }
+
+  const sessionId = startJson.upload_session_id as string;
+  const videoId = startJson.video_id as string;
+  if (!sessionId) {
+    throw new Error("Meta não retornou upload_session_id na fase start");
+  }
+  if (!videoId) {
+    throw new Error("Meta não retornou video_id na fase start");
+  }
+
+  // Phase 2: Transfer chunks
+  let offset = 0;
+  let chunkIndex = 0;
+  while (offset < fileSize) {
+    const end = Math.min(offset + CHUNK_SIZE, fileSize);
+    const chunk = videoBuffer.subarray(offset, end);
+
+    const formData = new FormData();
+    formData.append("upload_phase", "transfer");
+    formData.append("upload_session_id", sessionId);
+    formData.append("start_offset", String(offset));
+    formData.append("video_file_chunk", new Blob([new Uint8Array(chunk)], { type: mimeType }), fileName);
+    formData.append("access_token", token);
+
+    const chunkRes = await metaFetchWithRetry(
+      url,
+      { method: "POST", body: formData },
+      { timeoutMs: UPLOAD_CHUNK_TIMEOUT_MS }
+    );
+    const chunkJson = await safeResponseJson(chunkRes);
+    if (!chunkRes.ok || chunkJson.error) {
+      throw new Error(`Erro no chunk ${chunkIndex} do upload: ${extrairErroMeta(chunkJson)}`);
+    }
+
+    // Meta returns the start_offset for the next chunk
+    offset = Number(chunkJson.start_offset ?? end);
+    chunkIndex++;
+
+    logger.debug("Chunk uploaded", {
+      fn: "uploadVideoChunked",
+      sessionId,
+      chunkIndex,
+      offset,
+      fileSize,
+    });
+  }
+
+  // Phase 3: Finish
+  const finishParams = new URLSearchParams({
+    upload_phase: "finish",
+    upload_session_id: sessionId,
+    title: fileName,
+    access_token: token,
+  });
+
+  const finishRes = await metaFetchWithRetry(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: finishParams.toString(),
+  });
+  const finishJson = await safeResponseJson(finishRes);
+  if (!finishRes.ok || finishJson.error) {
+    throw new Error(`Erro ao finalizar upload chunked: ${extrairErroMeta(finishJson)}`);
+  }
+
+  return videoId;
+}
+
+async function aguardarProcessamentoVideo(videoId: string): Promise<void> {
+  const token = getAccessToken();
+  const maxTentativas = 30;
+  const intervaloBaseMs = 5_000;
+  const intervaloMaxMs = 15_000;
+
+  for (let tentativa = 0; tentativa < maxTentativas; tentativa++) {
+    const url = `${META_API_BASE}/${videoId}?fields=status&access_token=${token}`;
+    const res = await metaFetchWithRetry(url);
+    const json = await safeResponseJson(res);
+
+    if (json.error) {
+      logger.error("Error checking video processing status", {
+        fn: "aguardarProcessamentoVideo",
+        videoId,
+        attempt: tentativa + 1,
+        error: extrairErroMeta(json),
+      });
+      throw new Error(
+        `Erro ao verificar status do vídeo: ${extrairErroMeta(json)}`
+      );
+    }
+
+    const status = json.status?.video_status;
+
+    logger.debug("Video processing poll", {
+      fn: "aguardarProcessamentoVideo",
+      videoId,
+      attempt: tentativa + 1,
+      maxAttempts: maxTentativas,
+      status,
+    });
+
+    if (status === "ready") {
+      logger.info("Video processing complete", {
+        fn: "aguardarProcessamentoVideo",
+        videoId,
+        attempts: tentativa + 1,
+      });
+      return;
+    }
+
+    if (status === "error") {
+      logger.error("Video processing failed on Meta side", {
+        fn: "aguardarProcessamentoVideo",
+        videoId,
+        attempt: tentativa + 1,
+      });
+      throw new Error(
+        "O Meta não conseguiu processar o vídeo. Verifique o formato e tente novamente."
+      );
+    }
+
+    const espera = Math.min(
+      intervaloBaseMs + tentativa * 2_000,
+      intervaloMaxMs
+    );
+    await new Promise((resolve) => setTimeout(resolve, espera));
+  }
+
+  logger.error("Video processing timeout", {
+    fn: "aguardarProcessamentoVideo",
+    videoId,
+    maxAttempts: maxTentativas,
+  });
+  throw new Error(
+    "Timeout: o vídeo não ficou pronto após 5 minutos. Tente novamente mais tarde."
+  );
+}
+
+/**
+ * Single-check variant of `aguardarProcessamentoVideo` used by the
+ * pipeline in /api/meta/processar — the client polls, so we return
+ * immediately instead of blocking the HTTP request.
+ */
+export async function verificarStatusVideo(
+  videoId: string
+): Promise<{ ready: boolean; status: string }> {
+  const token = getAccessToken();
+  const url = `${META_API_BASE}/${videoId}?fields=status&access_token=${token}`;
+  const res = await metaFetchWithRetry(url);
+  const json = await safeResponseJson(res);
+
+  if (json.error) {
+    throw new Error(
+      `Erro ao verificar status do vídeo: ${extrairErroMeta(json)}`
+    );
+  }
+
+  const status: string = json.status?.video_status ?? "unknown";
+
+  if (status === "error") {
+    throw new Error(
+      "O Meta não conseguiu processar o vídeo. Verifique o formato e tente novamente."
+    );
+  }
+
+  return { ready: status === "ready", status };
+}
+
+async function buscarThumbnailVideo(videoId: string): Promise<string> {
+  const token = getAccessToken();
+  const url = `${META_API_BASE}/${videoId}?fields=picture,thumbnails&access_token=${token}`;
+
+  const res = await metaFetchWithRetry(url);
+  const json = await safeResponseJson(res);
+
+  if (json.error) {
+    logger.error("Failed to fetch video thumbnail", {
+      fn: "buscarThumbnailVideo",
+      videoId,
+      error: extrairErroMeta(json),
+    });
+    throw new Error(
+      `Erro ao buscar thumbnail do vídeo: ${extrairErroMeta(json)}`
+    );
+  }
+
+  const preferido = json.thumbnails?.data?.find(
+    (t: { is_preferred?: boolean }) => t.is_preferred
+  );
+  if (preferido?.uri) return preferido.uri;
+  if (json.thumbnails?.data?.[0]?.uri) return json.thumbnails.data[0].uri;
+  if (json.picture) return json.picture;
+
+  throw new Error("Não foi possível obter thumbnail do vídeo.");
+}
+
+// ─── Image Upload ───────────────────────────────────────────
+
+/**
+ * Faz upload de uma imagem para o Meta a partir de uma URL pública (Cloudinary).
+ * Baixa a imagem e envia como multipart/form-data (o método `url` requer permissões
+ * avançadas do app; multipart funciona com qualquer app em modo desenvolvimento).
+ * Retorna o image_hash necessário para criar o creative.
+ */
+export async function uploadImage(
+  accountId: string,
+  imageUrl: string
+): Promise<string> {
+  const token = getAccessToken();
+  const endpoint = `${META_API_BASE}/${accountId}/adimages`;
+
+  // Baixar a imagem da URL pública
+  const imgRes = await fetch(imageUrl);
+  if (!imgRes.ok) {
+    throw new Error(`Erro ao baixar imagem de ${imageUrl}: ${imgRes.status}`);
+  }
+  const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
+  const filename = imageUrl.split("/").pop()?.split("?")[0] || "image.jpg";
+
+  // Montar multipart/form-data
+  const formData = new FormData();
+  formData.append("filename", new Blob([imgBuffer]), filename);
+  formData.append("access_token", token);
+
+  logger.info("Uploading image to Meta", {
+    fn: "uploadImage",
+    accountId,
+    filename,
+    sizeBytes: imgBuffer.byteLength,
+  });
+
+  const res = await metaFetchWithRetry(endpoint, {
+    method: "POST",
+    body: formData,
+  });
+
+  const json = await safeResponseJson(res);
+  if (!res.ok || json.error) {
+    logger.error("Image upload failed", {
+      fn: "uploadImage",
+      accountId,
+      filename,
+      error: extrairErroMeta(json),
+    });
+    throw new Error(`Erro ao fazer upload da imagem: ${extrairErroMeta(json)}`);
+  }
+
+  // A resposta tem formato: { images: { "filename": { hash: "..." } } }
+  const images = json.images;
+  if (!images) {
+    throw new Error("Resposta inesperada do Meta ao fazer upload da imagem");
+  }
+
+  const firstKey = Object.keys(images)[0];
+  const hash = images[firstKey]?.hash;
+  if (!hash) {
+    throw new Error("Image hash não encontrado na resposta do Meta");
+  }
+
+  logger.info("Image uploaded successfully", {
+    fn: "uploadImage",
+    accountId,
+    filename,
+    imageHash: hash,
+  });
+
+  return hash;
+}
+
+// ─── Video Creative ─────────────────────────────────────────
+
+export interface ParamsCriativoVideo {
+  pageId: string;
+  videoId: string;
+  message: string;
+  title: string;
+  linkDescription: string;
+  ctaType: string;
+  link: string;
+  name: string;
+  crossChannel?: CrossChannelInfo;
+  instagramActorId?: string | null;
+}
+
+export async function criarCreativeVideo(
+  accountId: string,
+  params: ParamsCriativoVideo
+): Promise<string> {
+  const token = getAccessToken();
+  const url = `${META_API_BASE}/${accountId}/adcreatives`;
+
+  const imageUrl = await buscarThumbnailVideo(params.videoId);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const videoData: Record<string, any> = {
+    video_id: params.videoId,
+    message: params.message,
+    title: params.title,
+    link_description: params.linkDescription,
+    image_url: imageUrl,
+  };
+
+  const isCrossChannel = (params.crossChannel?.objectStoreUrls?.length ?? 0) > 0;
+
+  if (params.link && params.link.trim()) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ctaValue: Record<string, any> = { link: params.link };
+    if (isCrossChannel) {
+      ctaValue.object_store_urls = params.crossChannel!.objectStoreUrls;
+    }
+    videoData.call_to_action = {
+      type: params.ctaType || "SHOP_NOW",
+      value: ctaValue,
+    };
+  }
+
+  if (!params.instagramActorId) {
+    throw new Error(`Instagram actor ID não encontrado para page ${params.pageId}. Configure META_INSTAGRAM_ACTOR_ID no .env ou vincule o Instagram Business à página.`);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const objectStorySpec: Record<string, any> = {
+    page_id: params.pageId,
+    video_data: videoData,
+  };
+  // `instagram_actor_id` foi descontinuado pelo Meta — usar `instagram_user_id`
+  // (aceita o IG Business Account id retornado por buscarInstagramActorId).
+  objectStorySpec.instagram_user_id = params.instagramActorId;
+
+  const formData = new FormData();
+  formData.append("name", params.name);
+  formData.append("object_story_spec", JSON.stringify(objectStorySpec));
+  if (isCrossChannelValido(params.crossChannel)) {
+    formData.append("applink_treatment", "deeplink_with_web_fallback");
+    formData.append("omnichannel_link_spec", JSON.stringify(
+      construirOmnichannelSpec(params.link ?? "", params.crossChannel),
+    ));
+  }
+  formData.append("access_token", token);
+
+  const res = await metaFetchWithRetry(url, {
+    method: "POST",
+    body: formData,
+  });
+
+  const json = await safeResponseJson(res);
+  if (!res.ok || json.error) {
+    logger.error("Failed to create video creative", {
+      fn: "criarCreativeVideo",
+      accountId,
+      videoId: params.videoId,
+      error: extrairErroMeta(json),
+    });
+    throw new Error(`Erro ao criar creative de vídeo: ${extrairErroMeta(json)}`);
+  }
+
+  logger.info("Video creative created", {
+    fn: "criarCreativeVideo",
+    accountId,
+    creativeId: json.id,
+  });
+
+  return json.id;
+}
+
+// Manter export legado para compatibilidade durante migração
+export const criarCreative = criarCreativeVideo;
+export type ParamsCriativo = ParamsCriativoVideo;
+
+// ─── Image Creative (multi-placement) ──────────────────────
+
+export interface ImagemPlacement {
+  imageHash: string;
+  placement: string; // 'feed', 'stories', 'horizontal'
+}
+
+export interface ParamsCriativoImagem {
+  pageId: string;
+  imagens: ImagemPlacement[];
+  message: string;
+  title: string;
+  linkDescription: string;
+  ctaType: string;
+  link: string;
+  name: string;
+  crossChannel?: CrossChannelInfo;
+  instagramActorId?: string | null;
+}
+
+type PlacementImagemNormalizado = "feed" | "stories" | "horizontal";
+
+function limparObjeto<T extends Record<string, unknown>>(objeto: T): T {
+  return Object.fromEntries(
+    Object.entries(objeto).filter(([, valor]) => valor !== undefined && valor !== null && valor !== "")
+  ) as T;
+}
+
+// Mapa de placement do asset → customization_spec do Meta
+const PLACEMENT_RULES: Record<PlacementImagemNormalizado, Record<string, unknown>> = {
+  feed: {
+    publisher_platforms: ["facebook", "instagram"],
+    facebook_positions: ["feed", "marketplace", "search"],
+    instagram_positions: ["stream", "explore", "profile_feed"],
+  },
+  stories: {
+    publisher_platforms: ["facebook", "instagram"],
+    facebook_positions: ["story", "facebook_reels"],
+    instagram_positions: ["story", "reels"],
+  },
+  horizontal: {
+    publisher_platforms: ["facebook"],
+    facebook_positions: ["instant_article", "right_hand_column", "suggested_video", "video_feeds"],
+  },
+};
+
+export async function criarCreativeImagem(
+  accountId: string,
+  params: ParamsCriativoImagem
+): Promise<string> {
+  const token = getAccessToken();
+  const url = `${META_API_BASE}/${accountId}/adcreatives`;
+
+  // Se só tem 1 imagem, usar link_data simples
+  if (params.imagens.length === 1) {
+    return criarCreativeImagemSimples(accountId, params);
+  }
+
+  const imagensPorPlacement = new Map<PlacementImagemNormalizado, ImagemPlacement>();
+  for (const imagem of params.imagens) {
+    const placement = normalizarPlacementImagem(imagem.placement) as PlacementImagemNormalizado;
+    if (!PLACEMENT_RULES[placement]) {
+      console.warn(`[meta-criar] Placement ignorado para imagem: "${imagem.placement}" — será excluída do creative`);
+      continue;
+    }
+    if (imagensPorPlacement.has(placement)) continue;
+    imagensPorPlacement.set(placement, imagem);
+  }
+
+  if (imagensPorPlacement.size <= 1) {
+    const primeiraImagemValida = Array.from(imagensPorPlacement.values())[0] ?? params.imagens[0];
+    return criarCreativeImagemSimples(accountId, {
+      ...params,
+      imagens: [primeiraImagemValida],
+    });
+  }
+
+  const labels: Record<PlacementImagemNormalizado, string> = {
+    feed: "IMAGE_FEED",
+    stories: "IMAGE_VERTICAL",
+    horizontal: "IMAGE_HORIZONTAL",
+  };
+
+  const images = Array.from(imagensPorPlacement.entries()).map(([placement, imagem]) => ({
+    hash: imagem.imageHash,
+    adlabels: [{ name: labels[placement] }],
+  }));
+
+  // Default rule (sem `customization_spec`) age como catch-all pra qualquer
+  // placement que nao caia nas regras explicitas — Audience Network,
+  // Messenger, Threads, IG Reels Overlay/Explore Home, FB Instream Video,
+  // etc. Sem ela, edits manuais no Ads Manager em campanhas Advantage+ (ASC)
+  // disparam #1885876 ("trouble adding more placements"): a UI tenta
+  // expandir o asset_feed_spec pra cobrir todos os placements implicitos do
+  // adset, nao acha rule pra eles, e quebra. Recomendacao oficial em Meta
+  // Asset Customization Rules docs. Fallback usa a imagem de feed (1:1, mais
+  // universal); cai pra stories ou horizontal se feed nao existir.
+  const fallbackPlacement: PlacementImagemNormalizado = imagensPorPlacement.has("feed")
+    ? "feed"
+    : imagensPorPlacement.has("stories")
+    ? "stories"
+    : "horizontal";
+  const assetCustomizationRules: Array<{
+    customization_spec?: Record<string, unknown>;
+    image_label: { name: string };
+    priority: number;
+  }> = Array.from(imagensPorPlacement.entries()).map(([placement], idx) => ({
+    customization_spec: PLACEMENT_RULES[placement],
+    image_label: { name: labels[placement] },
+    priority: idx + 1,
+  }));
+  assetCustomizationRules.push({
+    image_label: { name: labels[fallbackPlacement] },
+    priority: assetCustomizationRules.length + 1,
+  });
+
+  // Cross-channel multi-placement — posição testada de cada campo:
+  //
+  //  omnichannel_link_spec:
+  //    ✗ form level          → delivery error 2446461
+  //    ✗ asset_feed_spec root → error #100 "Unexpected key"
+  //    ✓ link_urls[0]        → aceito (não aparece no GET, mas funciona)
+  //
+  //  deeplink_url, object_store_urls → link_urls[0] (campos do schema)
+  //  applink_treatment               → form level (subcode 2446455)
+  //
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const linkUrlEntry: Record<string, any> | undefined = params.link
+    ? { website_url: params.link }
+    : undefined;
+  if (linkUrlEntry && isCrossChannelValido(params.crossChannel)) {
+    linkUrlEntry.deeplink_url = params.link;
+    linkUrlEntry.object_store_urls = params.crossChannel.objectStoreUrls;
+    linkUrlEntry.omnichannel_link_spec = construirOmnichannelSpec(params.link!, params.crossChannel);
+  }
+
+  // optimization_type=PLACEMENT + ad_formats=AUTOMATIC_FORMAT são o
+  // padrão usado pela UI do Ads Manager para criativos placement-based.
+  const assetFeedSpec = limparObjeto({
+    ad_formats: ["AUTOMATIC_FORMAT"],
+    optimization_type: "PLACEMENT",
+    images,
+    bodies: params.message ? [{ text: params.message }] : undefined,
+    titles: params.title ? [{ text: params.title }] : undefined,
+    descriptions: params.linkDescription ? [{ text: params.linkDescription }] : undefined,
+    link_urls: linkUrlEntry ? [linkUrlEntry] : undefined,
+    call_to_action_types: params.ctaType ? [params.ctaType] : undefined,
+    asset_customization_rules: assetCustomizationRules,
+  });
+
+  if (!params.instagramActorId) {
+    throw new Error(`Instagram actor ID não encontrado para page ${params.pageId}. Configure META_INSTAGRAM_ACTOR_ID no .env ou vincule o Instagram Business à página.`);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const objectStorySpecMulti: Record<string, any> = { page_id: params.pageId };
+  objectStorySpecMulti.instagram_user_id = params.instagramActorId;
+
+  const formData = new FormData();
+  formData.append("name", params.name);
+  formData.append("object_story_spec", JSON.stringify(objectStorySpecMulti));
+  formData.append("asset_feed_spec", JSON.stringify(assetFeedSpec));
+  if (params.link?.trim()) {
+    formData.append("link_url", params.link);
+  }
+  // Cross-channel multi-placement precisa de TRES envios coordenados:
+  //   1. applink_treatment no form level (sem ele: subcode 2446455).
+  //   2. omnichannel_link_spec dentro de link_urls[0] (sem isso: subcode
+  //      2446461 "needs to be within asset_feed_spec").
+  //   3. omnichannel_link_spec TAMBEM no form level — sem isso o ad
+  //      passa validacao mas o Ads Manager UI mostra o "Deep link" vazio.
+  //      Confirmado em teste controlado 2026-05-09 (id 1852024642104426
+  //      vs 1626451038655980): mesma asset_feed_spec, so com vs sem
+  //      form-level omnichannel_link_spec — UI exibe Deep Link no
+  //      primeiro caso, fica em branco no segundo.
+  //   Isso parece duplicacao mas Meta exige os dois canais (delivery
+  //   le do nested, UI de edicao le do form-level).
+  if (isCrossChannelValido(params.crossChannel)) {
+    formData.append("applink_treatment", "deeplink_with_web_fallback");
+    formData.append("omnichannel_link_spec", JSON.stringify(
+      construirOmnichannelSpec(params.link ?? "", params.crossChannel),
+    ));
+  }
+  formData.append(
+    "degrees_of_freedom_spec",
+    JSON.stringify({
+      creative_features_spec: {
+        adapt_to_placement: { enroll_status: "OPT_OUT" },
+        add_text_overlay: { enroll_status: "OPT_OUT" },
+        creative_stickers: { enroll_status: "OPT_OUT" },
+        description_automation: { enroll_status: "OPT_OUT" },
+        enhance_cta: { enroll_status: "OPT_OUT" },
+        image_background_gen: { enroll_status: "OPT_OUT" },
+        image_brightness_and_contrast: { enroll_status: "OPT_OUT" },
+        image_templates: { enroll_status: "OPT_OUT" },
+        image_touchups: { enroll_status: "OPT_OUT" },
+        image_uncrop: { enroll_status: "OPT_OUT" },
+        inline_comment: { enroll_status: "OPT_OUT" },
+        media_type_automation: { enroll_status: "OPT_OUT" },
+        product_extensions: { enroll_status: "OPT_OUT" },
+        text_optimizations: { enroll_status: "OPT_OUT" },
+        text_translation: { enroll_status: "OPT_OUT" },
+        video_auto_crop: { enroll_status: "OPT_OUT" },
+      },
+    })
+  );
+  formData.append("access_token", token);
+
+  const res = await metaFetchWithRetry(url, {
+    method: "POST",
+    body: formData,
+  });
+
+  const json = await safeResponseJson(res);
+  if (!res.ok || json.error) {
+    logger.error("Failed to create image creative (multi-placement)", {
+      fn: "criarCreativeImagem",
+      accountId,
+      placementCount: imagensPorPlacement.size,
+      error: extrairErroMeta(json),
+    });
+    throw new Error(`Erro ao criar creative de imagem: ${extrairErroMeta(json)}`);
+  }
+
+  logger.info("Image creative created (multi-placement)", {
+    fn: "criarCreativeImagem",
+    accountId,
+    creativeId: json.id,
+    placementCount: imagensPorPlacement.size,
+  });
+
+  return json.id;
+}
+
+async function criarCreativeImagemSimples(
+  accountId: string,
+  params: ParamsCriativoImagem
+): Promise<string> {
+  const token = getAccessToken();
+  const url = `${META_API_BASE}/${accountId}/adcreatives`;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const linkData: Record<string, any> = {
+    message: params.message,
+    link: params.link,
+    name: params.title,
+    description: params.linkDescription,
+    image_hash: params.imagens[0].imageHash,
+  };
+
+  const isCrossChannel = (params.crossChannel?.objectStoreUrls?.length ?? 0) > 0;
+
+  if (params.ctaType) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ctaValue: Record<string, any> = { link: params.link };
+    if (isCrossChannel) {
+      ctaValue.object_store_urls = params.crossChannel!.objectStoreUrls;
+    }
+    linkData.call_to_action = {
+      type: params.ctaType || "SHOP_NOW",
+      value: ctaValue,
+    };
+  }
+
+  if (!params.instagramActorId) {
+    throw new Error(`Instagram actor ID não encontrado para page ${params.pageId}. Configure META_INSTAGRAM_ACTOR_ID no .env ou vincule o Instagram Business à página.`);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const objectStorySpec: Record<string, any> = {
+    page_id: params.pageId,
+    link_data: linkData,
+  };
+  // `instagram_actor_id` foi descontinuado pelo Meta — usar `instagram_user_id`
+  // (aceita o IG Business Account id retornado por buscarInstagramActorId).
+  objectStorySpec.instagram_user_id = params.instagramActorId;
+
+  const formData = new FormData();
+  formData.append("name", params.name);
+  formData.append("object_story_spec", JSON.stringify(objectStorySpec));
+  if (isCrossChannelValido(params.crossChannel)) {
+    formData.append("applink_treatment", "deeplink_with_web_fallback");
+    formData.append("omnichannel_link_spec", JSON.stringify(
+      construirOmnichannelSpec(params.link ?? "", params.crossChannel),
+    ));
+  }
+  formData.append("access_token", token);
+
+  const res = await metaFetchWithRetry(url, {
+    method: "POST",
+    body: formData,
+  });
+
+  const json = await safeResponseJson(res);
+  if (!res.ok || json.error) {
+    logger.error("Failed to create image creative (simple)", {
+      fn: "criarCreativeImagemSimples",
+      accountId,
+      error: extrairErroMeta(json),
+    });
+    throw new Error(`Erro ao criar creative de imagem: ${extrairErroMeta(json)}`);
+  }
+
+  logger.info("Image creative created (simple)", {
+    fn: "criarCreativeImagemSimples",
+    accountId,
+    creativeId: json.id,
+  });
+
+  return json.id;
+}
+
+// ─── Criar Anúncio ──────────────────────────────────────────
+
+export async function criarAnuncio(
+  accountId: string,
+  adsetId: string,
+  name: string,
+  creativeId: string
+): Promise<string> {
+  const token = getAccessToken();
+  const url = `${META_API_BASE}/${accountId}/ads`;
+
+  const params = new URLSearchParams({
+    name,
+    adset_id: adsetId,
+    creative: JSON.stringify({ creative_id: creativeId }),
+    status: "PAUSED",
+    access_token: token,
+  });
+
+  const res = await metaFetchWithRetry(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+  });
+
+  const json = await safeResponseJson(res);
+  if (!res.ok || json.error) {
+    logger.error("Failed to create ad", {
+      fn: "criarAnuncio",
+      accountId,
+      adsetId,
+      creativeId,
+      error: extrairErroMeta(json),
+    });
+    throw new Error(`Erro ao criar anúncio: ${extrairErroMeta(json)}`);
+  }
+
+  logger.info("Ad created", {
+    fn: "criarAnuncio",
+    accountId,
+    adsetId,
+    adId: json.id,
+    creativeId,
+  });
+
+  return json.id;
+}
+
+// ─── Validação pós-criação ──────────────────────────────────
+
+interface IssueInfo {
+  level?: string;
+  error_code?: number;
+  error_summary?: string;
+  error_message?: string;
+  error_type?: string;
+}
+
+/**
+ * Após criar o ad, o Meta valida assincronamente. Estados que podem
+ * aparecer brevemente: IN_PROCESS → PENDING_REVIEW → PAUSED/ACTIVE.
+ * Se houver delivery error, surge WITH_ISSUES com `issues_info`
+ * preenchido. Polling curto pega isso na hora do upload em vez de
+ * ficar latente até o próximo sync.
+ *
+ * Retorna a mensagem do issue se houver problema, ou null se OK.
+ */
+export async function verificarIssuesAd(
+  metaAdId: string,
+  opts: { tentativas?: number; intervaloMs?: number } = {}
+): Promise<string | null> {
+  const tentativas = opts.tentativas ?? 3;
+  const intervaloMs = opts.intervaloMs ?? 4_000;
+  const token = getAccessToken();
+
+  for (let i = 0; i < tentativas; i++) {
+    await new Promise((r) => setTimeout(r, intervaloMs));
+
+    const url = `${META_API_BASE}/${metaAdId}?fields=effective_status,issues_info&access_token=${token}`;
+    try {
+      const res = await metaFetchWithRetry(url);
+      const json = await safeResponseJson(res);
+      if (json.error) {
+        logger.warn("Falha ao verificar issues do ad pós-criação", {
+          fn: "verificarIssuesAd",
+          metaAdId,
+          attempt: i + 1,
+          error: extrairErroMeta(json),
+        });
+        continue;
+      }
+
+      const status = json.effective_status as string | undefined;
+      const issues = json.issues_info as IssueInfo[] | undefined;
+
+      logger.debug("Pós-criação poll", {
+        fn: "verificarIssuesAd",
+        metaAdId,
+        attempt: i + 1,
+        status,
+        hasIssues: !!issues?.length,
+      });
+
+      // Se já tem issues, retorna a mensagem na hora — não espera mais.
+      if (issues && issues.length > 0) {
+        const primeiro = issues[0];
+        const partes: string[] = [];
+        if (primeiro.error_summary) partes.push(primeiro.error_summary);
+        if (primeiro.error_message && primeiro.error_message !== primeiro.error_summary) {
+          partes.push(primeiro.error_message);
+        }
+        if (primeiro.error_code) partes.push(`[code ${primeiro.error_code}]`);
+        return partes.join(" — ") || `Meta sinalizou problemas (status ${status})`;
+      }
+
+      // Estados terminais que indicam problema sem issues_info preenchido
+      // (raro, mas defensivo).
+      if (status === "DISAPPROVED" || status === "DELETED") {
+        return `Meta status: ${status}`;
+      }
+
+      // Estados normais — terminamos cedo, não precisa esperar mais.
+      if (status === "ACTIVE" || status === "PAUSED" || status === "PENDING_REVIEW") {
+        return null;
+      }
+
+      // IN_PROCESS / outro estado intermediário → continua tentando
+    } catch (err) {
+      logger.warn("Exceção ao verificar issues pós-criação", {
+        fn: "verificarIssuesAd",
+        metaAdId,
+        attempt: i + 1,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // Polling esgotou sem confirmar — não bloqueia o upload, o sync
+  // posterior pega se algo aparecer.
+  return null;
+}
+
+/**
+ * Deleta um ad no Meta. Usado quando reprocessamos um ad em erro,
+ * para liberar o slot na campanha (Advantage+ tem limite de 150) e
+ * evitar acumular ads zumbis.
+ */
+export async function deletarAdMeta(metaAdId: string): Promise<void> {
+  const token = getAccessToken();
+  const url = `${META_API_BASE}/${metaAdId}?access_token=${token}`;
+  try {
+    const res = await metaFetchWithRetry(url, { method: "DELETE" });
+    const json = await safeResponseJson(res);
+    if (res.ok && json.success) {
+      logger.info("Ad deletado no Meta", { fn: "deletarAdMeta", metaAdId });
+      return;
+    }
+    // Se o ad já não existe (803), trata como sucesso silencioso.
+    const code = (json.error as { code?: number } | undefined)?.code;
+    if (code === 803) {
+      logger.info("Ad já não existia no Meta (803)", { fn: "deletarAdMeta", metaAdId });
+      return;
+    }
+    logger.warn("Falha ao deletar ad no Meta", {
+      fn: "deletarAdMeta",
+      metaAdId,
+      error: extrairErroMeta(json),
+    });
+  } catch (err) {
+    logger.warn("Exceção ao deletar ad no Meta", {
+      fn: "deletarAdMeta",
+      metaAdId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+// ─── Utilitários ────────────────────────────────────────────
+
+export async function buscarAccountIdDoAdSet(
+  adsetId: string
+): Promise<string> {
+  const token = getAccessToken();
+  const url = `${META_API_BASE}/${adsetId}?fields=account_id&access_token=${token}`;
+
+  const res = await metaFetchWithRetry(url);
+  const json = await safeResponseJson(res);
+
+  if (!res.ok || json.error) {
+    logger.error("Failed to fetch account ID from adset", {
+      fn: "buscarAccountIdDoAdSet",
+      adsetId,
+      error: extrairErroMeta(json),
+    });
+    throw new Error(
+      `Erro ao buscar account do adset: ${extrairErroMeta(json)}`
+    );
+  }
+
+  return `act_${json.account_id}`;
+}
+
+export interface CrossChannelInfo {
+  objectStoreUrls: string[];
+  applicationId: string | null;
+}
+
+/**
+ * Determina se um crossChannel é realmente válido para uso (tem applicationId).
+ * Sem applicationId, adicionar applink_treatment sem omnichannel_link_spec
+ * causa erro #100 no Meta.
+ */
+function isCrossChannelValido(cc?: CrossChannelInfo): cc is CrossChannelInfo & { applicationId: string } {
+  return Boolean(cc && cc.objectStoreUrls.length > 0 && cc.applicationId);
+}
+
+/**
+ * Constrói omnichannel_link_spec usando a mesma URL universal do site
+ * para web/iOS/Android. As URLs de App Store/Play Store continuam em
+ * `object_store_urls` como fallback de instalação, mas não devem ser
+ * enviadas como deep links por plataforma.
+ */
+function construirOmnichannelSpec(link: string, cc: CrossChannelInfo & { applicationId: string }) {
+  return {
+    web: { url: link },
+    app: {
+      application_id: cc.applicationId,
+      platform_specs: {
+        android: { url: link },
+        ios: { url: link },
+      },
+    },
+  };
+}
+
+/**
+ * Resolve o Instagram User ID a ser usado em `object_story_spec.instagram_user_id`.
+ *
+ * Sem essa identidade, criativos com placements do Instagram falham com:
+ *   "Select an Instagram account or a Facebook Page to represent your business
+ *    on Instagram." [code 100] [subcode 1772103]
+ *
+ * Estratégia (em ordem):
+ *   1. Override por env (`META_INSTAGRAM_ACTOR_ID_EVINO/GRANDCRU` ou
+ *      `META_INSTAGRAM_ACTOR_ID_<PAGEID>`) — útil quando o token não tem
+ *      permissão para ler a conexão IG da página.
+ *   2. `GET /{pageId}?fields=instagram_business_account,connected_instagram_account`
+ *      Esse é o caminho moderno; cobre páginas conectadas via Meta Business
+ *      Suite / Accounts Center.
+ *   3. `GET /{pageId}/instagram_accounts` (endpoint legado, mantido como
+ *      último recurso).
+ *
+ * Erros são logados em vez de engolidos silenciosamente — antes a função
+ * retornava null em qualquer falha, escondendo a causa raiz quando o Meta
+ * depois recusava o creative.
+ */
+export async function buscarInstagramActorId(
+  pageId: string
+): Promise<string | null> {
+  // 1. Env overrides
+  const envOverride =
+    process.env[`META_INSTAGRAM_ACTOR_ID_${pageId}`] ||
+    (pageId === process.env.META_PAGE_ID_EVINO
+      ? process.env.META_INSTAGRAM_ACTOR_ID_EVINO
+      : undefined) ||
+    (pageId === process.env.META_PAGE_ID_GRANDCRU
+      ? process.env.META_INSTAGRAM_ACTOR_ID_GRANDCRU
+      : undefined);
+  if (envOverride && envOverride.trim()) {
+    logger.debug("Instagram actor id resolved from env override", {
+      fn: "buscarInstagramActorId",
+      pageId,
+    });
+    return envOverride.trim();
+  }
+
+  const token = getAccessToken();
+
+  // 2. Modern fields on the page itself
+  try {
+    const url = `${META_API_BASE}/${pageId}?fields=instagram_business_account,connected_instagram_account&access_token=${token}`;
+    const res = await metaFetchWithRetry(url);
+    const json = await safeResponseJson(res);
+    if (res.ok && !json.error) {
+      const igb = (json.instagram_business_account as { id?: string } | undefined)?.id;
+      const cig = (json.connected_instagram_account as { id?: string } | undefined)?.id;
+      const resolved = igb ?? cig ?? null;
+      if (resolved) {
+        logger.debug("Instagram actor id resolved from page fields", {
+          fn: "buscarInstagramActorId",
+          pageId,
+          source: igb ? "instagram_business_account" : "connected_instagram_account",
+        });
+        return resolved;
+      }
+      logger.warn("Page has no instagram_business_account/connected_instagram_account", {
+        fn: "buscarInstagramActorId",
+        pageId,
+      });
+    } else {
+      logger.warn("Failed to read page IG fields", {
+        fn: "buscarInstagramActorId",
+        pageId,
+        error: extrairErroMeta(json),
+      });
+    }
+  } catch (err) {
+    logger.warn("Exception reading page IG fields", {
+      fn: "buscarInstagramActorId",
+      pageId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // 3. Legacy endpoint
+  try {
+    const url = `${META_API_BASE}/${pageId}/instagram_accounts?fields=id&access_token=${token}`;
+    const res = await metaFetchWithRetry(url);
+    const json = await safeResponseJson(res);
+    if (res.ok && !json.error) {
+      const data = json.data as { id: string }[] | undefined;
+      const resolved = data?.[0]?.id ?? null;
+      if (resolved) {
+        logger.debug("Instagram actor id resolved from legacy endpoint", {
+          fn: "buscarInstagramActorId",
+          pageId,
+        });
+        return resolved;
+      }
+    } else {
+      logger.warn("Legacy /instagram_accounts call failed", {
+        fn: "buscarInstagramActorId",
+        pageId,
+        error: extrairErroMeta(json),
+      });
+    }
+  } catch (err) {
+    logger.warn("Exception on legacy /instagram_accounts", {
+      fn: "buscarInstagramActorId",
+      pageId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  logger.error("Could not resolve Instagram actor id — creative will likely be rejected for IG placements", {
+    fn: "buscarInstagramActorId",
+    pageId,
+    hint: "Set META_INSTAGRAM_ACTOR_ID_EVINO/GRANDCRU as fallback, or grant the access token instagram_basic + pages_show_list permissions.",
+  });
+  console.warn(`[buscarInstagramActorId] Instagram actor ID não encontrado para page ${pageId}. Configure META_INSTAGRAM_ACTOR_ID no .env ou vincule o Instagram Business à página.`);
+  return null;
+}
+
+/**
+ * Resolve cross-channel info do AdSet — `objectStoreUrls` e `applicationId`.
+ *
+ * O `applicationId` é necessário para `omnichannel_link_spec.app.application_id`
+ * no creative. Sem ele, o ad sai sem `applink_treatment`/`omnichannel_link_spec`,
+ * o Meta preenche apenas "URL do site (Destino de Backup)" e o "Deep link
+ * (Destino padrão)" fica vazio. Quando o operador cola manualmente, a
+ * publicação quebra com #100 ("application_id is required") e #1885876
+ * ("recreate the ad").
+ *
+ * Estratégia (cada nível loga em qual tier resolveu):
+ *
+ *   1. Field expansion explícita no AdSet:
+ *      `promoted_object{application_id,omnichannel_object{app{application_id,object_store_urls}}}`
+ *      — defesa contra Graph API não retornar sub-campos aninhados.
+ *   2. Top-level `promoted_object.application_id` (raro, mas presente em
+ *      campanhas app-install que viram cross-channel).
+ *
+ * Se `objectStoreUrls.length > 0` mas nada resolveu o applicationId, loga
+ * `warn` com o JSON parcial do `promoted_object` recebido — isso permite
+ * decidir o próximo passo de derivação baseado no que a API de fato devolve.
+ */
+export async function buscarCrossChannelInfo(
+  adsetId: string
+): Promise<CrossChannelInfo> {
+  const token = getAccessToken();
+  const fields = "promoted_object{application_id,omnichannel_object{app{application_id,object_store_urls}}}";
+  const url = `${META_API_BASE}/${adsetId}?fields=${fields}&access_token=${token}`;
+
+  const res = await metaFetchWithRetry(url);
+  const json = await safeResponseJson(res);
+
+  if (!res.ok || json.error) return { objectStoreUrls: [], applicationId: null };
+
+  const promotedObject = json.promoted_object;
+  const apps = promotedObject?.omnichannel_object?.app;
+  const hasApps = Array.isArray(apps) && apps.length > 0;
+  if (!promotedObject || !hasApps) {
+    return { objectStoreUrls: [], applicationId: null };
+  }
+
+  const objectStoreUrls: string[] = apps[0].object_store_urls ?? [];
+  let applicationId: string | null = apps[0].application_id ?? null;
+  let resolvedFrom: string | null = applicationId ? "omnichannel_object.app[0]" : null;
+
+  if (!applicationId && promotedObject.application_id) {
+    applicationId = String(promotedObject.application_id);
+    resolvedFrom = "promoted_object.application_id";
+  }
+
+  if (objectStoreUrls.length > 0) {
+    if (applicationId) {
+      logger.info("Cross-channel application_id resolved", {
+        fn: "buscarCrossChannelInfo",
+        adsetId,
+        resolvedFrom,
+      });
+    } else {
+      // Snippet do promoted_object pra debug futuro via Vercel logs ou
+      // via /api/meta/diagnostico-adset?adsetId=X (endpoint mais comodo).
+      const promotedObjectSample = JSON.stringify(promotedObject).slice(0, 1000);
+      logger.warn(
+        "Cross-channel signals present (object_store_urls) but application_id missing from promoted_object. Ad will be created without applink_treatment/omnichannel_link_spec — Deep Link field will stay empty.",
+        { fn: "buscarCrossChannelInfo", adsetId, promotedObjectSample }
+      );
+    }
+  }
+
+  return { objectStoreUrls, applicationId };
+}
