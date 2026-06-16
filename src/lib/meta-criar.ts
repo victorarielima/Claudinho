@@ -463,7 +463,6 @@ export async function criarCreativeVideo(
     video_id: params.videoId,
     message: params.message,
     title: params.title,
-    link_description: params.linkDescription,
     image_url: imageUrl,
   };
 
@@ -479,6 +478,10 @@ export async function criarCreativeVideo(
       type: params.ctaType || "SHOP_NOW",
       value: ctaValue,
     };
+    // link_description só é válido quando há call_to_action (Meta subcode 1815614)
+    if (params.linkDescription) {
+      videoData.link_description = params.linkDescription;
+    }
   }
 
   if (!params.instagramActorId) {
