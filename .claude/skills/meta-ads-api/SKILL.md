@@ -65,11 +65,14 @@ description: |
    `degrees_of_freedom_spec.creative_features_spec` (não
    `standard_enhancements` agregado — deprecado desde v22).
 9. **Multi-placement em ASC precisa de default rule** em
-   `asset_customization_rules` (sem `customization_spec`, fallback
-   feed). Sem ela, qualquer edit no Ads Manager dispara #1885876.
-   Ver [references/creatives.md](./references/creatives.md) §3 +
+   `asset_customization_rules` (com `customization_spec: {}` —
+   catch-all). Sem ela, qualquer edit no Ads Manager dispara
+   #1885876. **Atenção (pós-27/05/2026):** a chave
+   `customization_spec` precisa estar PRESENTE mesmo que vazia
+   (`{}`); omitir causa `code 100 / subcode 1487390`. Ver
+   [references/creatives.md](./references/creatives.md) §3 +
    [references/errors-subcodes.md](./references/errors-subcodes.md)
-   §1885876.
+   §1885876/§1487390.
 
 ---
 
@@ -162,8 +165,10 @@ matriz. Detalhes em [references/cross-channel.md](./references/cross-channel.md)
 
 Pra ad multi-imagem em campanha Advantage+ Shopping (ASC) ser editável
 diretamente no Ads Manager (mudar legenda, link etc), o
-`asset_customization_rules` precisa de uma **default rule** sem
-`customization_spec`. Sem ela, qualquer edit dispara #1885876.
+`asset_customization_rules` precisa de uma **default rule** com
+`customization_spec: {}` (catch-all). Sem ela, qualquer edit dispara
+#1885876. **Pós-27/05/2026:** a chave `customization_spec` precisa
+estar PRESENTE (mesmo `{}`); omitir causa `code 100 / subcode 1487390`.
 
 ```jsonc
 asset_customization_rules: [
@@ -171,11 +176,16 @@ asset_customization_rules: [
   { customization_spec: {...stories...},    image_label: {...}, priority: 2 },
   { customization_spec: {...horizontal...}, image_label: {...}, priority: 3 },
   // catch-all (Audience Network, Messenger, Threads, IG Reels Overlay/Explore Home, etc.)
-  { image_label: { name: "IMAGE_FEED" }, priority: 4 }
+  // ATENÇÃO: `customization_spec: {}` PRESENTE — não omita a chave.
+  // Omitir causa code 100 / subcode 1487390 (~27/05/2026 em diante).
+  { customization_spec: {}, image_label: { name: "IMAGE_FEED" }, priority: 4 }
 ]
 ```
 
-Já implementado em `criarCreativeImagem()` (commit `e4f2294`).
+Default rule originalmente sem `customization_spec` (commit `e4f2294`,
+22/05) resolveu #1885876 mas começou a quebrar com 1487390 após a Meta
+endurecer validação em ~27/05. Fix: `customization_spec: {}` no
+catch-all — war story em [references/errors-subcodes.md](./references/errors-subcodes.md#war-story-2026-05-27).
 
 ### 3.4 Ad novo, subir de vez ou dar retry?
 
@@ -256,10 +266,11 @@ Receitas específicas em [`references/debugging-playbook.md`](./references/debug
 10. **SEMPRE** armazenar `meta_account_id` com prefixo `act_`.
 11. **SEMPRE** ler a atual versão da API (`META_API_VERSION`)
     antes de citar campos ou usar endpoints.
-12. **SEMPRE** incluir default rule (sem `customization_spec`) em
+12. **SEMPRE** incluir default rule com `customization_spec: {}` em
     `asset_customization_rules` quando o ad for multi-placement em
     campanha Advantage+. Caso contrário, edits no Ads Manager
-    quebram com #1885876.
+    quebram com #1885876. **NUNCA** omita a chave `customization_spec`
+    — desde ~27/05/2026 isso dispara `code 100 / subcode 1487390`.
 
 ---
 

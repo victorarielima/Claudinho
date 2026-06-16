@@ -50,10 +50,32 @@ Retry do Claudinho: 4, 17, 32, 100, 613, 80004, HTTP 429.
 | **2446461** | "omnichannel_link_spec needs to be within your asset_feed_spec" | Posição errada em multi-placement | Mover p/ `asset_feed_spec.link_urls[0]` |
 | **1359187** | "Object store URLs are required" | `object_store_urls` ausente | Adicionar no local correto |
 | **1487006** | Política (álcool/farmacêutico/etc) | Categoria/copy | Rever copy, targeting |
+| **1487390** | "The Adcreative Create Failed for the following reason: Something went wrong. Please try again later" (`[code 100]`, `is_transient=false`) | **Default rule no `asset_customization_rules` sem `customization_spec`** — em ~27/05/2026 a Meta endureceu a validação: catch-all rules precisam da chave `customization_spec` presente (mesmo `{}`), antes a chave podia ser omitida. O subcode é genérico e mascara a causa real; só bissecção via `execution_options=[validate_only]` isola. | Fix em `criarCreativeImagem()` (commit pós-`e4f2294`): default rule envia `customization_spec: {}`. Se o erro reaparecer em ad novo, é regressão dessa linha — ver §3.3b do SKILL.md. |
 | **1487748** | "not eligible for this placement" | Asset formato errado | Reenviar no formato correto |
 | **1363024** | "format that isn't supported" (acompanha `[code 352]`) | **Filename sem extensão `.mp4`/`.mov`/`.m4v`**. Meta usa a extensão pra inferir o container e, sem ela, rejeita com mensagem genérica de formato. Bytes podem estar perfeitamente válidos. | `uploadVideo()` em `src/lib/meta-criar.ts` sanitiza via `ensureVideoExtension()` — adiciona `.mp4` se faltar. Se ainda aparecer, é mesmo um codec/container não-H.264. |
 | **1363047** | "There was a problem uploading your video. Please try again." (acompanha `[code 2]`) | **Indisponibilidade transitória do `/advideos`** — arquivo, token e payload estão OK; o serviço de upload do Meta ficou intermitente. | `metaFetchWithRetry` em `src/lib/meta-retry.ts` retenta automaticamente (até 3x, backoff exponencial). Se chegar até a UI mesmo assim, esperar 1 min e clicar "Tentar de novo". |
-| **1885876** | "Estamos com problemas para adicionar mais posicionamentos a esse anúncio. Para incluir suas novas seleções de posicionamento, exclua o anúncio e crie-o novamente." | **Bug do editor do Ads Manager** com criativos `asset_feed_spec` em campanha Advantage+ (ASC). Aparece quando o operador edita QUALQUER campo (até 1 letra na legenda) direto no Ads Manager. Tem dois gatilhos: **(a)** `asset_customization_rules` não cobre todos os placements implícitos do ASC (Audience Network, Messenger, Threads, etc) — a UI tenta expandir e quebra; **(b)** ad com Deep Link vazio na UI por cross-channel incompleto e operador cola manual. | **(a)** Default rule sem `customization_spec` no `asset_customization_rules` (fallback feed) — `criarCreativeImagem()`, commit `e4f2294`. **(b)** Garantir `omnichannel_link_spec` form-level + `link_urls[0]` (commit `6ba3c85`). **Ads antigos** (pré-fix): recriar via Claudinho ou duplicar no Ads Manager — não dá pra patchear retroativamente. |
+| **1885876** | "Estamos com problemas para adicionar mais posicionamentos a esse anúncio. Para incluir suas novas seleções de posicionamento, exclua o anúncio e crie-o novamente." | **Bug do editor do Ads Manager** com criativos `asset_feed_spec` em campanha Advantage+ (ASC). Aparece quando o operador edita QUALQUER campo (até 1 letra na legenda) direto no Ads Manager. Tem dois gatilhos: **(a)** `asset_customization_rules` não cobre todos os placements implícitos do ASC (Audience Network, Messenger, Threads, etc) — a UI tenta expandir e quebra; **(b)** ad com Deep Link vazio na UI por cross-channel incompleto e operador cola manual. | **(a)** Default rule com `customization_spec: {}` no `asset_customization_rules` (fallback feed) — `criarCreativeImagem()`, commit `e4f2294` + ajuste pós-27/05/2026 (ver §1487390). **(b)** Garantir `omnichannel_link_spec` form-level + `link_urls[0]` (commit `6ba3c85`). **Ads antigos** (pré-fix): recriar via Claudinho ou duplicar no Ads Manager — não dá pra patchear retroativamente. |
+
+### War story 2026-05-27 — `code 100 / subcode 1487390` causado pelo nosso próprio fix do #1885876
+
+Dois ads da Evino (`EST-Prod-LupoMeravigliaTreDiTre114Kit` e `EST-Prod-6LupoMeravigliaTreDiTre114`, ambos W21-2026) começaram a falhar com `code 100 / subcode 1487390` ("Adcreative Create Failed: Something went wrong. Please try again later", `is_transient=false`). 40 outros ads na mesma campanha Evino-Ecomm-Meta-Web_App-Purchase-ASCPremium concluíram normais — descarta Meta transitório e policy.
+
+**Pista:** ads idênticos do mesmo produto (W22-2026, mesmos image hashes, mesmo texto, mesmo link) deram OK em 22/05 — antes do commit `e4f2294`. Tudo entre 22/05 e 27/05 começou a quebrar.
+
+**Bissecção** via `execution_options=[validate_only]` no `/{accountId}/adcreatives` (POST que NÃO persiste, só valida) isolou:
+
+| Payload | Resultado |
+|---|---|
+| `asset_customization_rules` com default rule sem `customization_spec` (estado pós-`e4f2294`) | ❌ 1487390 |
+| Mesmo payload sem default rule | ✅ OK |
+| Default rule com `customization_spec: {}` | ✅ OK |
+| Default rule com `customization_spec: { publisher_platforms: ["audience_network","messenger"] }` | ✅ OK |
+
+**Conclusão:** entre 22/05 e 27/05 a Meta passou a exigir a chave `customization_spec` presente (mesmo vazia) em toda rule do `asset_customization_rules`. O commit `e4f2294` (default rule sem `customization_spec`) era a recomendação oficial de catch-all até essa mudança e parou de funcionar.
+
+**Fix:** default rule envia `customization_spec: {}` (commit pós-`e4f2294`). Verificado contra Meta com `validate_only` retornando `success: true` no payload exato do ad W21 que falhou.
+
+**Lição reusável:** quando ver `subcode 1487390` com `is_transient=false`, NÃO assumir transitório. Reproduzir com `execution_options=[validate_only]` (não persiste, dá pra rodar quantas variações precisar) e bisseccionar campos do `asset_feed_spec` — a Meta tipicamente engole a mensagem específica nesse subcode.
 
 ### War story 2026-05-22 — confirmação ao vivo do gatilho do 1885876
 

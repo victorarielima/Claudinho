@@ -66,8 +66,29 @@ Retry do Claudinho (`src/lib/meta-retry.ts`) considera retryable:
 | **2446461** | *"omnichannel_link_spec needs to be within your asset_feed_spec"* | Posição errada do spec em creatives multi-placement | Mover para `asset_feed_spec.link_urls[0].omnichannel_link_spec` |
 | **1359187** | *"Object store URLs are required for cross-channel"* | `object_store_urls` ausente no creative | Adicionar dentro de `call_to_action.value` (vídeo/imagem simples) ou `link_urls[0]` (imagem multi) |
 | **1487006** | Restrição de política (álcool, farmacêutico, etc) | Categoria do produto / copy inadequado | Revisar copy, target, ajustar categoria especial |
+| **1487390** | *"The Adcreative Create Failed for the following reason: Something went wrong. Please try again later"* (`[code 100]`, `is_transient=false`) | **Default rule no `asset_customization_rules` sem `customization_spec`.** Em ~27/05/2026 a Meta endureceu a validação: catch-all rules precisam da chave `customization_spec` presente (mesmo `{}`); antes a chave podia ser omitida e funcionava. O subcode é genérico e mascara a causa específica — só bissecção via `execution_options=[validate_only]` isola. War story 2026-05-27 abaixo. | Fix em `criarCreativeImagem()` (commit pós-`e4f2294`): default rule envia `customization_spec: {}`. Classificado em `erros-meta.ts` como "Default rule no asset_customization_rules sem customization_spec". |
 | **1487748** | *"The ad creative is not eligible for this placement"* | Asset incompatível (aspect ratio, tamanho) | Reenviar asset no formato correto |
-| **1885876** | *"Estamos com problemas para adicionar mais posicionamentos a esse anúncio."* | Bug do editor do Ads Manager com `asset_feed_spec` em campanha Advantage+ (ASC). Dois gatilhos: **(a)** `asset_customization_rules` não cobre todos os placements implícitos do ASC (Audience Network, Messenger, Threads); **(b)** cross-channel ghost link — Deep Link vazio na UI e operador cola manual. | **(a)** Default rule sem `customization_spec` em `asset_customization_rules` — commit `e4f2294`. **(b)** `omnichannel_link_spec` form-level + `link_urls[0]` — commit `6ba3c85`. **Ads pré-fix**: precisam ser recriados. |
+| **1885876** | *"Estamos com problemas para adicionar mais posicionamentos a esse anúncio."* | Bug do editor do Ads Manager com `asset_feed_spec` em campanha Advantage+ (ASC). Dois gatilhos: **(a)** `asset_customization_rules` não cobre todos os placements implícitos do ASC (Audience Network, Messenger, Threads); **(b)** cross-channel ghost link — Deep Link vazio na UI e operador cola manual. | **(a)** Default rule com `customization_spec: {}` em `asset_customization_rules` — commit `e4f2294` + ajuste pós-27/05/2026 (ver §1487390). **(b)** `omnichannel_link_spec` form-level + `link_urls[0]` — commit `6ba3c85`. **Ads pré-fix**: precisam ser recriados. |
+
+### War story 2026-05-27 — bug do nosso próprio fix do #1885876
+
+Dois ads Lupo Meraviglia W21-2026 (Evino) começaram a falhar com `code 100 / subcode 1487390` ("Adcreative Create Failed: Something went wrong"). 40 outros ads na mesma campanha ASCPremium concluíram normais — descartando Meta transitório e policy. Ads idênticos do mesmo produto W22-2026 (mesmos image hashes, mesmo texto, mesmo link) tinham passado em 22/05 — **antes do commit `e4f2294`**.
+
+Bissecção via `execution_options=[validate_only]` no POST `/{accountId}/adcreatives` (não persiste — ideal pra rodar variações):
+
+| Payload | Resultado |
+|---|---|
+| `asset_customization_rules` com default rule **sem** `customization_spec` (estado pós-`e4f2294`) | ❌ 1487390 |
+| Mesmo payload **sem** default rule | ✅ OK |
+| Default rule com `customization_spec: {}` | ✅ OK |
+| Default rule com `customization_spec: { publisher_platforms: ["audience_network","messenger"] }` | ✅ OK |
+| Apenas 1 rule (sem multi-placement) | ❌ 2446428 ("needs at least 2 target rules" — mensagem clara) |
+
+**Conclusão:** entre 22/05 e 27/05 a Meta passou a exigir a chave `customization_spec` PRESENTE em toda rule do `asset_customization_rules` (mesmo `{}`). Omiti-la — recomendação válida até então — passou a disparar 1487390 com `is_transient=false`. O subcode é genérico: a validação real falha mas o Meta engole a mensagem.
+
+**Fix:** default rule envia `customization_spec: {}` agora. Verificado com `validate_only` retornando `success: true` no payload exato do ad W21 que falhou.
+
+**Lição:** ao ver 1487390 com `is_transient=false`, NÃO assumir transitório nem policy. Bisseccionar `asset_feed_spec` via `validate_only`.
 
 ## Matriz de erro → arquivo do projeto
 
