@@ -19,6 +19,7 @@ import {
   X,
   Copy,
   Loader2,
+  Check,
   CheckCircle2,
   AlertCircle,
 } from "lucide-react";
@@ -60,7 +61,7 @@ interface AnuncioForm {
   textoPrincipal: string;
   linkCampanha: string;
   linkAnuncioOverride: string | null;
-  attachments: { placement: string; url: string; title: string }[];
+  attachments: { placement: string; url: string; title: string; selecionado: boolean }[];
 }
 
 // ─── Helpers ───────────────────────────────────────────────
@@ -194,6 +195,7 @@ export function FormularioLoteImagens({
           placement: a.placement,
           url: a.url,
           title: a.title,
+          selecionado: true,
         })),
       }))
     );
@@ -288,6 +290,21 @@ export function FormularioLoteImagens({
     });
   }, []);
 
+  // ── Toggle attachment selection ─────────────────────────
+  const toggleAttachment = useCallback((anuncioIndex: number, url: string) => {
+    setAnuncios((prev) => {
+      const next = [...prev];
+      const item = next[anuncioIndex];
+      next[anuncioIndex] = {
+        ...item,
+        attachments: item.attachments.map((att) =>
+          att.url === url ? { ...att, selecionado: !att.selecionado } : att
+        ),
+      };
+      return next;
+    });
+  }, []);
+
   // ── Remove anuncio ──────────────────────────────────────
   const removerAnuncio = useCallback((index: number) => {
     setAnuncios((prev) => prev.filter((_, i) => i !== index));
@@ -335,7 +352,9 @@ export function FormularioLoteImagens({
   const podeSalvar = useMemo(() => {
     if (!brandId || !campanhaId || !adSetId) return false;
     if (anuncios.length === 0) return false;
-    return anuncios.every((a) => a.adName.trim() && a.attachments.length > 0);
+    return anuncios.every(
+      (a) => a.adName.trim() && a.attachments.some((att) => att.selecionado)
+    );
   }, [brandId, campanhaId, adSetId, anuncios]);
 
   // ── Fetch existing ad names for selected destino ────────
@@ -430,11 +449,13 @@ export function FormularioLoteImagens({
             textoPrincipal: a.textoPrincipal || undefined,
             linkCampanha: a.linkCampanha || undefined,
             linkAnuncioOverride: a.linkAnuncioOverride || undefined,
-            assets: a.attachments.map((att) => ({
-              placement: att.placement,
-              url: att.url,
-              type: "image" as const,
-            })),
+            assets: a.attachments
+              .filter((att) => att.selecionado)
+              .map((att) => ({
+                placement: att.placement,
+                url: att.url,
+                type: "image" as const,
+              })),
           })),
         }),
       });
@@ -597,18 +618,34 @@ export function FormularioLoteImagens({
                 {/* Row 1: thumbnails + ad name */}
                 <div className="flex gap-3">
                   <div className="flex gap-1 shrink-0">
-                    {anuncio.attachments.slice(0, 3).map((att) => (
-                      <div key={att.url} className="relative">
+                    {anuncio.attachments.map((att) => (
+                      <button
+                        key={att.url}
+                        type="button"
+                        onClick={() => toggleAttachment(i, att.url)}
+                        aria-pressed={att.selecionado}
+                        title={att.selecionado ? "Clique para não enviar" : "Clique para enviar"}
+                        className={`relative h-16 w-16 rounded overflow-hidden ring-offset-background transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                          att.selecionado
+                            ? "ring-2 ring-primary"
+                            : "opacity-40 grayscale hover:opacity-70"
+                        }`}
+                      >
                         <img
                           src={att.url}
                           alt={att.title}
-                          className="h-16 w-16 rounded object-cover"
+                          className="h-full w-full object-cover"
                           loading="lazy"
                         />
-                        <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-[9px] text-white text-center py-0.5 rounded-b">
+                        {att.selecionado && (
+                          <span className="absolute top-0.5 right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                            <Check className="h-2.5 w-2.5" />
+                          </span>
+                        )}
+                        <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-[9px] text-white text-center py-0.5">
                           {placementLabel[att.placement] ?? att.placement}
                         </span>
-                      </div>
+                      </button>
                     ))}
                   </div>
                   <div className="flex-1 space-y-1">
@@ -635,6 +672,18 @@ export function FormularioLoteImagens({
                       <p className="text-[10px] text-amber-600">
                         Já existe neste ad set — será criado como{" "}
                         <span className="font-mono">{proximosNomes[i]}</span>
+                      </p>
+                    )}
+                    {anuncio.attachments.some((att) => att.selecionado) ? (
+                      <p className="text-[10px] text-muted-foreground">
+                        {anuncio.attachments.filter((att) => att.selecionado).length} de{" "}
+                        {anuncio.attachments.length} criativo
+                        {anuncio.attachments.length !== 1 ? "s" : ""} selecionado
+                        {anuncio.attachments.filter((att) => att.selecionado).length !== 1 ? "s" : ""}
+                      </p>
+                    ) : (
+                      <p className="text-[10px] text-destructive">
+                        Selecione ao menos um criativo
                       </p>
                     )}
                   </div>
