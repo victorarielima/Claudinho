@@ -865,7 +865,10 @@ export async function criarAnuncio(
   accountId: string,
   adsetId: string,
   name: string,
-  creativeId: string
+  creativeId: string,
+  // Default é PAUSED (regra de ouro #1: automação nunca sobe ATIVO sozinha).
+  // ACTIVE só quando o operador marca explicitamente o check no upload.
+  status: "PAUSED" | "ACTIVE" = "PAUSED"
 ): Promise<string> {
   const token = getAccessToken();
   const url = `${META_API_BASE}/${accountId}/ads`;
@@ -874,7 +877,7 @@ export async function criarAnuncio(
     name,
     adset_id: adsetId,
     creative: JSON.stringify({ creative_id: creativeId }),
-    status: "PAUSED",
+    status,
     access_token: token,
   });
 
@@ -902,6 +905,7 @@ export async function criarAnuncio(
     adsetId,
     adId: json.id,
     creativeId,
+    status,
   });
 
   return json.id;

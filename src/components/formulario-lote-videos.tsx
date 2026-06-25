@@ -1,8 +1,8 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useState } from "react";
-import { Loader2, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Loader2, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PreviewLinkAnuncio } from "@/components/editor-utm";
 import {
@@ -46,6 +46,13 @@ interface AdSet {
   nome: string;
   status: string;
   dailyBudget: string;
+}
+
+interface Destino {
+  campaignId: string;
+  campaignName: string;
+  adSetId: string;
+  adSetName: string;
 }
 
 interface AnuncioItem {
@@ -163,6 +170,9 @@ export function FormularioLoteVideos({
   const [brandId, setBrandId] = useState("");
   const [campanhaId, setCampanhaId] = useState("");
   const [adSetId, setAdSetId] = useState("");
+  // Multi-destino: lista de campanhas/ad sets para os quais os mesmos
+  // criativos serão enviados (fan-out). O seletor acima é o "staging".
+  const [destinos, setDestinos] = useState<Destino[]>([]);
 
   // ─── Form: shared fields ───────────────────────────────────
   const [descricao, setDescricao] = useState(DESCRICAO_PADRAO_VINHO);
@@ -209,6 +219,7 @@ export function FormularioLoteVideos({
     setBrandId("");
     setCampanhaId("");
     setAdSetId("");
+    setDestinos([]);
     setDescricao(DESCRICAO_PADRAO_VINHO);
     setCta(CTA_PADRAO_VINHO);
     setCampanhas([]);
@@ -223,6 +234,7 @@ export function FormularioLoteVideos({
     setAdsets([]);
     setCampanhaId("");
     setAdSetId("");
+    setDestinos([]); // destinos pertencem a uma conta; troca de marca os limpa
     if (!accountId) return;
 
     setCarregandoCampanhas(true);
@@ -299,6 +311,42 @@ export function FormularioLoteVideos({
     [carregarAdsets]
   );
 
+  // ─── Multi-destino ─────────────────────────────────────────
+  const adicionarDestino = useCallback(() => {
+    if (!campanhaId || !adSetId) return;
+    const campaignName = campanhas.find((c) => c.id === campanhaId)?.nome ?? campanhaId;
+    const adSetName = adsets.find((a) => a.id === adSetId)?.nome ?? adSetId;
+    setDestinos((prev) => {
+      if (prev.some((d) => d.adSetId === adSetId)) return prev; // já adicionado
+      return [...prev, { campaignId: campanhaId, campaignName, adSetId, adSetName }];
+    });
+    // Mantém a campanha selecionada para facilitar adicionar outro ad set dela.
+    setAdSetId("");
+  }, [campanhaId, adSetId, campanhas, adsets]);
+
+  const removerDestino = useCallback((adSetId: string) => {
+    setDestinos((prev) => prev.filter((d) => d.adSetId !== adSetId));
+  }, []);
+
+  // Destinos efetivos: a lista, ou — se vazia — o que estiver selecionado no
+  // staging (preserva o fluxo "escolhe 1 e salva" sem clique extra).
+  const destinosEfetivos: Destino[] = useMemo(
+    () =>
+      destinos.length > 0
+        ? destinos
+        : campanhaId && adSetId
+          ? [
+              {
+                campaignId: campanhaId,
+                campaignName: campanhas.find((c) => c.id === campanhaId)?.nome ?? campanhaId,
+                adSetId,
+                adSetName: adsets.find((a) => a.id === adSetId)?.nome ?? adSetId,
+              },
+            ]
+          : [],
+    [destinos, campanhaId, adSetId, campanhas, adsets]
+  );
+
   // ─── Update individual ad ──────────────────────────────────
   const atualizarAnuncio = useCallback(
     (videoId: string, campo: "adName" | "titulo" | "textoPrincipal" | "linkCampanha" | "linkAnuncioOverride", valor: string | null) => {
@@ -331,7 +379,7 @@ export function FormularioLoteVideos({
 
   // ─── Save ──────────────────────────────────────────────────
   const podeSalvar =
-    brandId && campanhaId && adSetId && anuncios.length > 0 && !salvando;
+    brandId && destinosEfetivos.length > 0 && anuncios.length > 0 && !salvando;
 
   const salvar = useCallback(async () => {
     if (!podeSalvar) return;
@@ -345,10 +393,7 @@ export function FormularioLoteVideos({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           brandId,
-          campaignName: campanhas.find((c) => c.id === campanhaId)?.nome ?? "",
-          campaignId: campanhaId,
-          adSetName: adsets.find((a) => a.id === adSetId)?.nome ?? "",
-          adSetId,
+          destinos: destinosEfetivos,
           textoPrincipal: "",
           descricao,
           cta,
@@ -370,8 +415,10 @@ export function FormularioLoteVideos({
       const json = await res.json();
       if (!res.ok) throw new Error(json.erro ?? "Erro ao salvar rascunhos");
 
+      const totalCriados = typeof json.criados === "number" ? json.criados : anuncios.length;
+      const sufixoDestino = destinosEfetivos.length > 1 ? ` em ${destinosEfetivos.length} destinos` : "";
       setMensagemSucesso(
-        `${anuncios.length} rascunho${anuncios.length !== 1 ? "s" : ""} salvo${anuncios.length !== 1 ? "s" : ""} com sucesso!`
+        `${totalCriados} rascunho${totalCriados !== 1 ? "s" : ""} salvo${totalCriados !== 1 ? "s" : ""}${sufixoDestino} com sucesso!`
       );
       setTimeout(() => {
         aoSalvar();
@@ -387,10 +434,7 @@ export function FormularioLoteVideos({
   }, [
     podeSalvar,
     brandId,
-    campanhaId,
-    campanhas,
-    adSetId,
-    adsets,
+    destinosEfetivos,
     descricao,
     cta,
     anuncios,
@@ -474,6 +518,45 @@ export function FormularioLoteVideos({
                 />
               </div>
             </div>
+
+            {/* Multi-destino: adicionar mais campanhas/ad sets */}
+            <div className="mt-3 flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={adicionarDestino}
+                disabled={!campanhaId || !adSetId}
+              >
+                <Plus className="mr-1 h-3.5 w-3.5" />
+                Adicionar destino
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Envie os mesmos vídeos para campanhas e ad sets diferentes numa única importação.
+              </p>
+            </div>
+
+            {destinos.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {destinos.map((d) => (
+                  <span
+                    key={d.adSetId}
+                    className="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 py-1 pl-3 pr-1.5 text-xs"
+                  >
+                    <span className="font-medium">{d.campaignName}</span>
+                    <span className="text-muted-foreground">/ {d.adSetName}</span>
+                    <button
+                      type="button"
+                      onClick={() => removerDestino(d.adSetId)}
+                      className="rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                      title="Remover destino"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
           </section>
 
           <Separator className="my-5" />

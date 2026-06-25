@@ -22,6 +22,7 @@ import {
   Check,
   CheckCircle2,
   AlertCircle,
+  Plus,
 } from "lucide-react";
 import { CTA_OPTIONS } from "@/lib/constants";
 import type { ClickUpTask } from "@/lib/clickup";
@@ -50,6 +51,13 @@ interface AdSet {
   nome: string;
   status: string;
   dailyBudget: number | null;
+}
+
+interface Destino {
+  campaignId: string;
+  campaignName: string;
+  adSetId: string;
+  adSetName: string;
 }
 
 interface AnuncioForm {
@@ -161,6 +169,8 @@ export function FormularioLoteImagens({
   const [brandId, setBrandId] = useState("");
   const [campanhaId, setCampanhaId] = useState("");
   const [adSetId, setAdSetId] = useState("");
+  // Multi-destino: mesmos criativos para campanhas/ad sets diferentes (fan-out).
+  const [destinos, setDestinos] = useState<Destino[]>([]);
 
   // ── Shared fields ───────────────────────────────────────
   const [descricao, setDescricao] = useState("");
@@ -218,6 +228,7 @@ export function FormularioLoteImagens({
     setAdsets([]);
     setCampanhaId("");
     setAdSetId("");
+    setDestinos([]);
     if (!accountId) return;
 
     setCarregandoCampanhas(true);
@@ -273,6 +284,22 @@ export function FormularioLoteImagens({
     },
     [carregarAdsets]
   );
+
+  // ── Multi-destino ───────────────────────────────────────
+  const adicionarDestino = useCallback(() => {
+    if (!campanhaId || !adSetId) return;
+    const campaignName = campanhas.find((c) => c.id === campanhaId)?.nome ?? campanhaId;
+    const adSetName = adsets.find((a) => a.id === adSetId)?.nome ?? adSetId;
+    setDestinos((prev) => {
+      if (prev.some((d) => d.adSetId === adSetId)) return prev;
+      return [...prev, { campaignId: campanhaId, campaignName, adSetId, adSetName }];
+    });
+    setAdSetId("");
+  }, [campanhaId, adSetId, campanhas, adsets]);
+
+  const removerDestino = useCallback((id: string) => {
+    setDestinos((prev) => prev.filter((d) => d.adSetId !== id));
+  }, []);
 
   // ── Update anuncio field ────────────────────────────────
   const updateAnuncio = useCallback((index: number, field: keyof AnuncioForm, value: string | null) => {
@@ -350,12 +377,14 @@ export function FormularioLoteImagens({
 
   // ── Validation ──────────────────────────────────────────
   const podeSalvar = useMemo(() => {
-    if (!brandId || !campanhaId || !adSetId) return false;
+    if (!brandId) return false;
+    // Precisa de pelo menos um destino: na lista ou no staging.
+    if (destinos.length === 0 && (!campanhaId || !adSetId)) return false;
     if (anuncios.length === 0) return false;
     return anuncios.every(
       (a) => a.adName.trim() && a.attachments.some((att) => att.selecionado)
     );
-  }, [brandId, campanhaId, adSetId, anuncios]);
+  }, [brandId, campanhaId, adSetId, destinos, anuncios]);
 
   // ── Fetch existing ad names for selected destino ────────
   const campanhaNome = useMemo(
@@ -367,8 +396,27 @@ export function FormularioLoteImagens({
     [adsets, adSetId]
   );
 
+  // Destinos efetivos: a lista, ou — se vazia — o staging selecionado.
+  const destinosEfetivos: Destino[] = useMemo(
+    () =>
+      destinos.length > 0
+        ? destinos
+        : campanhaId && adSetId
+          ? [{ campaignId: campanhaId, campaignName: campanhaNome, adSetId, adSetName: adSetNome }]
+          : [],
+    [destinos, campanhaId, adSetId, campanhaNome, adSetNome]
+  );
+
+  // Versionamento automático de nome só faz sentido para um único ad set
+  // (os existentes são consultados por ad set). Com fan-out multi-destino
+  // mantemos o nome digitado — nomes iguais em ad sets distintos não colidem.
+  const versionarNomes = destinosEfetivos.length <= 1;
+
   useEffect(() => {
-    if (!brandId || !campanhaNome || !adSetNome) {
+    // Só consultamos duplicatas quando há um único destino efetivo
+    // (o versionamento por ad set não faz sentido no fan-out).
+    const alvo = versionarNomes ? destinosEfetivos[0] : undefined;
+    if (!brandId || !alvo) {
       setAdNamesExistentes(new Set());
       return;
     }
@@ -376,7 +424,7 @@ export function FormularioLoteImagens({
     fetch("/api/ads/lote/checar-duplicatas", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ brandId, campaignName: campanhaNome, adSetName: adSetNome }),
+      body: JSON.stringify({ brandId, campaignName: alvo.campaignName, adSetName: alvo.adSetName }),
     })
       .then((r) => r.json())
       .then((json) => {
@@ -390,7 +438,7 @@ export function FormularioLoteImagens({
     return () => {
       cancelado = true;
     };
-  }, [brandId, campanhaNome, adSetNome]);
+  }, [brandId, versionarNomes, destinosEfetivos]);
 
   // Mapa: index do anuncio → próximo ad_name disponível (igual ao atual se não há conflito)
   const proximosNomes = useMemo(() => {
@@ -416,9 +464,9 @@ export function FormularioLoteImagens({
   const salvar = useCallback(async () => {
     if (!podeSalvar) return;
 
-    // Se há conflitos e o usuário ainda não confirmou, mostrar banner
-    // de confirmação em vez de salvar.
-    if (totalConflitos > 0 && !confirmandoVersao) {
+    // Se há conflitos (apenas no caso de destino único) e o usuário ainda
+    // não confirmou, mostrar banner de confirmação em vez de salvar.
+    if (versionarNomes && totalConflitos > 0 && !confirmandoVersao) {
       setConfirmandoVersao(true);
       setMensagemErro(null);
       return;
@@ -434,17 +482,14 @@ export function FormularioLoteImagens({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           brandId,
-          campaignName: campanhaNome,
-          campaignId: campanhaId,
-          adSetName: adSetNome,
-          adSetId,
+          destinos: destinosEfetivos,
           descricao,
           cta,
           textoPrincipal: "",
           linkCampanha: "",
           type: "image",
           anuncios: anuncios.map((a, i) => ({
-            adName: proximosNomes[i],
+            adName: versionarNomes ? proximosNomes[i] : a.adName,
             titulo: a.titulo,
             textoPrincipal: a.textoPrincipal || undefined,
             linkCampanha: a.linkCampanha || undefined,
@@ -463,8 +508,10 @@ export function FormularioLoteImagens({
       const json = await res.json();
       if (!res.ok) throw new Error(json.erro ?? "Erro ao salvar rascunhos");
 
+      const totalCriados = typeof json.criados === "number" ? json.criados : anuncios.length;
+      const sufixoDestino = destinosEfetivos.length > 1 ? ` em ${destinosEfetivos.length} destinos` : "";
       setMensagemSucesso(
-        `${anuncios.length} rascunho${anuncios.length !== 1 ? "s" : ""} salvo${anuncios.length !== 1 ? "s" : ""} com sucesso!`
+        `${totalCriados} rascunho${totalCriados !== 1 ? "s" : ""} salvo${totalCriados !== 1 ? "s" : ""}${sufixoDestino} com sucesso!`
       );
       setTimeout(() => {
         aoSalvar();
@@ -475,7 +522,7 @@ export function FormularioLoteImagens({
     } finally {
       setSalvando(false);
     }
-  }, [podeSalvar, totalConflitos, confirmandoVersao, brandId, campanhaId, adSetId, campanhaNome, adSetNome, descricao, cta, anuncios, proximosNomes, aoSalvar, aoFechar]);
+  }, [podeSalvar, versionarNomes, totalConflitos, confirmandoVersao, brandId, destinosEfetivos, descricao, cta, anuncios, proximosNomes, aoSalvar, aoFechar]);
 
   // ── Reset on close ──────────────────────────────────────
   useEffect(() => {
@@ -483,6 +530,7 @@ export function FormularioLoteImagens({
       setBrandId("");
       setCampanhaId("");
       setAdSetId("");
+      setDestinos([]);
       setDescricao("");
       setCta("SHOP_NOW");
       setAnuncios([]);
@@ -578,6 +626,48 @@ export function FormularioLoteImagens({
                 </Select>
               </div>
             </div>
+
+            {/* Multi-destino */}
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={adicionarDestino}
+                disabled={!campanhaId || !adSetId}
+              >
+                <Plus className="mr-1 h-3.5 w-3.5" />
+                Adicionar destino
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Envie os mesmos criativos para campanhas e ad sets diferentes numa única importação.
+              </p>
+            </div>
+
+            {destinos.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {destinos.map((d) => (
+                  <span
+                    key={d.adSetId}
+                    className="inline-flex items-center gap-1.5 rounded-full border bg-muted/50 py-1 pl-3 pr-1.5 text-xs"
+                  >
+                    <span className="font-medium">{d.campaignName}</span>
+                    <span className="text-muted-foreground">/ {d.adSetName}</span>
+                    <button
+                      type="button"
+                      onClick={() => removerDestino(d.adSetId)}
+                      className="rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                      title="Remover destino"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+                <span className="self-center text-[11px] text-muted-foreground">
+                  O versionamento automático de nomes (V2, V3…) é aplicado apenas com um único destino.
+                </span>
+              </div>
+            )}
           </div>
 
           {/* ── Shared Fields ────────────────────────────── */}

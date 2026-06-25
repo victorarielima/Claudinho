@@ -66,6 +66,8 @@ export async function POST(request: NextRequest) {
   const { userId } = await auth();
   const body = await request.json();
   const adId = body.adId as string | undefined;
+  // Opt-in explícito do operador para subir o ad já ATIVO (default: PAUSED).
+  const ativar = body.ativar === true;
 
   if (!adId) {
     return NextResponse.json({ erro: "adId e obrigatorio" }, { status: 400 });
@@ -126,7 +128,7 @@ export async function POST(request: NextRequest) {
 
     // Step D: Has creative, needs ad creation
     if (ad.meta_creative_id && !ad.meta_ad_id) {
-      return await stepCriarAnuncio(ad, accountId, userId);
+      return await stepCriarAnuncio(ad, accountId, userId, ativar);
     }
 
     // Step A/B/C: No creative yet
@@ -379,9 +381,10 @@ async function stepCriarCreative(
 async function stepCriarAnuncio(
   ad: Ad,
   accountId: string,
-  userId: string | null
+  userId: string | null,
+  ativar: boolean
 ): Promise<NextResponse> {
-  logger.info("Step D: Criar anuncio no Meta", { fn: "stepCriarAnuncio", adId: ad.id, creativeId: ad.meta_creative_id });
+  logger.info("Step D: Criar anuncio no Meta", { fn: "stepCriarAnuncio", adId: ad.id, creativeId: ad.meta_creative_id, ativar });
 
   // Idempotency: skip if already created
   if (ad.meta_ad_id) {
@@ -401,7 +404,13 @@ async function stepCriarAnuncio(
     throw new Error("Ad Set ID e obrigatorio para criar o anuncio na Meta.");
   }
 
-  const metaAdId = await criarAnuncio(accountId, ad.ad_set_id, ad.ad_name, ad.meta_creative_id);
+  const metaAdId = await criarAnuncio(
+    accountId,
+    ad.ad_set_id,
+    ad.ad_name,
+    ad.meta_creative_id,
+    ativar ? "ACTIVE" : "PAUSED"
+  );
 
   // Validação pós-criação: o Meta valida o ad asincronamente. Se houver
   // delivery error (ex: cross-channel mal configurado), surge em

@@ -12,6 +12,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   TabelaPendentes,
   type LinhaComStatus,
@@ -101,6 +102,8 @@ export function PainelCriacao() {
 
   // QW-1: Confirmation dialog before bulk upload
   const [confirmUpload, setConfirmUpload] = useState<{show: boolean, linhas: LinhaComStatus[]}>({show: false, linhas: []});
+  // Opt-in: subir os anúncios já ATIVOS (em vez de PAUSADOS). Default PAUSADO.
+  const [subirAtivo, setSubirAtivo] = useState(false);
   // QW-2: Per-ad progress counter during batch upload
   const [progressoUpload, setProgressoUpload] = useState<{atual: number, total: number} | null>(null);
   // QW-12: AlertDialog for delete confirmation
@@ -390,7 +393,7 @@ export function PainelCriacao() {
   const limparSelecao = useCallback(() => { setSelecionados(new Set()); }, []);
 
   // ─── Subir anúncio ─────────────────────────────────────────
-  const subirAnuncio = useCallback(async (linha: LinhaComStatus) => {
+  const subirAnuncio = useCallback(async (linha: LinhaComStatus, ativar = false) => {
     if (!linha.prontoMeta) {
       setFeedback({
         tipo: "aviso",
@@ -417,6 +420,7 @@ export function PainelCriacao() {
         const payload = {
           indiceLinha: linha.indiceLinha,
           aba: abaLegada,
+          ativar,
           adSetId: linha.adSetId,
           adName: linha.adName,
           textoPrincipal: linha.textoPrincipal,
@@ -451,7 +455,7 @@ export function PainelCriacao() {
       const resInicio = await fetch("/api/meta/criar-anuncio", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ adId: linha.adId }),
+        body: JSON.stringify({ adId: linha.adId, ativar }),
       });
       const jsonInicio = await resInicio.json();
       if (!resInicio.ok) throw new Error(jsonInicio.erro ?? "Erro ao iniciar upload");
@@ -476,7 +480,7 @@ export function PainelCriacao() {
         const resPoll = await fetch("/api/meta/processar", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ adId: linha.adId }),
+          body: JSON.stringify({ adId: linha.adId, ativar }),
         });
         const jsonPoll = await resPoll.json();
 
@@ -557,12 +561,14 @@ export function PainelCriacao() {
       : linhas.filter(podeSubir);
 
     if (alvo.length === 0) return;
+    setSubirAtivo(false); // sempre reabre como PAUSADO; operador opta por ATIVO no dialog
     setConfirmUpload({ show: true, linhas: alvo });
   }, [linhas, selecionados]);
 
   // QW-1 + QW-2: Execute bulk upload after confirmation
   const subirSelecionados = useCallback(async () => {
     const alvo = confirmUpload.linhas;
+    const ativar = subirAtivo;
     setConfirmUpload({ show: false, linhas: [] });
     if (alvo.length === 0) return;
 
@@ -571,11 +577,12 @@ export function PainelCriacao() {
     for (const linha of alvo) {
       contador += 1;
       setProgressoUpload({ atual: contador, total: alvo.length });
-      await subirAnuncio(linha);
+      await subirAnuncio(linha, ativar);
     }
     setProgressoUpload(null);
     setSelecionados(new Set());
-  }, [confirmUpload.linhas, subirAnuncio]);
+    setSubirAtivo(false);
+  }, [confirmUpload.linhas, subirAtivo, subirAnuncio]);
 
   // ─── Importar da planilha ──────────────────────────────────
   const importarDaPlanilha = useCallback(async () => {
@@ -1146,10 +1153,27 @@ export function PainelCriacao() {
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          <label className="flex cursor-pointer items-start gap-3 rounded-lg border bg-muted/30 p-3">
+            <Checkbox
+              checked={subirAtivo}
+              onCheckedChange={(v) => setSubirAtivo(v === true)}
+              className="mt-0.5"
+            />
+            <span className="text-sm">
+              <span className="font-medium">Subir como ATIVO</span>
+              <span className="block text-xs text-muted-foreground">
+                {subirAtivo
+                  ? "Os anúncios vão ao ar imediatamente após aprovação do Meta."
+                  : "Por padrão os anúncios sobem PAUSADOS. Marque para já ativá-los."}
+              </span>
+            </span>
+          </label>
+
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={subirSelecionados}>
-              Confirmar Upload
+              {subirAtivo ? "Confirmar e Ativar" : "Confirmar Upload"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

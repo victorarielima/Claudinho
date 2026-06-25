@@ -47,6 +47,8 @@ interface CorpoNovoFluxo {
 interface CorpoLegado {
   indiceLinha: number;
   aba: ChaveAba;
+  /** Opt-in explícito para subir o ad já ATIVO (default: PAUSED). */
+  ativar?: boolean;
   adSetId: string;
   adName: string;
   textoPrincipal: string;
@@ -313,7 +315,8 @@ async function processarFluxoLegado(body: CorpoLegado) {
       accountId,
       body.adSetId,
       body.adName,
-      creativeId
+      creativeId,
+      body.ativar ? "ACTIVE" : "PAUSED"
     );
 
     // Validação pós-criação: o Meta valida o ad de forma assíncrona.

@@ -18,6 +18,13 @@ interface AnuncioItem {
   assets?: { placement: string; url: string; type: "image" | "video" }[];
 }
 
+interface Destino {
+  campaignName: string;
+  campaignId: string;
+  adSetName: string;
+  adSetId: string;
+}
+
 interface LoteBody {
   brandId: string;
   campaignName: string;
@@ -30,6 +37,23 @@ interface LoteBody {
   linkCampanha: string;
   type?: "video" | "image";
   anuncios: AnuncioItem[];
+  /**
+   * Multi-destino: cada anúncio é criado uma vez por destino (fan-out),
+   * permitindo subir o mesmo criativo para campanhas/ad sets diferentes
+   * numa única importação. Quando ausente, cai no destino único legado
+   * (campos campaign/adSet no nível do body).
+   */
+  destinos?: Destino[];
+}
+
+/** Normaliza um destino aplicando o fallback nome←id. Retorna null se inválido. */
+function normalizarDestino(d: Partial<Destino>): Destino | null {
+  const campaignId = d.campaignId ?? "";
+  const adSetId = d.adSetId ?? "";
+  const campaignName = (d.campaignName || campaignId).trim();
+  const adSetName = (d.adSetName || adSetId).trim();
+  if (!campaignName || !adSetName) return null;
+  return { campaignName, campaignId, adSetName, adSetId };
 }
 
 export async function POST(request: NextRequest) {
@@ -50,18 +74,30 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Se não veio nome, buscar via ID na Meta API
-    if (!body.campaignName && body.campaignId) {
-      body.campaignName = body.campaignId;
-    }
-    if (!body.adSetName && body.adSetId) {
-      body.adSetName = body.adSetId;
-    }
-    if (!body.campaignName || !body.adSetName) {
-      return NextResponse.json(
-        { erro: "campaignName/campaignId e adSetName/adSetId são obrigatórios" },
-        { status: 400 }
-      );
+    // Resolver destinos: multi-destino (fan-out) ou destino único legado.
+    let destinos: Destino[];
+    if (body.destinos && body.destinos.length > 0) {
+      destinos = body.destinos.map(normalizarDestino).filter((d): d is Destino => d !== null);
+      if (destinos.length === 0) {
+        return NextResponse.json(
+          { erro: "Cada destino precisa de campanha e ad set válidos" },
+          { status: 400 }
+        );
+      }
+    } else {
+      const unico = normalizarDestino({
+        campaignName: body.campaignName,
+        campaignId: body.campaignId,
+        adSetName: body.adSetName,
+        adSetId: body.adSetId,
+      });
+      if (!unico) {
+        return NextResponse.json(
+          { erro: "campaignName/campaignId e adSetName/adSetId são obrigatórios" },
+          { status: 400 }
+        );
+      }
+      destinos = [unico];
     }
 
     if (!body.anuncios || body.anuncios.length === 0) {
@@ -73,7 +109,11 @@ export async function POST(request: NextRequest) {
 
     const adType = body.type ?? "video";
 
-    const promises = body.anuncios.map((item) => {
+    // Fan-out: cada anúncio é criado uma vez por destino.
+    type Tarefa = { adName: string; destino: Destino; promise: Promise<unknown> };
+    const tarefas: Tarefa[] = [];
+
+    for (const item of body.anuncios) {
       let assets: { placement: string; asset_url: string; asset_type: "image" | "video" }[];
 
       if (item.assets && item.assets.length > 0) {
@@ -94,35 +134,38 @@ export async function POST(request: NextRequest) {
         ];
       }
 
-      const input: CriarAdInput = {
-        brand_id: body.brandId,
-        type: adType,
-        campaign_name: body.campaignName,
-        campaign_id: body.campaignId,
-        ad_set_name: body.adSetName,
-        ad_set_id: body.adSetId,
-        ad_name: item.adName,
-        titulo: item.titulo,
-        texto_principal: item.textoPrincipal || body.textoPrincipal,
-        descricao: descricaoPadrao,
-        cta: ctaPadrao,
-        link_campanha: item.linkCampanha || body.linkCampanha,
-        link_anuncio_override: item.linkAnuncioOverride,
-        assets,
-      };
+      for (const destino of destinos) {
+        const input: CriarAdInput = {
+          brand_id: body.brandId,
+          type: adType,
+          campaign_name: destino.campaignName,
+          campaign_id: destino.campaignId,
+          ad_set_name: destino.adSetName,
+          ad_set_id: destino.adSetId,
+          ad_name: item.adName,
+          titulo: item.titulo,
+          texto_principal: item.textoPrincipal || body.textoPrincipal,
+          descricao: descricaoPadrao,
+          cta: ctaPadrao,
+          link_campanha: item.linkCampanha || body.linkCampanha,
+          link_anuncio_override: item.linkAnuncioOverride,
+          assets,
+        };
 
-      return criarAd(input, userId);
-    });
+        tarefas.push({ adName: item.adName, destino, promise: criarAd(input, userId) });
+      }
+    }
 
-    const results = await Promise.allSettled(promises);
+    const results = await Promise.allSettled(tarefas.map((t) => t.promise));
 
     const detalhes = results.map((result, i) => {
-      const adName = body.anuncios[i].adName;
+      const { adName, destino } = tarefas[i];
       if (result.status === "fulfilled") {
-        return { ad_name: adName, status: "criado" as const };
+        return { ad_name: adName, ad_set_name: destino.adSetName, status: "criado" as const };
       }
       return {
         ad_name: adName,
+        ad_set_name: destino.adSetName,
         status: "erro" as const,
         error: result.reason instanceof Error ? result.reason.message : "Erro desconhecido",
       };
@@ -131,7 +174,7 @@ export async function POST(request: NextRequest) {
     const criados = detalhes.filter((d) => d.status === "criado").length;
     const erros = detalhes.filter((d) => d.status === "erro").length;
 
-    return NextResponse.json({ criados, erros, detalhes });
+    return NextResponse.json({ criados, erros, detalhes, destinos: destinos.length });
   } catch (error) {
     const mensagem =
       error instanceof Error ? error.message : "Erro desconhecido";
