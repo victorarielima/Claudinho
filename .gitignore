@@ -55,6 +55,10 @@ next-env.d.ts
 /secrets/
 *.key
 *.cert
+# Stray credential files na raiz (config real fica nas env vars da Vercel)
+/env
+/trim-surfer-*.json
+*-*.iam.gserviceaccount.json
 
 # clerk configuration (can include secrets)
 /.clerk/

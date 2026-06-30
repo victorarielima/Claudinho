@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { criarAd, type CriarAdInput } from "@/lib/db";
+import { criarAd, buscarBrand, type CriarAdInput, type Ad } from "@/lib/db";
 import { normalizarPlacementImagem } from "@/lib/ad-media";
+import { appendAnunciosExportados, linhaExportacaoDeAd } from "@/lib/sheets";
 
 interface AnuncioItem {
   adName: string;
@@ -173,6 +174,23 @@ export async function POST(request: NextRequest) {
 
     const criados = detalhes.filter((d) => d.status === "criado").length;
     const erros = detalhes.filter((d) => d.status === "erro").length;
+
+    // Exporta os anúncios criados para a planilha de acompanhamento.
+    // Falha aqui não deve quebrar a criação — o anúncio já foi salvo.
+    try {
+      const adsCriados = results
+        .filter((r): r is PromiseFulfilledResult<Ad> => r.status === "fulfilled")
+        .map((r) => r.value);
+
+      if (adsCriados.length > 0) {
+        const brand = await buscarBrand(body.brandId);
+        if (brand) {
+          await appendAnunciosExportados(brand.name, adsCriados.map(linhaExportacaoDeAd));
+        }
+      }
+    } catch (e) {
+      console.error("Falha ao exportar anúncios para a planilha de acompanhamento:", e);
+    }
 
     return NextResponse.json({ criados, erros, detalhes, destinos: destinos.length });
   } catch (error) {

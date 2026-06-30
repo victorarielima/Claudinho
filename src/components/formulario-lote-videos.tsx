@@ -84,20 +84,6 @@ export interface FormularioLoteVideosProps {
  * Extrai o destino (PRODUCT, CAMPAIGN, etc.) a partir da URL de campanha.
  * Ex: evino.com.br/product/... → PRODUCT, evino.com.br/campaign/... → CAMPAIGN
  */
-function extrairDestinoDaUrl(url: string): string {
-  if (!url) return "";
-  try {
-    const pathname = new URL(url).pathname.toLowerCase();
-    if (pathname.includes("/product")) return "PRODUCT";
-    if (pathname.includes("/campaign")) return "CAMPAIGN";
-    if (pathname.includes("/category") || pathname.includes("/categoria")) return "CATEGORY";
-    if (pathname.includes("/landing")) return "LANDING";
-    return "LINK";
-  } catch {
-    return "";
-  }
-}
-
 /**
  * Retorna a semana ISO e o ano no formato W{NN}-{AAAA}.
  */
@@ -126,20 +112,13 @@ function limparMiolo(nomeArquivo: string): string {
 
 /**
  * Gera o ad name seguindo o padrão:
- * VIDEO-{DESTINO}-{MIOLO}-W{NN}-{AAAA}
- *
- * Se destino não for identificável, omite essa parte.
+ * VID-{MIOLO}-W{NN}-{AAAA}
  */
-function gerarAdName(nomeArquivo: string, linkCampanha?: string): string {
+function gerarAdName(nomeArquivo: string): string {
   const miolo = limparMiolo(nomeArquivo);
-  const destino = linkCampanha ? extrairDestinoDaUrl(linkCampanha) : "";
   const semana = semanaAno();
 
-  const partes = ["VIDEO"];
-  if (destino) partes.push(destino);
-  partes.push(miolo, semana);
-
-  return partes.join("-");
+  return ["VID", miolo, semana].join("-");
 }
 
 import { CTA_OPTIONS } from "@/lib/constants";
@@ -355,10 +334,6 @@ export function FormularioLoteVideos({
           if (a.videoId !== videoId) return a;
           const atualizado = { ...a, [campo]: valor };
           if (campo === "adName") atualizado.nomeEditado = true;
-          // Regenerar ad name quando link individual muda (se não editado manualmente)
-          if (campo === "linkCampanha" && !a.nomeEditado && typeof valor === "string") {
-            atualizado.adName = gerarAdName(a.nomeArquivo, valor);
-          }
           return atualizado;
         })
       );

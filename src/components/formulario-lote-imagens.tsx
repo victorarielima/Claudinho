@@ -74,20 +74,6 @@ interface AnuncioForm {
 
 // ─── Helpers ───────────────────────────────────────────────
 
-function extrairDestinoDaUrl(url: string): string {
-  try {
-    const u = new URL(url);
-    const path = u.pathname.toLowerCase();
-    if (path.includes("/produto/") || path.includes("/product/")) return "PRODUCT";
-    if (path.includes("/campanha/") || path.includes("/campaign/")) return "CAMPAIGN";
-    if (path.includes("/categoria/") || path.includes("/category/")) return "CATEGORY";
-    if (path.includes("/landing")) return "LANDING";
-    return "LINK";
-  } catch {
-    return "";
-  }
-}
-
 function semanaAno(): string {
   const now = new Date();
   const oneJan = new Date(now.getFullYear(), 0, 1);
@@ -111,16 +97,11 @@ function limparMiolo(nome: string): string {
   return s;
 }
 
-function gerarAdName(taskName: string, linkCampanha?: string): string {
+function gerarAdName(taskName: string): string {
   const miolo = limparMiolo(taskName);
-  const destino = linkCampanha ? extrairDestinoDaUrl(linkCampanha) : "";
   const semana = semanaAno();
 
-  const partes = ["STATIC"];
-  if (destino) partes.push(destino);
-  partes.push(miolo, semana);
-
-  return partes.join("-");
+  return ["EST", miolo, semana].join("-");
 }
 
 function escaparRegex(s: string): string {
@@ -306,9 +287,6 @@ export function FormularioLoteImagens({
     setAnuncios((prev) => {
       const next = [...prev];
       const item = { ...next[index], [field]: value };
-      if (field === "linkCampanha" && !item.adNameEditado && typeof value === "string") {
-        item.adName = gerarAdName(item.taskName, value);
-      }
       if (field === "adName") {
         item.adNameEditado = true;
       }
@@ -344,9 +322,6 @@ export function FormularioLoteImagens({
       return prev.map((a, i) => {
         if (i === fromIndex) return a;
         const updated = { ...a, [field]: valor };
-        if (field === "linkCampanha" && !a.adNameEditado) {
-          updated.adName = gerarAdName(a.taskName, valor);
-        }
         return updated;
       });
     });

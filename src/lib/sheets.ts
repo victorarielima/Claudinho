@@ -1,5 +1,6 @@
 import { google } from "googleapis";
 import { getGoogleAuth } from "./google-auth";
+import type { Ad } from "./db";
 
 function getAuth() {
   return getGoogleAuth();
@@ -420,6 +421,150 @@ export async function atualizarAccountId(
     requestBody: {
       values: [[accountId]],
     },
+  });
+}
+
+// ─── Exportação automática para a planilha de acompanhamento ──
+//
+// Quando um anúncio é criado pelo formulário, replicamos a linha numa
+// planilha externa de acompanhamento (uma aba por marca), logo abaixo da
+// última linha preenchida. Usa `values.append` com INSERT_ROWS, que detecta
+// sozinho o fim da tabela.
+//
+// IMPORTANTE: a escrita usa a service account (getGoogleAuth). A planilha
+// precisa estar compartilhada como Editor com o e-mail da service account
+// (client_email do JSON de credenciais) — não basta o usuário ter acesso.
+
+const SPREADSHEET_EXPORTACAO_ID =
+  process.env.GOOGLE_SHEETS_EXPORT_ID || "1SIm9wuzoAHf5rNwECZPASBQM12uPKUTNcacQeeFm17A";
+
+// Mapeia a marca para a aba de destino. Ordem importa: testa por substring.
+const ABAS_EXPORTACAO: { contem: string; aba: string }[] = [
+  { contem: "grand", aba: "Grand Cru - Meta" },
+  { contem: "evino", aba: "Evino - Meta" },
+];
+
+type CampoExportacao =
+  | "conjuntoAnuncio"
+  | "linkAnuncio"
+  | "adName"
+  | "textoPrincipal"
+  | "titulo"
+  | "descricao"
+  | "cta";
+
+const EXPORT_HEADER_ALIASES: Record<CampoExportacao, string[]> = {
+  conjuntoAnuncio: ["conjunto de anuncio", "conjunto de anuncios", "conjunto", "ad set", "adset"],
+  linkAnuncio: ["link anuncio", "link do anuncio", "link"],
+  adName: ["ad name nome do anuncio", "ad name", "nome do anuncio", "nome anuncio"],
+  textoPrincipal: ["texto principal legenda", "texto principal", "legenda", "texto"],
+  titulo: ["titulo", "title", "headline"],
+  descricao: ["descricao", "description"],
+  cta: ["cta", "call to action"],
+};
+
+// Posição padrão das colunas caso o cabeçalho não seja encontrado.
+const EXPORT_FALLBACK_INDEX: Record<CampoExportacao, number> = {
+  conjuntoAnuncio: 0,
+  linkAnuncio: 1,
+  adName: 2,
+  textoPrincipal: 3,
+  titulo: 4,
+  descricao: 5,
+  cta: 6,
+};
+
+export interface LinhaExportacao {
+  conjuntoAnuncio: string;
+  linkAnuncio: string;
+  adName: string;
+  textoPrincipal: string;
+  titulo: string;
+  descricao: string;
+  cta: string;
+}
+
+/** Resolve a aba de exportação a partir do nome da marca. */
+export function resolverAbaExportacao(brandName: string): string | null {
+  const nome = brandName.toLowerCase();
+  for (const { contem, aba } of ABAS_EXPORTACAO) {
+    if (nome.includes(contem)) return aba;
+  }
+  return null;
+}
+
+/** Converte um Ad (já criado) numa linha da planilha de acompanhamento. */
+export function linhaExportacaoDeAd(ad: Ad): LinhaExportacao {
+  return {
+    conjuntoAnuncio: ad.ad_set_name,
+    linkAnuncio: ad.link_anuncio ?? "",
+    adName: ad.ad_name,
+    textoPrincipal: ad.texto_principal ?? "",
+    titulo: ad.titulo ?? "",
+    descricao: ad.descricao ?? "",
+    cta: ad.cta,
+  };
+}
+
+/**
+ * Acrescenta linhas de anúncios na planilha externa de acompanhamento,
+ * abaixo da última linha preenchida da aba correspondente à marca.
+ * Lança erro se a marca não tiver aba mapeada — o chamador deve decidir
+ * se isso quebra ou não o fluxo (a criação do anúncio não deve depender disso).
+ */
+export async function appendAnunciosExportados(
+  brandName: string,
+  linhas: LinhaExportacao[]
+): Promise<void> {
+  if (linhas.length === 0) return;
+
+  const aba = resolverAbaExportacao(brandName);
+  if (!aba) {
+    throw new Error(`Marca "${brandName}" não tem aba mapeada na planilha de acompanhamento`);
+  }
+
+  const sheets = await obterSheetsClient();
+
+  // Mapear colunas pelo cabeçalho (com fallback para a ordem padrão).
+  const cab = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_EXPORTACAO_ID,
+    range: `'${aba}'!1:1`,
+  });
+  const cabecalhos = (cab.data.values?.[0] ?? []).map((valor) => normalizarCabecalho(String(valor)));
+  const usandoCabecalho = cabecalhos.some((valor) => valor.length > 0);
+
+  const indices = (Object.keys(EXPORT_FALLBACK_INDEX) as CampoExportacao[]).reduce(
+    (acc, campo) => {
+      const indiceCabecalho = usandoCabecalho
+        ? encontrarIndiceCabecalho(cabecalhos, EXPORT_HEADER_ALIASES[campo])
+        : -1;
+      acc[campo] = indiceCabecalho >= 0 ? indiceCabecalho : EXPORT_FALLBACK_INDEX[campo];
+      return acc;
+    },
+    {} as Record<CampoExportacao, number>
+  );
+
+  const maxIndice = Math.max(...Object.values(indices));
+  const colunaFinal = indiceParaColunaA1(maxIndice);
+
+  const values = linhas.map((linha) => {
+    const row = new Array<string>(maxIndice + 1).fill("");
+    row[indices.conjuntoAnuncio] = linha.conjuntoAnuncio;
+    row[indices.linkAnuncio] = linha.linkAnuncio;
+    row[indices.adName] = linha.adName;
+    row[indices.textoPrincipal] = linha.textoPrincipal;
+    row[indices.titulo] = linha.titulo;
+    row[indices.descricao] = linha.descricao;
+    row[indices.cta] = linha.cta;
+    return row;
+  });
+
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: SPREADSHEET_EXPORTACAO_ID,
+    range: `'${aba}'!A:${colunaFinal}`,
+    valueInputOption: "RAW",
+    insertDataOption: "INSERT_ROWS",
+    requestBody: { values },
   });
 }
 

@@ -3,12 +3,14 @@ import { auth } from "@clerk/nextjs/server";
 import {
   listarAds,
   criarAd,
+  buscarBrand,
   type FiltrosAd,
   type StatusAd,
   type TipoAd,
   type CriarAdInput,
 } from "@/lib/db";
 import { normalizarPlacementImagem } from "@/lib/ad-media";
+import { appendAnunciosExportados, linhaExportacaoDeAd } from "@/lib/sheets";
 
 function ehUrlHttp(valor: unknown): valor is string {
   return typeof valor === "string" && /^https?:\/\//i.test(valor.trim());
@@ -141,6 +143,18 @@ export async function POST(request: NextRequest) {
     };
 
     const ad = await criarAd(input, userId);
+
+    // Exporta o anúncio para a planilha de acompanhamento (aba por marca).
+    // Falha aqui não deve quebrar a criação — o anúncio já foi salvo.
+    try {
+      const brand = await buscarBrand(ad.brand_id);
+      if (brand) {
+        await appendAnunciosExportados(brand.name, [linhaExportacaoDeAd(ad)]);
+      }
+    } catch (e) {
+      console.error("Falha ao exportar anúncio para a planilha de acompanhamento:", e);
+    }
+
     return NextResponse.json({ data: ad }, { status: 201 });
   } catch (error) {
     const mensagem = error instanceof Error ? error.message : "Erro desconhecido";
