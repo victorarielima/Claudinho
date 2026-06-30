@@ -1,21 +1,33 @@
 /**
- * Gera link completo com UTMs a partir do link base da campanha.
+ * Gera o link final do anúncio a partir do link base.
  *
- * Template:
- *   LINK_CAMPANHA?utm_source=Facebook&utm_medium=Ads
+ * Regras:
+ * - Se o usuário já forneceu um link **completo** (contém qualquer parâmetro
+ *   `utm_*`), ele é priorizado e devolvido exatamente como está. É o link dele.
+ * - Caso contrário, o link é montado automaticamente: `utm_campaign` recebe o
+ *   nome do conjunto de anúncios (ad set) e `utm_content` o nome do anúncio.
+ *   Como esses nomes alimentam o link, ao mudar o nome o link muda junto.
+ *
+ * Template gerado automaticamente:
+ *   LINK_BASE?utm_source=Facebook&utm_medium=Ads
  *     &utm_campaign=NOME_CONJUNTO_ANUNCIOS&utm_content=NOME_ANUNCIO&openShop=true
- *
- * O `utm_campaign` recebe o nome do conjunto de anúncios (ad set), não o da
- * campanha.
  */
 export function gerarLinkAnuncio(
-  linkCampanha: string,
+  linkBase: string,
   adSetName: string,
   adName: string
 ): string {
-  if (!linkCampanha || !linkCampanha.trim()) return "";
+  if (!linkBase || !linkBase.trim()) return "";
 
-  const url = new URL(linkCampanha.trim());
+  const url = new URL(linkBase.trim());
+
+  // Link já completo (com UTMs): prioriza exatamente o que o usuário colocou.
+  let jaTemUtm = false;
+  url.searchParams.forEach((_valor, chave) => {
+    if (chave.toLowerCase().startsWith("utm_")) jaTemUtm = true;
+  });
+  if (jaTemUtm) return url.toString();
+
   url.searchParams.set("utm_source", "Facebook");
   url.searchParams.set("utm_medium", "Ads");
   url.searchParams.set("utm_campaign", limparNomeParaUtm(adSetName));
