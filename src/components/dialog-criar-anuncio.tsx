@@ -786,7 +786,7 @@ export function DialogCriarAnuncio({
                         rotulo="Titulo"
                         valor={form.titulo}
                         onChange={(valor) => atualizarCampo("titulo", valor)}
-                        contador={40}
+                        contador={50}
                       />
                       <CampoTexto
                         rotulo="Descricao"

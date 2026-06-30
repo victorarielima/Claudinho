@@ -227,11 +227,11 @@ export function analisarProntidaoAnuncio(input: AnuncioValidavel): DiagnosticoAn
     });
   }
 
-  if (input.titulo && input.titulo.trim().length > 40) {
+  if (input.titulo && input.titulo.trim().length > 50) {
     avisos.push({
       nivel: "aviso",
       codigo: "titulo_longo",
-      mensagem: "Titulo excede 40 caracteres (recomendado pelo Meta)",
+      mensagem: "Titulo excede 50 caracteres (recomendado pelo Meta)",
     });
   }
 

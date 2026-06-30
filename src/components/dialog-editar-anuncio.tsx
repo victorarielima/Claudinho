@@ -452,7 +452,7 @@ export function DialogEditarAnuncio({
                   valor={form.titulo}
                   onChange={(v) => atualizar("titulo", v)}
                   placeholder="Título visível ao cliente"
-                  contador={40}
+                  contador={50}
                 />
                 <CampoTexto
                   rotulo="Descrição"
