@@ -759,15 +759,15 @@ export function FormularioLoteImagens({
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
                       <label className="text-[11px] text-muted-foreground">Título</label>
-                      <span className={`text-[10px] ${anuncio.titulo.length > 40 ? "text-destructive" : "text-muted-foreground"}`}>
-                        {anuncio.titulo.length}/40
+                      <span className={`text-[10px] ${anuncio.titulo.length > 50 ? "text-destructive" : "text-muted-foreground"}`}>
+                        {anuncio.titulo.length}/50
                       </span>
                     </div>
                     <input
                       value={anuncio.titulo}
                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateAnuncio(i, "titulo", e.target.value)}
                       className="h-8 text-xs w-full rounded-md border border-input bg-background px-3 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      maxLength={40}
+                      maxLength={50}
                     />
                     {anuncio.titulo.length === 0 && (
                       <p className="text-[10px] text-amber-600">Recomendado pela Meta</p>

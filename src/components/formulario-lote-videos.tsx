@@ -642,7 +642,7 @@ export function FormularioLoteVideos({
                       <input
                         type="text"
                         value={anuncio.titulo}
-                        maxLength={40}
+                        maxLength={50}
                         onChange={(e) =>
                           atualizarAnuncio(
                             anuncio.videoId,
@@ -653,8 +653,8 @@ export function FormularioLoteVideos({
                         className="h-8 w-full rounded-md border border-input bg-background px-2.5 pr-12 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                         placeholder="Título"
                       />
-                      <span className={`absolute right-2 top-1/2 -translate-y-1/2 text-[10px] tabular-nums ${anuncio.titulo.trim().length > 40 ? "text-amber-600 font-medium" : "text-muted-foreground"}`}>
-                        {anuncio.titulo.trim().length}/40
+                      <span className={`absolute right-2 top-1/2 -translate-y-1/2 text-[10px] tabular-nums ${anuncio.titulo.trim().length > 50 ? "text-amber-600 font-medium" : "text-muted-foreground"}`}>
+                        {anuncio.titulo.trim().length}/50
                       </span>
                     </div>
                     <div className="flex gap-1.5 items-start">
