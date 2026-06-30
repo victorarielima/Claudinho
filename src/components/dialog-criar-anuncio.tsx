@@ -154,12 +154,12 @@ function montarAssets(form: FormularioCriativo, tipo: TipoCriativo) {
 }
 
 function montarLinkUtm(form: FormularioCriativo): string {
-  if (!form.link_campanha.trim() || !form.campaign_name.trim() || !form.ad_name.trim()) {
+  if (!form.link_campanha.trim() || !form.ad_set_name.trim() || !form.ad_name.trim()) {
     return "";
   }
 
   try {
-    return gerarLinkAnuncio(form.link_campanha, form.campaign_name, form.ad_name);
+    return gerarLinkAnuncio(form.link_campanha, form.ad_set_name, form.ad_name);
   } catch {
     return form.link_campanha.trim();
   }

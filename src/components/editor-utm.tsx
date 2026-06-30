@@ -246,24 +246,24 @@ function EditorUtm({
 
 export function PreviewLinkAnuncio({
   linkCampanha,
-  campaignName,
+  adSetName,
   adName,
   onOverride,
   override,
 }: {
   linkCampanha: string;
-  campaignName: string;
+  adSetName: string;
   adName: string;
   onOverride: (url: string | null) => void;
   override: string | null;
 }) {
   const gerado = useMemo(() => {
     try {
-      return linkCampanha ? gerarLinkAnuncio(linkCampanha, campaignName, adName) : "";
+      return linkCampanha ? gerarLinkAnuncio(linkCampanha, adSetName, adName) : "";
     } catch {
       return "";
     }
-  }, [linkCampanha, campaignName, adName]);
+  }, [linkCampanha, adSetName, adName]);
 
   const linkFinal = override ?? gerado;
   const foiEditado = override !== null && override !== gerado;

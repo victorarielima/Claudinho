@@ -3,11 +3,14 @@
  *
  * Template:
  *   LINK_CAMPANHA?utm_source=Facebook&utm_medium=Ads
- *     &utm_campaign=NOME_CAMPANHA&utm_content=NOME_ANUNCIO&openShop=true
+ *     &utm_campaign=NOME_CONJUNTO_ANUNCIOS&utm_content=NOME_ANUNCIO&openShop=true
+ *
+ * O `utm_campaign` recebe o nome do conjunto de anúncios (ad set), não o da
+ * campanha.
  */
 export function gerarLinkAnuncio(
   linkCampanha: string,
-  campaignName: string,
+  adSetName: string,
   adName: string
 ): string {
   if (!linkCampanha || !linkCampanha.trim()) return "";
@@ -15,7 +18,7 @@ export function gerarLinkAnuncio(
   const url = new URL(linkCampanha.trim());
   url.searchParams.set("utm_source", "Facebook");
   url.searchParams.set("utm_medium", "Ads");
-  url.searchParams.set("utm_campaign", campaignName);
+  url.searchParams.set("utm_campaign", limparNomeParaUtm(adSetName));
   url.searchParams.set("utm_content", limparNomeParaUtm(adName));
   url.searchParams.set("openShop", "true");
 

@@ -709,7 +709,7 @@ export function FormularioLoteVideos({
                     </div>
                     <PreviewLinkAnuncio
                       linkCampanha={anuncio.linkCampanha}
-                      campaignName={campanhas.find((c) => c.id === campanhaId)?.nome ?? ""}
+                      adSetName={adsets.find((a) => a.id === adSetId)?.nome ?? ""}
                       adName={anuncio.adName}
                       override={anuncio.linkAnuncioOverride}
                       onOverride={(v) => atualizarAnuncio(anuncio.videoId, "linkAnuncioOverride", v)}

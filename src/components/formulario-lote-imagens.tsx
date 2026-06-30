@@ -817,7 +817,7 @@ export function FormularioLoteImagens({
                     )}
                     <PreviewLinkAnuncio
                       linkCampanha={anuncio.linkCampanha}
-                      campaignName={campanhas.find((c) => c.id === campanhaId)?.nome ?? ""}
+                      adSetName={adSetNome}
                       adName={anuncio.adName}
                       override={anuncio.linkAnuncioOverride}
                       onOverride={(v) => updateAnuncio(i, "linkAnuncioOverride", v)}

@@ -252,7 +252,7 @@ export async function criarAd(input: CriarAdInput, userId: string, userName?: st
   // Usar override se fornecido, senão gerar UTM automaticamente
   const linkAnuncio = input.link_anuncio_override
     ?? (input.link_campanha
-      ? gerarLinkAnuncio(input.link_campanha, input.campaign_name, input.ad_name)
+      ? gerarLinkAnuncio(input.link_campanha, input.ad_set_name, input.ad_name)
       : null);
 
   const { data: ad, error } = await sb

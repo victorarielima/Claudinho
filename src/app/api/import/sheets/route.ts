@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
 
       // Gerar UTM
       const linkAnuncio = linha.linkAnuncio
-        ? gerarLinkAnuncio(linha.linkAnuncio, linha.campaign, linha.adName)
+        ? gerarLinkAnuncio(linha.linkAnuncio, linha.adSet, linha.adName)
         : null;
 
       // Inserir ad
