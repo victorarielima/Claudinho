@@ -902,7 +902,7 @@ export function PainelCriacao() {
               {compacto ? "Detalhado" : "Compacto"}
             </button>
           </div>
-          <TabelaPendentes linhas={linhasFiltradas} carregando={carregando} aoSubir={subirAnuncio} processando={processando}
+          <TabelaPendentes linhas={linhasFiltradas} carregando={carregando} aoSubir={(linha) => { setSubirAtivo(false); setConfirmUpload({ show: true, linhas: [linha] }); }} processando={processando}
             aoExcluir={(linha) => {
               if (!linha.adId) return;
               setConfirmExcluir({ show: true, linha });
