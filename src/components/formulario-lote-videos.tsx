@@ -1,10 +1,11 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, Plus, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Loader2, Plus, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PreviewLinkAnuncio } from "@/components/editor-utm";
+import { gerarLegendaCliente, detectarMarca } from "@/lib/ai-cliente";
 import {
   Dialog,
   DialogContent,
@@ -160,6 +161,12 @@ export function FormularioLoteVideos({
   // ─── Form: individual ads ──────────────────────────────────
   const [anuncios, setAnuncios] = useState<AnuncioItem[]>([]);
 
+  // ─── Legenda por IA ────────────────────────────────────────
+  const [statusLegenda, setStatusLegenda] = useState<
+    Record<string, "gerando" | "erro" | undefined>
+  >({});
+  const legendasDisparadasRef = useRef<Set<string>>(new Set());
+
   // ─── Save state ────────────────────────────────────────────
   const [salvando, setSalvando] = useState(false);
   const [mensagemErro, setMensagemErro] = useState<string | null>(null);
@@ -205,6 +212,9 @@ export function FormularioLoteVideos({
     setAdsets([]);
     setMensagemErro(null);
     setMensagemSucesso(null);
+    // Reset do tracking de legendas IA para a nova seleção
+    legendasDisparadasRef.current = new Set();
+    setStatusLegenda({});
   }, [aberto, videos]);
 
   // ─── Load campanhas when brand changes ─────────────────────
@@ -351,6 +361,45 @@ export function FormularioLoteVideos({
     },
     []
   );
+
+  // ─── Gerar legenda com IA (analisa o thumbnail do vídeo) ───
+  const gerarLegendaPara = useCallback(
+    async (anuncio: AnuncioItem, forcar = false) => {
+      // Não sobrescreve o que o usuário já escreveu (a menos que forçado)
+      if (!forcar && anuncio.textoPrincipal.trim()) return;
+      setStatusLegenda((s) => ({ ...s, [anuncio.videoId]: "gerando" }));
+      try {
+        const legenda = await gerarLegendaCliente({
+          tipo: "video",
+          imagemUrl: anuncio.thumbnailLink,
+          nomeArquivo: anuncio.nomeArquivo,
+          marca: detectarMarca(anuncio.nomeArquivo),
+        });
+        setAnuncios((prev) =>
+          prev.map((a) => {
+            if (a.videoId !== anuncio.videoId) return a;
+            // Se o usuário digitou algo nesse meio-tempo, respeita (salvo forçar)
+            if (!forcar && a.textoPrincipal.trim()) return a;
+            return { ...a, textoPrincipal: legenda };
+          })
+        );
+        setStatusLegenda((s) => ({ ...s, [anuncio.videoId]: undefined }));
+      } catch {
+        setStatusLegenda((s) => ({ ...s, [anuncio.videoId]: "erro" }));
+      }
+    },
+    []
+  );
+
+  // Auto-dispara a geração assim que os anúncios são inicializados.
+  useEffect(() => {
+    if (!aberto) return;
+    for (const a of anuncios) {
+      if (legendasDisparadasRef.current.has(a.videoId)) continue;
+      legendasDisparadasRef.current.add(a.videoId);
+      void gerarLegendaPara(a);
+    }
+  }, [aberto, anuncios, gerarLegendaPara]);
 
   // ─── Save ──────────────────────────────────────────────────
   const podeSalvar =
@@ -657,29 +706,64 @@ export function FormularioLoteVideos({
                         {anuncio.titulo.trim().length}/50
                       </span>
                     </div>
-                    <div className="flex gap-1.5 items-start">
-                      <textarea
-                        value={anuncio.textoPrincipal}
-                        onChange={(e) =>
-                          atualizarAnuncio(
-                            anuncio.videoId,
-                            "textoPrincipal",
-                            e.target.value
-                          )
-                        }
-                        rows={2}
-                        className="flex-1 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                        placeholder="Legenda (texto principal do anúncio)"
-                      />
-                      {anuncios.length > 1 && anuncio.textoPrincipal && (
+                    <div className="grid gap-1">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[11px] text-muted-foreground">
+                          Legenda (texto principal)
+                        </label>
                         <button
                           type="button"
-                          onClick={() => replicarCampo("textoPrincipal", anuncio.textoPrincipal)}
-                          className="shrink-0 mt-1.5 rounded-md border border-input bg-background px-2 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                          title="Aplicar este texto a todos os anúncios"
+                          onClick={() => gerarLegendaPara(anuncio, true)}
+                          disabled={statusLegenda[anuncio.videoId] === "gerando"}
+                          className="flex items-center gap-1 text-[10px] font-medium text-primary transition-colors hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                          title="Gerar a legenda com IA a partir do vídeo"
                         >
-                          Replicar
+                          {statusLegenda[anuncio.videoId] === "gerando" ? (
+                            <>
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              Gerando...
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="h-3 w-3" />
+                              Gerar com IA
+                            </>
+                          )}
                         </button>
+                      </div>
+                      <div className="flex gap-1.5 items-start">
+                        <textarea
+                          value={anuncio.textoPrincipal}
+                          onChange={(e) =>
+                            atualizarAnuncio(
+                              anuncio.videoId,
+                              "textoPrincipal",
+                              e.target.value
+                            )
+                          }
+                          rows={2}
+                          className="flex-1 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                          placeholder={
+                            statusLegenda[anuncio.videoId] === "gerando"
+                              ? "A IA está escrevendo a legenda..."
+                              : "Legenda (texto principal do anúncio)"
+                          }
+                        />
+                        {anuncios.length > 1 && anuncio.textoPrincipal && (
+                          <button
+                            type="button"
+                            onClick={() => replicarCampo("textoPrincipal", anuncio.textoPrincipal)}
+                            className="shrink-0 mt-1.5 rounded-md border border-input bg-background px-2 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                            title="Aplicar este texto a todos os anúncios"
+                          >
+                            Replicar
+                          </button>
+                        )}
+                      </div>
+                      {statusLegenda[anuncio.videoId] === "erro" && (
+                        <p className="text-[10px] text-destructive">
+                          Não foi possível gerar a legenda. Clique em “Gerar com IA” para tentar de novo.
+                        </p>
                       )}
                     </div>
                     <div className="flex gap-1.5 items-center">

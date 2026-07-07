@@ -321,20 +321,49 @@ export async function atualizarAd(
 
   const updateData: Record<string, unknown> = { ...input };
 
-  // link_anuncio direto (do editor) tem prioridade sobre link_campanha
+  // ── Consistência do link/UTM ────────────────────────────────
+  // O link do anúncio embute o nome do ad set (utm_campaign) e o nome do
+  // anúncio (utm_content). Se o usuário renomear o rascunho, o link precisa
+  // ser regenerado a partir da base (link_campanha) para não continuar
+  // apontando o nome antigo. Mas se o link tiver sido editado à mão,
+  // respeitamos a escolha dele.
+  const base = input.link_campanha ?? anterior.link_campanha;
+  const novoAdSetName = input.ad_set_name ?? anterior.ad_set_name;
+  const novoAdName = input.ad_name ?? anterior.ad_name;
+  const nomeMudou =
+    (input.ad_name !== undefined && input.ad_name !== anterior.ad_name) ||
+    (input.ad_set_name !== undefined && input.ad_set_name !== anterior.ad_set_name);
+
   if (input.link_anuncio !== undefined) {
-    // Já é o link final — usar direto
+    // O editor sempre reenvia o link atual. Detectamos se ele foi customizado
+    // comparando com o que geraríamos a partir dos nomes ANTIGOS: se bate, é
+    // um link auto-gerado (seguro regenerar); se difere, o usuário editou.
+    const linkAutoAntigo = base
+      ? gerarLinkAnuncio(base, anterior.ad_set_name, anterior.ad_name)
+      : "";
+    const linkCustomizado =
+      input.link_anuncio.trim() !== "" && input.link_anuncio !== linkAutoAntigo;
+
+    if (nomeMudou && base && !linkCustomizado) {
+      updateData.link_anuncio = gerarLinkAnuncio(base, novoAdSetName, novoAdName);
+    }
+    // caso contrário: mantém o link_anuncio recebido (custom ou inalterado)
   } else if (input.link_campanha !== undefined) {
-    // Legado: link_campanha vira link_anuncio direto
-    updateData.link_anuncio = input.link_campanha;
+    // Sem link_anuncio explícito: deriva do link_campanha informado.
+    updateData.link_anuncio = gerarLinkAnuncio(input.link_campanha, novoAdSetName, novoAdName);
+  } else if (nomeMudou && base) {
+    // Só o nome mudou (nem link_anuncio nem link_campanha vieram no payload):
+    // regenera a partir da base salva para manter a consistência.
+    updateData.link_anuncio = gerarLinkAnuncio(base, novoAdSetName, novoAdName);
   }
 
   const { error } = await sb.from("ads").update(updateData).eq("id", id);
   if (error) throw new Error(`Erro ao atualizar ad: ${error.message}`);
 
-  // Calcular diff para audit
+  // Calcular diff para audit. Iteramos sobre updateData (e não input) para
+  // que a regeneração do link_anuncio também apareça no histórico.
   const changes: Record<string, { old: unknown; new: unknown }> = {};
-  for (const [key, value] of Object.entries(input)) {
+  for (const [key, value] of Object.entries(updateData)) {
     const oldVal = (anterior as unknown as Record<string, unknown>)[key];
     if (oldVal !== value) {
       changes[key] = { old: oldVal, new: value };

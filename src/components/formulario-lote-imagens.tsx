@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -23,8 +23,10 @@ import {
   CheckCircle2,
   AlertCircle,
   Plus,
+  Sparkles,
 } from "lucide-react";
 import { CTA_OPTIONS } from "@/lib/constants";
+import { gerarLegendaCliente, detectarMarca } from "@/lib/ai-cliente";
 import type { ClickUpTask } from "@/lib/clickup";
 import type { Brand } from "@/lib/db";
 
@@ -160,6 +162,12 @@ export function FormularioLoteImagens({
   // ── Per-ad form ─────────────────────────────────────────
   const [anuncios, setAnuncios] = useState<AnuncioForm[]>([]);
 
+  // ── Legenda por IA ──────────────────────────────────────
+  const [statusLegenda, setStatusLegenda] = useState<
+    Record<string, "gerando" | "erro" | undefined>
+  >({});
+  const legendasDisparadasRef = useRef<Set<string>>(new Set());
+
   // ── Save state ──────────────────────────────────────────
   const [salvando, setSalvando] = useState(false);
   const [mensagemErro, setMensagemErro] = useState<string | null>(null);
@@ -190,6 +198,8 @@ export function FormularioLoteImagens({
         })),
       }))
     );
+    legendasDisparadasRef.current = new Set();
+    setStatusLegenda({});
   }, [aberto, cards]);
 
   // ── Load brands ─────────────────────────────────────────
@@ -326,6 +336,46 @@ export function FormularioLoteImagens({
       });
     });
   }, []);
+
+  // ── Gerar legenda com IA (analisa o criativo estático) ──
+  const gerarLegendaPara = useCallback(
+    async (anuncio: AnuncioForm, forcar = false) => {
+      if (!forcar && anuncio.textoPrincipal.trim()) return;
+      // Usa o primeiro criativo selecionado (ou o primeiro anexo) como visual.
+      const visual =
+        anuncio.attachments.find((a) => a.selecionado) ?? anuncio.attachments[0];
+      setStatusLegenda((s) => ({ ...s, [anuncio.taskId]: "gerando" }));
+      try {
+        const legenda = await gerarLegendaCliente({
+          tipo: "imagem",
+          imagemUrl: visual?.url ?? null,
+          nomeArquivo: anuncio.taskName,
+          marca: detectarMarca(anuncio.taskName),
+        });
+        setAnuncios((prev) =>
+          prev.map((a) => {
+            if (a.taskId !== anuncio.taskId) return a;
+            if (!forcar && a.textoPrincipal.trim()) return a;
+            return { ...a, textoPrincipal: legenda };
+          })
+        );
+        setStatusLegenda((s) => ({ ...s, [anuncio.taskId]: undefined }));
+      } catch {
+        setStatusLegenda((s) => ({ ...s, [anuncio.taskId]: "erro" }));
+      }
+    },
+    []
+  );
+
+  // Auto-dispara a geração quando os anúncios são inicializados.
+  useEffect(() => {
+    if (!aberto) return;
+    for (const a of anuncios) {
+      if (legendasDisparadasRef.current.has(a.taskId)) continue;
+      legendasDisparadasRef.current.add(a.taskId);
+      void gerarLegendaPara(a);
+    }
+  }, [aberto, anuncios, gerarLegendaPara]);
 
   // ── Sort: ACTIVE first, then alphabetical ───────────────
   const campanhasOrdenadas = useMemo(
@@ -513,6 +563,8 @@ export function FormularioLoteImagens({
       setMensagemSucesso(null);
       setAdNamesExistentes(new Set());
       setConfirmandoVersao(false);
+      legendasDisparadasRef.current = new Set();
+      setStatusLegenda({});
     }
   }, [aberto]);
 
@@ -774,24 +826,43 @@ export function FormularioLoteImagens({
                     )}
                   </div>
                   <div className="space-y-1">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <label className="text-[11px] text-muted-foreground">Texto Principal</label>
-                      {anuncios.length > 1 && (
+                      <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          className="text-[10px] text-primary hover:underline"
-                          onClick={() => replicarCampo(i, "textoPrincipal")}
+                          onClick={() => gerarLegendaPara(anuncio, true)}
+                          disabled={statusLegenda[anuncio.taskId] === "gerando"}
+                          className="flex items-center gap-1 text-[10px] font-medium text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                          title="Gerar a legenda com IA a partir do criativo"
                         >
-                          <Copy className="h-3 w-3 inline mr-0.5" />replicar
+                          {statusLegenda[anuncio.taskId] === "gerando" ? (
+                            <><Loader2 className="h-3 w-3 animate-spin" />gerando...</>
+                          ) : (
+                            <><Sparkles className="h-3 w-3" />IA</>
+                          )}
                         </button>
-                      )}
+                        {anuncios.length > 1 && (
+                          <button
+                            type="button"
+                            className="text-[10px] text-primary hover:underline"
+                            onClick={() => replicarCampo(i, "textoPrincipal")}
+                          >
+                            <Copy className="h-3 w-3 inline mr-0.5" />replicar
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <textarea
                       value={anuncio.textoPrincipal}
                       onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => updateAnuncio(i, "textoPrincipal", e.target.value)}
                       className="text-xs min-h-[32px] resize-none w-full rounded-md border border-input bg-background px-3 py-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       rows={1}
+                      placeholder={statusLegenda[anuncio.taskId] === "gerando" ? "A IA está escrevendo..." : undefined}
                     />
+                    {statusLegenda[anuncio.taskId] === "erro" && (
+                      <p className="text-[10px] text-destructive">Falha ao gerar — clique em “IA” para tentar de novo.</p>
+                    )}
                   </div>
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
