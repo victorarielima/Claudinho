@@ -317,24 +317,24 @@ export function FormularioLoteVideos({
     setDestinos((prev) => prev.filter((d) => d.adSetId !== adSetId));
   }, []);
 
-  // Destinos efetivos: a lista, ou — se vazia — o que estiver selecionado no
-  // staging (preserva o fluxo "escolhe 1 e salva" sem clique extra).
-  const destinosEfetivos: Destino[] = useMemo(
-    () =>
-      destinos.length > 0
-        ? destinos
-        : campanhaId && adSetId
-          ? [
-              {
-                campaignId: campanhaId,
-                campaignName: campanhas.find((c) => c.id === campanhaId)?.nome ?? campanhaId,
-                adSetId,
-                adSetName: adsets.find((a) => a.id === adSetId)?.nome ?? adSetId,
-              },
-            ]
-          : [],
-    [destinos, campanhaId, adSetId, campanhas, adsets]
-  );
+  // Destinos efetivos: a lista + o que estiver selecionado no staging (se
+  // ainda não estiver na lista). Assim o fluxo "escolhe 1 e salva" funciona
+  // sem clique extra, e — importante — o ad set selecionado no dropdown NÃO é
+  // perdido caso o usuário esqueça de clicar "Adicionar destino" depois de já
+  // ter adicionado outros. Sem isso, o anúncio subia só para os destinos
+  // adicionados, ignorando a seleção atual.
+  const destinosEfetivos: Destino[] = useMemo(() => {
+    const efetivos = [...destinos];
+    if (campanhaId && adSetId && !efetivos.some((d) => d.adSetId === adSetId)) {
+      efetivos.push({
+        campaignId: campanhaId,
+        campaignName: campanhas.find((c) => c.id === campanhaId)?.nome ?? campanhaId,
+        adSetId,
+        adSetName: adsets.find((a) => a.id === adSetId)?.nome ?? adSetId,
+      });
+    }
+    return efetivos;
+  }, [destinos, campanhaId, adSetId, campanhas, adsets]);
 
   // ─── Update individual ad ──────────────────────────────────
   const atualizarAnuncio = useCallback(

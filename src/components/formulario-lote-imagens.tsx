@@ -421,16 +421,17 @@ export function FormularioLoteImagens({
     [adsets, adSetId]
   );
 
-  // Destinos efetivos: a lista, ou — se vazia — o staging selecionado.
-  const destinosEfetivos: Destino[] = useMemo(
-    () =>
-      destinos.length > 0
-        ? destinos
-        : campanhaId && adSetId
-          ? [{ campaignId: campanhaId, campaignName: campanhaNome, adSetId, adSetName: adSetNome }]
-          : [],
-    [destinos, campanhaId, adSetId, campanhaNome, adSetNome]
-  );
+  // Destinos efetivos: a lista + o staging selecionado (se ainda não estiver
+  // na lista). Garante que o ad set escolhido no dropdown não seja perdido
+  // caso o usuário esqueça de clicar "Adicionar destino" após já ter
+  // adicionado outros — antes, o anúncio subia só para os destinos adicionados.
+  const destinosEfetivos: Destino[] = useMemo(() => {
+    const efetivos = [...destinos];
+    if (campanhaId && adSetId && !efetivos.some((d) => d.adSetId === adSetId)) {
+      efetivos.push({ campaignId: campanhaId, campaignName: campanhaNome, adSetId, adSetName: adSetNome });
+    }
+    return efetivos;
+  }, [destinos, campanhaId, adSetId, campanhaNome, adSetNome]);
 
   // Versionamento automático de nome só faz sentido para um único ad set
   // (os existentes são consultados por ad set). Com fan-out multi-destino
