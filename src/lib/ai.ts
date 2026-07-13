@@ -6,13 +6,14 @@
 // Abordagem (validada com o usuário):
 //  - Vídeo: usa o thumbnail do Drive (1 frame) — sem ffmpeg, barato e rápido.
 //  - Imagem: usa a própria URL pública do criativo (ClickUp / colagem).
-//  - Modelo: gpt-4o-mini (visão + texto), detail "low" para custo mínimo.
+//  - Modelo: gpt-4o (visão + texto). Legenda de anúncio exige copy nuançada e
+//    leitura de rótulo/região no criativo — gpt-4o-mini entregava texto genérico.
 //
 // Usa fetch direto na REST API da OpenAI — não requer o SDK como dependência.
 // ---------------------------------------------------------------------------
 
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
-const MODELO = "gpt-4o-mini";
+const MODELO = "gpt-4o";
 
 export type TipoCriativo = "video" | "imagem";
 
@@ -26,23 +27,47 @@ export interface GerarLegendaParams {
   marca?: string | null;
 }
 
-const SYSTEM_PROMPT = `Você é um copywriter sênior de performance para e-commerce de vinhos (marcas como Evino e Grand Cru), escrevendo em português do Brasil.
+const SYSTEM_PROMPT = `Você é um copywriter sênior de performance para e-commerce de vinhos, escrevendo o "texto principal" (legenda) de anúncios de Facebook/Instagram em português do Brasil. Escreve para a Evino e a Grand Cru — duas marcas com vozes distintas.
 
-Sua tarefa: analisar o criativo do anúncio (imagem ou frame de vídeo) e escrever o "texto principal" (legenda) de um anúncio no Facebook/Instagram.
+Objetivo: uma legenda que desperta desejo pelo vinho específico do criativo, com a densidade sensorial e o repertório de um sommelier. Nunca genérica.
 
-Regras:
-- Escreva APENAS a legenda final, sem aspas, sem títulos, sem explicações.
-- 2 a 4 linhas curtas. Comece com um gancho forte na primeira linha.
-- Foque no benefício e no desejo; conecte com o que aparece no criativo.
-- Tom brasileiro, natural e vendedor, sem exageros nem clichês batidos.
-- No máximo 1 ou 2 emojis, só se fizer sentido.
-- Para bebida alcoólica, encerre com "Beba com moderação." quando o produto for vinho/bebida.
-- Não invente preços, descontos ou dados específicos que não estejam claramente no criativo.`;
+COMO ESCREVER
+- 2 a 4 linhas curtas, nesta lógica:
+  1) Gancho de abertura sensorial ou instigante — um aroma, um terroir, uma ocasião, uma imagem forte. Nada de "Descubra o melhor vinho".
+  2) Corpo com algo concreto e verdadeiro sobre o produto: uva, região, vinícola, estilo, safra, história ou harmonização. É o que faz o vinho parecer único.
+  3) Fechamento com uma chamada leve para a marca.
+- Use seu conhecimento de vinhos: quando o rótulo, o nome do arquivo ou a imagem indicam o produto (uva, região, produtor, safra, tipo), traga fatos verdadeiros e bem estabelecidos sobre eles. É isso que separa uma legenda boa de uma clichê.
+
+O QUE NÃO FAZER
+- Não invente preços, descontos, quantidades, notas, prêmios, safras ou números que não estejam claros no criativo.
+- Não use clichês batidos ("o melhor vinho", "não perca", "imperdível", "eleve seu paladar") nem exageros vazios.
+- Não escreva aspas, títulos, hashtags nem explicações — devolva SÓ a legenda final.
+
+VOZ POR MARCA
+- Grand Cru: sofisticada, editorial, sensorial. Foco em terroir, heritage e curadoria. Pouco ou nenhum emoji. Feche com "Descubra na Grand Cru: lojas, site e app."
+- Evino: leve, acessível e animada — tom de "vinho sem frescura", mas ainda informativa. Pode usar 1 emoji (ex.: 🍷). Feche com um convite direto e caloroso à ação.
+
+EXEMPLOS DE LEGENDAS BOAS (siga o nível, não copie)
+[Grand Cru]
+O frescor do Oceano Pacífico em cada taça.
+Pioneira no Valle de Leyda, a vinícola Leyda traduz a pureza dos terroirs costeiros do Chile na sua linha Reserva — vinhos de identidade única, do frescor do Sauvignon Blanc à elegância do Pinot Noir.
+Descubra na Grand Cru: lojas, site e app.
+
+[Grand Cru]
+Brinde em grande estilo com Pannier Sélection Brut, Antoine Janson Chablis e Hubert de Charenne, ícones de Champagne e Borgonha!
+Descubra na Grand Cru: lojas, site e app.
+
+[Grand Cru]
+Deguste um autêntico Brunello di Montalcino, expressão máxima do Sangiovese toscano e de um dos terroirs mais celebrados da Itália.
+Descubra na Grand Cru: lojas, site e app.
+
+[Evino]
+Descubra 3 versões reserva dos vinhos que conquistaram o coração dos clientes da Evino! 🍷 Leve para casa ainda uma bolsa exclusiva!`;
 
 function bumpTamanhoThumbnail(url: string): string {
   // Thumbnails do Drive (googleusercontent) terminam em "=s220"; pedimos um
-  // frame maior para a análise ficar melhor.
-  return url.replace(/=s\d+(-c)?$/i, "=s800");
+  // frame maior para a IA conseguir ler rótulo/região no criativo.
+  return url.replace(/=s\d+(-c)?$/i, "=s1024");
 }
 
 async function baixarComoDataUrl(url: string): Promise<string | null> {
@@ -81,7 +106,7 @@ export async function gerarLegenda(params: GerarLegendaParams): Promise<string> 
   const dataUrl = imagemUrl ? await baixarComoDataUrl(imagemUrl) : null;
 
   const contexto: string[] = [];
-  if (marca) contexto.push(`Marca: ${marca}.`);
+  if (marca) contexto.push(`Marca: ${marca}. Use a voz desta marca conforme as instruções.`);
   if (nomeArquivo) contexto.push(`Nome do arquivo/criativo: "${nomeArquivo}".`);
   contexto.push(
     dataUrl
@@ -95,7 +120,7 @@ export async function gerarLegenda(params: GerarLegendaParams): Promise<string> 
 
   const content: unknown[] = [{ type: "text", text: userText }];
   if (dataUrl) {
-    content.push({ type: "image_url", image_url: { url: dataUrl, detail: "low" } });
+    content.push({ type: "image_url", image_url: { url: dataUrl, detail: "high" } });
   }
 
   const res = await fetch(OPENAI_API_URL, {
@@ -111,7 +136,7 @@ export async function gerarLegenda(params: GerarLegendaParams): Promise<string> 
         { role: "user", content },
       ],
       max_tokens: 300,
-      temperature: 0.7,
+      temperature: 0.8,
     }),
   });
 

@@ -444,19 +444,14 @@ const ABAS_EXPORTACAO: { contem: string; aba: string }[] = [
   { contem: "evino", aba: "Evino - Meta" },
 ];
 
-type CampoExportacao =
-  | "conjuntoAnuncio"
-  | "linkAnuncio"
-  | "adName"
-  | "textoPrincipal"
-  | "titulo"
-  | "descricao"
-  | "cta";
+// A aba de acompanhamento ("Evino - Meta" / "Grand Cru - Meta") só tem estas 4
+// colunas de conteúdo, nesta ordem: Texto Principal (Legenda), Título, Descrição,
+// CTA (as colunas Observações, Link Click Up e Data Da Subida são preenchidas
+// manualmente). O mapeamento é feito por cabeçalho — não escrevemos mais
+// Conjunto/Link/Ad Name, que não existem na aba e deslocavam todas as colunas.
+type CampoExportacao = "textoPrincipal" | "titulo" | "descricao" | "cta";
 
 const EXPORT_HEADER_ALIASES: Record<CampoExportacao, string[]> = {
-  conjuntoAnuncio: ["conjunto de anuncio", "conjunto de anuncios", "conjunto", "ad set", "adset"],
-  linkAnuncio: ["link anuncio", "link do anuncio", "link"],
-  adName: ["ad name nome do anuncio", "ad name", "nome do anuncio", "nome anuncio"],
   textoPrincipal: ["texto principal legenda", "texto principal", "legenda", "texto"],
   titulo: ["titulo", "title", "headline"],
   descricao: ["descricao", "description"],
@@ -465,19 +460,13 @@ const EXPORT_HEADER_ALIASES: Record<CampoExportacao, string[]> = {
 
 // Posição padrão das colunas caso o cabeçalho não seja encontrado.
 const EXPORT_FALLBACK_INDEX: Record<CampoExportacao, number> = {
-  conjuntoAnuncio: 0,
-  linkAnuncio: 1,
-  adName: 2,
-  textoPrincipal: 3,
-  titulo: 4,
-  descricao: 5,
-  cta: 6,
+  textoPrincipal: 0,
+  titulo: 1,
+  descricao: 2,
+  cta: 3,
 };
 
 export interface LinhaExportacao {
-  conjuntoAnuncio: string;
-  linkAnuncio: string;
-  adName: string;
   textoPrincipal: string;
   titulo: string;
   descricao: string;
@@ -496,9 +485,6 @@ export function resolverAbaExportacao(brandName: string): string | null {
 /** Converte um Ad (já criado) numa linha da planilha de acompanhamento. */
 export function linhaExportacaoDeAd(ad: Ad): LinhaExportacao {
   return {
-    conjuntoAnuncio: ad.ad_set_name,
-    linkAnuncio: ad.link_anuncio ?? "",
-    adName: ad.ad_name,
     textoPrincipal: ad.texto_principal ?? "",
     titulo: ad.titulo ?? "",
     descricao: ad.descricao ?? "",
@@ -549,9 +535,6 @@ export async function appendAnunciosExportados(
 
   const values = linhas.map((linha) => {
     const row = new Array<string>(maxIndice + 1).fill("");
-    row[indices.conjuntoAnuncio] = linha.conjuntoAnuncio;
-    row[indices.linkAnuncio] = linha.linkAnuncio;
-    row[indices.adName] = linha.adName;
     row[indices.textoPrincipal] = linha.textoPrincipal;
     row[indices.titulo] = linha.titulo;
     row[indices.descricao] = linha.descricao;
