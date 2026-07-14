@@ -33,6 +33,8 @@ interface DialogExploradorClickUpProps {
   aberto: boolean;
   aoFechar: () => void;
   aoConfirmar: (tasks: ClickUpTask[]) => void;
+  /** Rótulo do botão de confirmação (default: "Continuar com N cards"). */
+  rotuloConfirmar?: (n: number) => string;
 }
 
 // ─── Status Colors ─────────────────────────────────────────
@@ -242,6 +244,7 @@ export function DialogExploradorClickUp({
   aberto,
   aoFechar,
   aoConfirmar,
+  rotuloConfirmar,
 }: DialogExploradorClickUpProps) {
   const { brands, selectedBrand, setSelectedBrand } = useBrand();
 
@@ -515,7 +518,9 @@ export function DialogExploradorClickUp({
               disabled={selecionados.size === 0}
               onClick={() => aoConfirmar(Array.from(selecionados.values()))}
             >
-              Continuar com {selecionados.size} card{selecionados.size !== 1 ? "s" : ""}
+              {rotuloConfirmar
+                ? rotuloConfirmar(selecionados.size)
+                : `Continuar com ${selecionados.size} card${selecionados.size !== 1 ? "s" : ""}`}
             </Button>
           </div>
         </div>

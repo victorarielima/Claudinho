@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Info, Loader2 } from "lucide-react";
+import { AlertTriangle, Film, FolderOpen, Info, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
@@ -33,7 +33,10 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { CTA_OPTIONS } from "@/lib/constants";
 import { EditorUtmTrigger } from "@/components/editor-utm";
 import { analisarProntidaoAnuncio, type AssetImagemValidavel } from "@/lib/ad-readiness";
-import { rotuloPlacementImagem } from "@/lib/ad-media";
+import { normalizarPlacementImagem, rotuloPlacementImagem } from "@/lib/ad-media";
+import { DialogExploradorClickUp } from "@/components/dialog-explorador-clickup";
+import { DialogExploradorVideos, type VideoDrive } from "@/components/dialog-explorador-videos";
+import type { ClickUpTask } from "@/lib/clickup";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -110,6 +113,10 @@ export function DialogEditarAnuncio({
   const [erro, setErro] = useState<string | null>(null);
   const [confirmRecriar, setConfirmRecriar] = useState(false);
 
+  // Exploradores de arte: imagens vêm do ClickUp, vídeos do Drive.
+  const [exploradorImagens, setExploradorImagens] = useState(false);
+  const [exploradorVideos, setExploradorVideos] = useState(false);
+
   // Campaign / AdSet selectors
   const [campanhas, setCampanhas] = useState<Campanha[]>([]);
   const [adsets, setAdsets] = useState<AdSet[]>([]);
@@ -181,6 +188,17 @@ export function DialogEditarAnuncio({
     []
   );
 
+  // Detecta troca de arte (imagens ou vídeo) comparando com o estado inicial.
+  const arteMudou = useMemo(() => {
+    if (!dadosIniciais) return false;
+    if (form.tipo === "image") {
+      const atual = (form.imageAssets ?? []).map((a) => a.url).join("|");
+      const inicial = (dadosIniciais.imageAssets ?? []).map((a) => a.url).join("|");
+      return atual !== inicial;
+    }
+    return (form.linkVideo ?? "") !== (dadosIniciais.linkVideo ?? "");
+  }, [form.tipo, form.imageAssets, form.linkVideo, dadosIniciais]);
+
   // Detecta se houve alteração nos campos editáveis
   const temAlteracao = useMemo(() => {
     if (!dadosIniciais) return false;
@@ -188,8 +206,32 @@ export function DialogEditarAnuncio({
       "ad_name", "texto_principal", "titulo", "descricao", "cta",
       "campaign_name", "campaign_id", "ad_set_name", "ad_set_id", "link_anuncio",
     ];
-    return campos.some((c) => (form[c] ?? "") !== (dadosIniciais[c] ?? ""));
-  }, [form, dadosIniciais]);
+    return arteMudou || campos.some((c) => (form[c] ?? "") !== (dadosIniciais[c] ?? ""));
+  }, [form, dadosIniciais, arteMudou]);
+
+  // Aplica a arte escolhida no explorador do ClickUp (primeiro card).
+  const trocarArteImagem = useCallback((cards: ClickUpTask[]) => {
+    setExploradorImagens(false);
+    const card = cards[0];
+    if (!card) return;
+    const novos: AssetImagemValidavel[] = card.attachments.map((a) => ({
+      placement: normalizarPlacementImagem(a.placement, a.url),
+      url: a.url,
+    }));
+    setForm((prev) => ({ ...prev, imageAssets: novos }));
+  }, []);
+
+  // Aplica o vídeo escolhido no explorador do Drive (primeiro selecionado).
+  const trocarVideo = useCallback((videos: VideoDrive[]) => {
+    setExploradorVideos(false);
+    const video = videos[0];
+    if (!video) return;
+    setForm((prev) => ({
+      ...prev,
+      linkVideo: video.driveUrl,
+      thumbnailLink: video.thumbnailLink ?? prev.thumbnailLink,
+    }));
+  }, []);
 
   // Live validation
   const diagnostico = useMemo(() => {
@@ -212,6 +254,20 @@ export function DialogEditarAnuncio({
     setSalvando(true);
     setErro(null);
     try {
+      // Só reenvia `assets` quando a arte realmente mudou — assim edições de
+      // copy não disparam o delete-then-insert dos ad_assets.
+      const assets = arteMudou
+        ? form.tipo === "image"
+          ? (form.imageAssets ?? []).map((a) => ({
+              placement: a.placement,
+              asset_url: a.url,
+              asset_type: "image" as const,
+            }))
+          : form.linkVideo
+            ? [{ placement: "video_principal", asset_url: form.linkVideo, asset_type: "video" as const }]
+            : []
+        : undefined;
+
       const res = await fetch(`/api/ads/${adId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -226,6 +282,7 @@ export function DialogEditarAnuncio({
           campaign_id: form.campaign_id,
           ad_set_name: form.ad_set_name,
           ad_set_id: form.ad_set_id,
+          ...(assets !== undefined && { assets }),
           ...(recriar && { _recriar: true }),
         }),
       });
@@ -238,12 +295,13 @@ export function DialogEditarAnuncio({
     } finally {
       setSalvando(false);
     }
-  }, [adId, form, aoSalvar, aoFechar]);
+  }, [adId, form, arteMudou, recriar, aoSalvar, aoFechar]);
 
   const temBloqueios = diagnostico.bloqueios.length > 0;
   const temAvisos = diagnostico.avisos.length > 0;
 
   return (
+    <>
     <Dialog open={aberto} onOpenChange={(open) => !open && aoFechar()}>
       <DialogContent className="sm:max-w-4xl max-h-[85vh] overflow-y-auto p-0">
         <DialogHeader className="px-6 pt-6 pb-0">
@@ -389,39 +447,110 @@ export function DialogEditarAnuncio({
           <Separator />
 
           {/* ── Imagens (apenas para criativos estáticos) ─────────── */}
-          {form.tipo === "image" && form.imageAssets && form.imageAssets.length > 0 && (
+          {form.tipo === "image" && (
             <>
               <section>
-                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                  Imagens ({form.imageAssets.length})
-                </h4>
-                <div className="grid grid-cols-3 gap-2">
-                  {form.imageAssets.map((asset, i) => (
-                    <a
-                      key={`${asset.placement}-${i}`}
-                      href={asset.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="group block overflow-hidden rounded-lg border bg-muted/30 transition-colors hover:border-ring"
-                      title={asset.url}
-                    >
-                      <div className="aspect-square bg-muted flex items-center justify-center overflow-hidden">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Imagens ({form.imageAssets?.length ?? 0})
+                  </h4>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7"
+                    onClick={() => setExploradorImagens(true)}
+                  >
+                    <FolderOpen className="size-3.5" />
+                    Trocar arte
+                  </Button>
+                </div>
+                {form.imageAssets && form.imageAssets.length > 0 ? (
+                  <div className="grid grid-cols-3 gap-2">
+                    {form.imageAssets.map((asset, i) => (
+                      <a
+                        key={`${asset.placement}-${i}`}
+                        href={asset.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="group block overflow-hidden rounded-lg border bg-muted/30 transition-colors hover:border-ring"
+                        title={asset.url}
+                      >
+                        <div className="aspect-square bg-muted flex items-center justify-center overflow-hidden">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={asset.url}
+                            alt=""
+                            className="h-full w-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                        <div className="px-2 py-1.5">
+                          <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                            {rotuloPlacementImagem(asset.placement)}
+                          </p>
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-dashed bg-muted/30 px-4 py-6 text-center text-xs text-muted-foreground">
+                    Sem arte selecionada. Clique em <strong>Trocar arte</strong> para escolher um card do ClickUp.
+                  </p>
+                )}
+              </section>
+
+              <Separator />
+            </>
+          )}
+
+          {/* ── Vídeo (apenas para criativos de vídeo) ────────────── */}
+          {form.tipo === "video" && (
+            <>
+              <section>
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Vídeo
+                  </h4>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7"
+                    onClick={() => setExploradorVideos(true)}
+                  >
+                    <FolderOpen className="size-3.5" />
+                    Trocar vídeo
+                  </Button>
+                </div>
+                {form.linkVideo ? (
+                  <a
+                    href={form.linkVideo}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group flex items-center gap-3 overflow-hidden rounded-lg border bg-muted/30 p-2 transition-colors hover:border-ring"
+                    title={form.linkVideo}
+                  >
+                    <div className="flex aspect-square h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted">
+                      {form.thumbnailLink ? (
+                        // eslint-disable-next-line @next/next/no-img-element
                         <img
-                          src={asset.url}
+                          src={form.thumbnailLink}
                           alt=""
                           className="h-full w-full object-cover"
                           referrerPolicy="no-referrer"
                         />
-                      </div>
-                      <div className="px-2 py-1.5">
-                        <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                          {rotuloPlacementImagem(asset.placement)}
-                        </p>
-                      </div>
-                    </a>
-                  ))}
-                </div>
+                      ) : (
+                        <Film className="size-5 text-muted-foreground" />
+                      )}
+                    </div>
+                    <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                      {form.linkVideo}
+                    </p>
+                  </a>
+                ) : (
+                  <p className="rounded-lg border border-dashed bg-muted/30 px-4 py-6 text-center text-xs text-muted-foreground">
+                    Sem vídeo selecionado. Clique em <strong>Trocar vídeo</strong> para escolher no Drive.
+                  </p>
+                )}
               </section>
 
               <Separator />
@@ -555,6 +684,23 @@ export function DialogEditarAnuncio({
         </AlertDialogContent>
       </AlertDialog>
     </Dialog>
+
+    {/* Explorador de imagens (ClickUp) — troca de arte estática */}
+    <DialogExploradorClickUp
+      aberto={exploradorImagens}
+      aoFechar={() => setExploradorImagens(false)}
+      aoConfirmar={trocarArteImagem}
+      rotuloConfirmar={() => "Usar esta arte"}
+    />
+
+    {/* Explorador de vídeos (Drive) — troca de vídeo */}
+    <DialogExploradorVideos
+      aberto={exploradorVideos}
+      aoFechar={() => setExploradorVideos(false)}
+      aoConfirmar={trocarVideo}
+      rotuloConfirmar="Usar este vídeo"
+    />
+    </>
   );
 }
 

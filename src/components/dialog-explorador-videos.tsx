@@ -49,6 +49,8 @@ interface DialogExploradorVideosProps {
   aberto: boolean;
   aoFechar: () => void;
   aoConfirmar: (videos: VideoDrive[]) => void;
+  /** Rótulo do botão de confirmação (default: "Criar Anúncios"). */
+  rotuloConfirmar?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -369,6 +371,7 @@ export function DialogExploradorVideos({
   aberto,
   aoFechar,
   aoConfirmar,
+  rotuloConfirmar = "Criar Anúncios",
 }: DialogExploradorVideosProps) {
   // Progressive streaming load: pastas + videos arrive incrementally
   const [filhosPorParent, setFilhosPorParent] = useState<Map<string, PastaDrive[]>>(new Map());
@@ -632,7 +635,7 @@ export function DialogExploradorVideos({
                 Cancelar
               </Button>
               <Button size="sm" disabled={totalSelecionados === 0} onClick={confirmar}>
-                Criar Anúncios ({totalSelecionados})
+                {rotuloConfirmar} ({totalSelecionados})
                 <ArrowRight className="size-4" />
               </Button>
             </div>

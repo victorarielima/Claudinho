@@ -100,6 +100,9 @@ export interface AtualizarAdInput {
   link_anuncio?: string;
   link_aux?: string;
   type?: TipoAd;
+  // Quando presente, substitui TODOS os assets do anúncio (troca de arte no
+  // editor). Imagens vêm de cards do ClickUp; vídeos, do Drive.
+  assets?: { placement: string; asset_url: string; asset_type: "image" | "video" }[];
 }
 
 export interface FiltrosAd {
@@ -320,6 +323,8 @@ export async function atualizarAd(
   if (!anterior) throw new Error("Ad não encontrado");
 
   const updateData: Record<string, unknown> = { ...input };
+  // `assets` não é coluna da tabela `ads` — tratado separadamente em ad_assets.
+  delete updateData.assets;
 
   // ── Consistência do link/UTM ────────────────────────────────
   // O link do anúncio embute o nome do ad set (utm_campaign) e o nome do
@@ -367,6 +372,34 @@ export async function atualizarAd(
     const oldVal = (anterior as unknown as Record<string, unknown>)[key];
     if (oldVal !== value) {
       changes[key] = { old: oldVal, new: value };
+    }
+  }
+
+  // ── Troca de arte: substitui todos os assets do anúncio ──────
+  // Estratégia delete-then-insert (o Meta trata os assets como imutáveis; a
+  // recriação lê os assets atuais no momento do upload). Só executa quando o
+  // caller enviou `assets` explicitamente — edições de copy não mexem na arte.
+  if (input.assets !== undefined) {
+    const urlsAntigas = (anterior.ad_assets ?? []).map((a) => a.asset_url);
+    const urlsNovas = input.assets.map((a) => a.asset_url);
+
+    if (urlsAntigas.join("|") !== urlsNovas.join("|")) {
+      const { error: delErr } = await sb.from("ad_assets").delete().eq("ad_id", id);
+      if (delErr) throw new Error(`Erro ao remover assets antigos: ${delErr.message}`);
+
+      if (input.assets.length > 0) {
+        const assetsData = input.assets.map((a, i) => ({
+          ad_id: id,
+          placement: a.placement,
+          asset_url: a.asset_url,
+          asset_type: a.asset_type,
+          sort_order: i,
+        }));
+        const { error: insErr } = await sb.from("ad_assets").insert(assetsData);
+        if (insErr) throw new Error(`Erro ao inserir novos assets: ${insErr.message}`);
+      }
+
+      changes.assets = { old: urlsAntigas, new: urlsNovas };
     }
   }
 
