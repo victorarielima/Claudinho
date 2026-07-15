@@ -444,14 +444,25 @@ const ABAS_EXPORTACAO: { contem: string; aba: string }[] = [
   { contem: "evino", aba: "Evino - Meta" },
 ];
 
-// A aba de acompanhamento ("Evino - Meta" / "Grand Cru - Meta") só tem estas 4
-// colunas de conteúdo, nesta ordem: Texto Principal (Legenda), Título, Descrição,
-// CTA (as colunas Observações, Link Click Up e Data Da Subida são preenchidas
-// manualmente). O mapeamento é feito por cabeçalho — não escrevemos mais
-// Conjunto/Link/Ad Name, que não existem na aba e deslocavam todas as colunas.
-type CampoExportacao = "textoPrincipal" | "titulo" | "descricao" | "cta";
+// A aba de acompanhamento ("Evino - Meta" / "Grand Cru - Meta") tem, nesta
+// ordem: Conjunto de Anúncio, Link Anúncio, Ad Name (Nome do Anúncio),
+// Texto Principal (Legenda), Título, Descrição, CTA, e depois as colunas
+// preenchidas manualmente (Observações, Link Click Up, Data Da Subida).
+// O mapeamento é feito por cabeçalho; escrevemos todas as colunas geradas
+// pelo app para cada linha ficar completa e alinhada.
+type CampoExportacao =
+  | "conjunto"
+  | "linkAnuncio"
+  | "adName"
+  | "textoPrincipal"
+  | "titulo"
+  | "descricao"
+  | "cta";
 
 const EXPORT_HEADER_ALIASES: Record<CampoExportacao, string[]> = {
+  conjunto: ["conjunto de anuncio", "conjunto de anuncios", "conjunto", "ad set", "adset", "ad set name"],
+  linkAnuncio: ["link anuncio", "link do anuncio", "link anúncio", "link"],
+  adName: ["ad name nome do anuncio", "ad name", "nome do anuncio", "adname", "nome"],
   textoPrincipal: ["texto principal legenda", "texto principal", "legenda", "texto"],
   titulo: ["titulo", "title", "headline"],
   descricao: ["descricao", "description"],
@@ -460,13 +471,19 @@ const EXPORT_HEADER_ALIASES: Record<CampoExportacao, string[]> = {
 
 // Posição padrão das colunas caso o cabeçalho não seja encontrado.
 const EXPORT_FALLBACK_INDEX: Record<CampoExportacao, number> = {
-  textoPrincipal: 0,
-  titulo: 1,
-  descricao: 2,
-  cta: 3,
+  conjunto: 0,
+  linkAnuncio: 1,
+  adName: 2,
+  textoPrincipal: 3,
+  titulo: 4,
+  descricao: 5,
+  cta: 6,
 };
 
 export interface LinhaExportacao {
+  conjunto: string;
+  linkAnuncio: string;
+  adName: string;
   textoPrincipal: string;
   titulo: string;
   descricao: string;
@@ -485,6 +502,9 @@ export function resolverAbaExportacao(brandName: string): string | null {
 /** Converte um Ad (já criado) numa linha da planilha de acompanhamento. */
 export function linhaExportacaoDeAd(ad: Ad): LinhaExportacao {
   return {
+    conjunto: ad.ad_set_name ?? "",
+    linkAnuncio: ad.link_anuncio ?? "",
+    adName: ad.ad_name ?? "",
     textoPrincipal: ad.texto_principal ?? "",
     titulo: ad.titulo ?? "",
     descricao: ad.descricao ?? "",
@@ -530,11 +550,18 @@ export async function appendAnunciosExportados(
     {} as Record<CampoExportacao, number>
   );
 
-  const maxIndice = Math.max(...Object.values(indices));
-  const colunaFinal = indiceParaColunaA1(maxIndice);
+  // A linha precisa cobrir toda a largura da tabela para o append (INSERT_ROWS)
+  // alinhar as colunas corretamente, mesmo que colunas manuais (Observações,
+  // Link Click Up, Data Da Subida) fiquem em branco à direita.
+  const maxIndiceCampo = Math.max(...Object.values(indices));
+  const larguraTabela = Math.max(maxIndiceCampo + 1, cabecalhos.length);
+  const colunaFinal = indiceParaColunaA1(larguraTabela - 1);
 
   const values = linhas.map((linha) => {
-    const row = new Array<string>(maxIndice + 1).fill("");
+    const row = new Array<string>(larguraTabela).fill("");
+    row[indices.conjunto] = linha.conjunto;
+    row[indices.linkAnuncio] = linha.linkAnuncio;
+    row[indices.adName] = linha.adName;
     row[indices.textoPrincipal] = linha.textoPrincipal;
     row[indices.titulo] = linha.titulo;
     row[indices.descricao] = linha.descricao;
