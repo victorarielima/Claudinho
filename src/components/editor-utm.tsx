@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { gerarLinkAnuncio } from "@/lib/utm";
+import { aplicarUtmDestino, gerarLinkAnuncio } from "@/lib/utm";
 import {
   Dialog,
   DialogContent,
@@ -250,12 +250,19 @@ export function PreviewLinkAnuncio({
   adName,
   onOverride,
   override,
+  destinos,
 }: {
   linkCampanha: string;
   adSetName: string;
   adName: string;
   onOverride: (url: string | null) => void;
   override: string | null;
+  /**
+   * Destinos do fan-out. Com mais de um, não existe link único: o
+   * `utm_campaign` é derivado do ad set de cada destino (igual ao que o
+   * servidor faz em /api/ads/lote), então mostramos um link por destino.
+   */
+  destinos?: { adSetId: string; adSetName: string }[];
 }) {
   const gerado = useMemo(() => {
     try {
@@ -277,13 +284,33 @@ export function PreviewLinkAnuncio({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gerado]);
 
+  // Um link por destino quando há fan-out: cada ad set tem seu utm_campaign.
+  const linksPorDestino = useMemo(() => {
+    if (!destinos || destinos.length <= 1 || !linkCampanha) return null;
+    return destinos.map((d) => {
+      let link = "";
+      try {
+        link = aplicarUtmDestino(override || linkCampanha, d.adSetName, adName);
+      } catch {
+        link = "";
+      }
+      return { ...d, link };
+    });
+  }, [destinos, override, linkCampanha, adName]);
+
   if (!linkCampanha) return null;
 
   return (
     <div className="mt-1.5 rounded-md border bg-muted/30 px-2.5 py-1.5">
       <div className="flex items-center justify-between mb-0.5">
         <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-          Link final (UTM){foiEditado && <span className="text-amber-600 ml-1">editado</span>}
+          Link final (UTM)
+          {linksPorDestino && (
+            <span className="ml-1 normal-case tracking-normal text-primary">
+              1 por destino
+            </span>
+          )}
+          {foiEditado && <span className="text-amber-600 ml-1">editado</span>}
         </span>
         <div className="flex items-center gap-2">
           {foiEditado && (
@@ -304,9 +331,24 @@ export function PreviewLinkAnuncio({
           </button>
         </div>
       </div>
-      <p className="text-[10px] text-muted-foreground break-all leading-relaxed select-all">
-        {linkFinal}
-      </p>
+      {linksPorDestino ? (
+        <div className="max-h-32 space-y-1 overflow-y-auto pr-0.5">
+          {linksPorDestino.map((d) => (
+            <div key={d.adSetId || d.adSetName} className="min-w-0">
+              <span className="block truncate text-[10px] font-medium text-foreground/70">
+                {d.adSetName}
+              </span>
+              <span className="block break-all text-[10px] leading-relaxed text-muted-foreground select-all">
+                {d.link}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-[10px] text-muted-foreground break-all leading-relaxed select-all">
+          {linkFinal}
+        </p>
+      )}
       {editorAberto && (
         <EditorUtm
           url={linkFinal}

@@ -890,7 +890,8 @@ export function FormularioLoteImagens({
                     <PreviewLinkAnuncio
                       linkCampanha={anuncio.linkCampanha}
                       adSetName={adSetNome}
-                      adName={anuncio.adName}
+                      adName={versionarNomes ? proximosNomes[i] : anuncio.adName}
+                      destinos={destinosEfetivos}
                       override={anuncio.linkAnuncioOverride}
                       onOverride={(v) => updateAnuncio(i, "linkAnuncioOverride", v)}
                     />

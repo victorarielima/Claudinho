@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { criarAd, buscarBrand, type CriarAdInput, type Ad } from "@/lib/db";
 import { normalizarPlacementImagem } from "@/lib/ad-media";
+import { aplicarUtmDestino } from "@/lib/utm";
 import { appendAnunciosExportados, linhaExportacaoDeAd } from "@/lib/sheets";
 
 interface AnuncioItem {
@@ -109,6 +110,7 @@ export async function POST(request: NextRequest) {
     }
 
     const adType = body.type ?? "video";
+    const multiDestino = destinos.length > 1;
 
     // Fan-out: cada anúncio é criado uma vez por destino.
     type Tarefa = { adName: string; destino: Destino; promise: Promise<unknown> };
@@ -135,7 +137,22 @@ export async function POST(request: NextRequest) {
         ];
       }
 
+      const linkBase = item.linkCampanha || body.linkCampanha;
+
       for (const destino of destinos) {
+        // Com mais de um destino, o link NÃO pode ser o mesmo para todos: cada
+        // cópia precisa do utm_campaign do seu próprio ad set. Isso vale tanto
+        // para link colado já com UTM (que `gerarLinkAnuncio` devolveria
+        // intacto) quanto para override editado à mão — ambos ficavam presos ao
+        // UTM de um único destino. Os demais parâmetros são preservados.
+        const linkOverride = multiDestino
+          ? aplicarUtmDestino(
+              item.linkAnuncioOverride || linkBase,
+              destino.adSetName,
+              item.adName
+            ) || undefined
+          : item.linkAnuncioOverride;
+
         const input: CriarAdInput = {
           brand_id: body.brandId,
           type: adType,
@@ -148,8 +165,8 @@ export async function POST(request: NextRequest) {
           texto_principal: item.textoPrincipal || body.textoPrincipal,
           descricao: descricaoPadrao,
           cta: ctaPadrao,
-          link_campanha: item.linkCampanha || body.linkCampanha,
-          link_anuncio_override: item.linkAnuncioOverride,
+          link_campanha: linkBase,
+          link_anuncio_override: linkOverride,
           assets,
         };
 
