@@ -447,6 +447,11 @@ export interface ParamsCriativoVideo {
   name: string;
   crossChannel?: CrossChannelInfo;
   instagramActorId?: string | null;
+  /**
+   * IG user id do criador parceiro — vídeo de influencer. Quando presente, o
+   * creative sobe como anúncio de parceria (`branded_content.partners`).
+   */
+  parceriaIgUserId?: string | null;
 }
 
 export async function criarCreativeVideo(
@@ -506,6 +511,10 @@ export async function criarCreativeVideo(
       construirOmnichannelSpec(params.link ?? "", params.crossChannel),
     ));
   }
+  const brandedContent = construirBrandedContent(params.parceriaIgUserId);
+  if (brandedContent) {
+    formData.append("branded_content", JSON.stringify(brandedContent));
+  }
   formData.append("access_token", token);
 
   const res = await metaFetchWithRetry(url, {
@@ -528,6 +537,7 @@ export async function criarCreativeVideo(
     fn: "criarCreativeVideo",
     accountId,
     creativeId: json.id,
+    parceriaIgUserId: params.parceriaIgUserId ?? null,
   });
 
   return json.id;
@@ -1285,4 +1295,119 @@ export async function buscarCrossChannelInfo(
   }
 
   return { objectStoreUrls, applicationId };
+}
+
+// ─── Anúncios de parceria (influencer) ──────────────────────
+
+const PARCERIAS_MAX_PAGINAS = 10;
+
+/**
+ * Monta o `branded_content` do creative para um anúncio de parceria
+ * (vídeo de influencer).
+ *
+ * Shape validado contra os parâmetros de `POST /act_{id}/adcreatives`:
+ * `branded_content.partners[]` aceita `ig_user_id`, `identity_type`
+ * (ADVERTISER | PARTNER_BUSINESS | PARTNER_CREATOR) e
+ * `creator_ad_permission_type`. Usamos `IG_ADS_PERMISSION` — a permissão de
+ * nível de conta concedida em `/{ig-user-id}/branded_content_ad_permissions`,
+ * que é exatamente o que `buscarParceriasAprovadas()` lista.
+ *
+ * Sem permissão APPROVED do criador o Meta recusa o creative (code 100), por
+ * isso o seletor da UI só oferece parcerias aprovadas.
+ *
+ * Docs: https://developers.facebook.com/docs/marketing-api/reference/ad-account/adcreatives/
+ */
+export function construirBrandedContent(parceriaIgUserId?: string | null) {
+  const igUserId = parceriaIgUserId?.trim();
+  if (!igUserId) return null;
+
+  return {
+    partners: [
+      {
+        ig_user_id: igUserId,
+        identity_type: "PARTNER_CREATOR",
+        creator_ad_permission_type: "IG_ADS_PERMISSION",
+      },
+    ],
+  };
+}
+
+export interface ParceriaMeta {
+  /** IG user id do criador — vai em `branded_content.partners[].ig_user_id`. */
+  creatorId: string;
+  /** @ do criador, para exibição no seletor. */
+  username: string;
+}
+
+/**
+ * Lista os criadores que já concederam à marca permissão de anúncio de
+ * parceria no nível de conta (o "allowlist" de influencers).
+ *
+ * `GET /{ig-user-id}/branded_content_ad_permissions` — o `{ig-user-id}` é a
+ * conta Instagram Business da MARCA, resolvida a partir da página via
+ * `buscarInstagramActorId()`. Só entram na lista os `permission_status`
+ * APPROVED; PENDING/REVOKED fariam o creative falhar na criação.
+ *
+ * Requer no token: `instagram_branded_content_ads_brand`, `instagram_basic` e
+ * `business_management`. Sem elas o Meta responde erro — que é propagado para
+ * a UI em vez de virar lista vazia silenciosa.
+ *
+ * Docs: https://developers.facebook.com/documentation/ads-commerce/marketing-api/ad-creative/partnership-ads/account-level-permissioning
+ */
+export async function buscarParceriasAprovadas(pageId: string): Promise<ParceriaMeta[]> {
+  const igUserId = await buscarInstagramActorId(pageId);
+  if (!igUserId) {
+    throw new Error(
+      `Instagram da marca não encontrado para a página ${pageId}. Sem ele não é possível listar as parcerias.`
+    );
+  }
+
+  const token = getAccessToken();
+  const parcerias: ParceriaMeta[] = [];
+  let proxima: string | null =
+    `${META_API_BASE}/${igUserId}/branded_content_ad_permissions` +
+    `?fields=creator_username,creator_id,permission_status&limit=100&access_token=${token}`;
+
+  for (let pagina = 0; pagina < PARCERIAS_MAX_PAGINAS && proxima; pagina += 1) {
+    const res = await metaFetchWithRetry(proxima);
+    const json = await safeResponseJson(res);
+
+    if (!res.ok || json.error) {
+      logger.error("Failed to list branded content ad permissions", {
+        fn: "buscarParceriasAprovadas",
+        pageId,
+        igUserId,
+        error: extrairErroMeta(json),
+      });
+      throw new Error(`Erro ao listar parcerias: ${extrairErroMeta(json)}`);
+    }
+
+    const data = (json.data ?? []) as {
+      creator_id?: string;
+      creator_username?: string;
+      permission_status?: string;
+    }[];
+
+    for (const item of data) {
+      if (!item.creator_id) continue;
+      if ((item.permission_status ?? "").toUpperCase() !== "APPROVED") continue;
+      parcerias.push({
+        creatorId: String(item.creator_id),
+        username: item.creator_username ?? String(item.creator_id),
+      });
+    }
+
+    proxima = (json.paging?.next as string | undefined) ?? null;
+  }
+
+  parcerias.sort((a, b) => a.username.localeCompare(b.username));
+
+  logger.info("Branded content ad permissions listed", {
+    fn: "buscarParceriasAprovadas",
+    pageId,
+    igUserId,
+    aprovadas: parcerias.length,
+  });
+
+  return parcerias;
 }

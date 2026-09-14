@@ -256,3 +256,64 @@ BUY_NOW, GET_QUOTE, WATCH_MORE
 ```
 
 Ad-readiness bloqueia CTA fora da whitelist (`cta_invalido`).
+
+---
+
+## 8. Anúncio de parceria (vídeo de influencer)
+
+Vídeo de criador subido pelo Drive que precisa aparecer com o header
+"parceria paga". Vale **só para vídeo** no Claudinho (`criarCreativeVideo`).
+
+### Payload (campo `branded_content`, nível do creative)
+
+```jsonc
+// POST /act_<id>/adcreatives — junto com object_story_spec normal
+{
+  "branded_content": {
+    "partners": [
+      {
+        "ig_user_id": "<IG user id do criador>",
+        "identity_type": "PARTNER_CREATOR",
+        "creator_ad_permission_type": "IG_ADS_PERMISSION"
+      }
+    ]
+  }
+}
+```
+
+- `identity_type`: `ADVERTISER | PARTNER_BUSINESS | PARTNER_CREATOR`.
+- `creator_ad_permission_type`: `IG_ADS_PERMISSION` = permissão de **nível
+  de conta** (allowlist), que é a que o Claudinho usa.
+- `object_story_spec.instagram_user_id` continua sendo o IG da **marca** —
+  o parceiro entra só em `branded_content`.
+- Não confundir com `branded_content_sponsor_page_id` (legado, para
+  impulsionar post orgânico do criador) nem com `source_instagram_media_id`
+  (boost de post existente, que usa o *ad code* do post).
+
+### Listar parcerias disponíveis
+
+```
+GET /{ig-user-id-da-marca}/branded_content_ad_permissions
+    ?fields=creator_username,creator_id,permission_status
+```
+
+`permission_status`: `APPROVED | PENDING | REVOKED`. **Só APPROVED serve** —
+os outros fazem o creative falhar com code 100. O `{ig-user-id}` sai de
+`buscarInstagramActorId(pageId)`.
+
+Token precisa de `instagram_branded_content_ads_brand`, `instagram_basic` e
+`business_management`; sem elas o endpoint responde erro (o Claudinho propaga
+para a UI em vez de mostrar lista vazia).
+
+### No projeto
+
+| Peça | Onde |
+|---|---|
+| Monta o `branded_content` | `construirBrandedContent()` em `src/lib/meta-criar.ts` |
+| Lista criadores aprovados | `buscarParceriasAprovadas()` em `src/lib/meta-criar.ts` |
+| Endpoint da UI | `GET /api/meta/parcerias?brandId=` |
+| Persistência | `ads.parceria_ig_user_id` / `ads.parceria_username` |
+| UI | checkbox "Vídeo de influencer" em `formulario-lote-videos.tsx` |
+
+Docs: [adcreatives POST params](https://developers.facebook.com/docs/marketing-api/reference/ad-account/adcreatives/) ·
+[account-level permissioning](https://developers.facebook.com/documentation/ads-commerce/marketing-api/ad-creative/partnership-ads/account-level-permissioning)

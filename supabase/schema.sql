@@ -47,6 +47,10 @@ CREATE TABLE ads (
   meta_account_id TEXT,
   meta_effective_status TEXT,
 
+  -- Anuncio de parceria (influencer): criador exibido no header do anuncio
+  parceria_ig_user_id TEXT,
+  parceria_username TEXT,
+
   created_by TEXT,            -- clerk user ID
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()

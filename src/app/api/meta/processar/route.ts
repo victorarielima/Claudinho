@@ -330,6 +330,8 @@ async function stepCriarCreative(
       name: `Creative - ${ad.ad_name}`,
       crossChannel,
       instagramActorId,
+      // Vídeo de influencer: sobe como anúncio de parceria.
+      parceriaIgUserId: ad.parceria_ig_user_id,
     });
   } else {
     // Re-fetch assets from DB to get updated meta_asset_id values

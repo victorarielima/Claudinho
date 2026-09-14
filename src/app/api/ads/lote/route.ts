@@ -38,6 +38,13 @@ interface LoteBody {
   cta: string;
   linkCampanha: string;
   type?: "video" | "image";
+  /**
+   * Anúncio de parceria (vídeo de influencer): IG user id do criador e o @ dele.
+   * Aplica-se a todos os anúncios do lote — o creative sobe com
+   * `branded_content.partners`. Ausente = anúncio normal.
+   */
+  parceriaIgUserId?: string;
+  parceriaUsername?: string;
   anuncios: AnuncioItem[];
   /**
    * Multi-destino: cada anúncio é criado uma vez por destino (fan-out),
@@ -110,6 +117,17 @@ export async function POST(request: NextRequest) {
     }
 
     const adType = body.type ?? "video";
+    const parceriaIgUserId = body.parceriaIgUserId?.trim() || undefined;
+    const parceriaUsername = body.parceriaUsername?.trim() || undefined;
+
+    // Parceria só existe em vídeo (influencer). Em imagem seria ignorada pelo
+    // pipeline, então recusamos em vez de salvar um dado que nunca sobe.
+    if (parceriaIgUserId && adType !== "video") {
+      return NextResponse.json(
+        { erro: "Anúncio de parceria só é suportado para vídeos" },
+        { status: 400 }
+      );
+    }
     const multiDestino = destinos.length > 1;
 
     // Fan-out: cada anúncio é criado uma vez por destino.
@@ -167,6 +185,8 @@ export async function POST(request: NextRequest) {
           cta: ctaPadrao,
           link_campanha: linkBase,
           link_anuncio_override: linkOverride,
+          parceria_ig_user_id: parceriaIgUserId,
+          parceria_username: parceriaUsername,
           assets,
         };
 

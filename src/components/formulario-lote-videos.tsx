@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { Checkbox } from "@/components/ui/checkbox";
 import type { VideoDrive } from "@/lib/drive-explorer";
 
 // ---------------------------------------------------------------------------
@@ -54,6 +55,12 @@ interface Destino {
   campaignName: string;
   adSetId: string;
   adSetName: string;
+}
+
+/** Criador com permissão de anúncio de parceria aprovada para a marca. */
+interface Parceria {
+  creatorId: string;
+  username: string;
 }
 
 interface AnuncioItem {
@@ -158,6 +165,15 @@ export function FormularioLoteVideos({
   const [descricao, setDescricao] = useState(DESCRICAO_PADRAO_VINHO);
   const [cta, setCta] = useState(CTA_PADRAO_VINHO);
 
+  // ─── Form: anúncio de parceria (vídeo de influencer) ───────
+  // Marcado, o lote inteiro sobe como anúncio de parceria com o criador
+  // escolhido no header. A lista vem das permissões aprovadas no Meta.
+  const [ehInfluencer, setEhInfluencer] = useState(false);
+  const [parcerias, setParcerias] = useState<Parceria[]>([]);
+  const [parceriaId, setParceriaId] = useState("");
+  const [carregandoParcerias, setCarregandoParcerias] = useState(false);
+  const [erroParcerias, setErroParcerias] = useState<string | null>(null);
+
   // ─── Form: individual ads ──────────────────────────────────
   const [anuncios, setAnuncios] = useState<AnuncioItem[]>([]);
 
@@ -208,6 +224,10 @@ export function FormularioLoteVideos({
     setDestinos([]);
     setDescricao(DESCRICAO_PADRAO_VINHO);
     setCta(CTA_PADRAO_VINHO);
+    setEhInfluencer(false);
+    setParcerias([]);
+    setParceriaId("");
+    setErroParcerias(null);
     setCampanhas([]);
     setAdsets([]);
     setMensagemErro(null);
@@ -241,6 +261,10 @@ export function FormularioLoteVideos({
   const handleBrandChange = useCallback(
     (value: string) => {
       setBrandId(value);
+      // As parcerias são do Instagram da marca — trocar de marca invalida a lista.
+      setParcerias([]);
+      setParceriaId("");
+      setErroParcerias(null);
       const brand = brands.find((b) => b.id === value);
       if (brand) {
         carregarCampanhas(brand.meta_account_id);
@@ -248,6 +272,44 @@ export function FormularioLoteVideos({
     },
     [brands, carregarCampanhas]
   );
+
+  // ─── Carrega parcerias quando o modo influencer é ligado ───
+  useEffect(() => {
+    if (!aberto || !ehInfluencer || !brandId) return;
+
+    let cancelado = false;
+    setCarregandoParcerias(true);
+    setErroParcerias(null);
+
+    fetch(`/api/meta/parcerias?brandId=${brandId}`)
+      .then(async (r) => {
+        const json = await r.json();
+        if (!r.ok) throw new Error(json.erro ?? "Erro ao buscar parcerias");
+        return json;
+      })
+      .then((json) => {
+        if (cancelado) return;
+        const lista: Parceria[] = json.parcerias ?? [];
+        setParcerias(lista);
+        if (lista.length === 0) {
+          setErroParcerias(
+            "Nenhuma parceria aprovada para esta marca. O criador precisa aprovar a permissão de anúncios de parceria no Instagram."
+          );
+        }
+      })
+      .catch((e: unknown) => {
+        if (cancelado) return;
+        setParcerias([]);
+        setErroParcerias(e instanceof Error ? e.message : "Erro ao buscar parcerias");
+      })
+      .finally(() => {
+        if (!cancelado) setCarregandoParcerias(false);
+      });
+
+    return () => {
+      cancelado = true;
+    };
+  }, [aberto, ehInfluencer, brandId]);
 
   // ─── Auto-select brand from video tags (_EV_ / _GC_) ───────
   useEffect(() => {
@@ -402,8 +464,16 @@ export function FormularioLoteVideos({
   }, [aberto, anuncios, gerarLegendaPara]);
 
   // ─── Save ──────────────────────────────────────────────────
+  const parceriaSelecionada = parcerias.find((p) => p.creatorId === parceriaId);
+  // Marcar influencer sem escolher o criador subiria o vídeo como anúncio
+  // comum, sem o header de parceria — bloqueia em vez de ignorar.
+  const parceriaPendente = ehInfluencer && !parceriaSelecionada;
   const podeSalvar =
-    brandId && destinosEfetivos.length > 0 && anuncios.length > 0 && !salvando;
+    brandId &&
+    destinosEfetivos.length > 0 &&
+    anuncios.length > 0 &&
+    !parceriaPendente &&
+    !salvando;
 
   const salvar = useCallback(async () => {
     if (!podeSalvar) return;
@@ -422,6 +492,8 @@ export function FormularioLoteVideos({
           descricao,
           cta,
           linkCampanha: "",
+          parceriaIgUserId: parceriaSelecionada?.creatorId,
+          parceriaUsername: parceriaSelecionada?.username,
           anuncios: anuncios.map((a) => ({
             videoId: a.videoId,
             adName: a.adName,
@@ -461,6 +533,7 @@ export function FormularioLoteVideos({
     destinosEfetivos,
     descricao,
     cta,
+    parceriaSelecionada,
     anuncios,
     aoSalvar,
     aoFechar,
@@ -621,6 +694,56 @@ export function FormularioLoteVideos({
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+
+            {/* Anúncio de parceria (vídeo de influencer) */}
+            <div className="mt-3 rounded-lg border bg-muted/30 p-3">
+              <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
+                <Checkbox
+                  checked={ehInfluencer}
+                  onCheckedChange={(valor) => {
+                    const marcado = valor === true;
+                    setEhInfluencer(marcado);
+                    if (!marcado) {
+                      setParceriaId("");
+                      setErroParcerias(null);
+                    }
+                  }}
+                />
+                Vídeo de influencer{" "}
+                <span className="font-normal text-muted-foreground">
+                  (anúncio de parceria)
+                </span>
+              </label>
+
+              {ehInfluencer && (
+                <div className="mt-3 grid gap-1.5">
+                  <label className="text-sm font-medium text-muted-foreground">
+                    Parceria
+                  </label>
+                  <SearchableSelect
+                    options={parcerias.map((p) => ({
+                      value: p.creatorId,
+                      label: `@${p.username.replace(/^@/, "")}`,
+                    }))}
+                    value={parceriaId}
+                    onValueChange={setParceriaId}
+                    disabled={!brandId || parcerias.length === 0}
+                    loading={carregandoParcerias}
+                    placeholder={
+                      !brandId ? "Selecione a marca primeiro" : "Buscar criador..."
+                    }
+                  />
+                  {erroParcerias ? (
+                    <p className="text-xs text-destructive">{erroParcerias}</p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Todos os vídeos do lote sobem como anúncio de parceria com
+                      esse criador.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </section>
 
@@ -829,6 +952,12 @@ export function FormularioLoteVideos({
           )}
           {mensagemSucesso && (
             <p className="mb-3 text-sm text-green-600">{mensagemSucesso}</p>
+          )}
+          {parceriaPendente && !mensagemErro && (
+            <p className="mb-3 text-sm text-muted-foreground">
+              Selecione a parceria para salvar, ou desmarque &ldquo;Vídeo de
+              influencer&rdquo;.
+            </p>
           )}
           <div className="flex items-center justify-end gap-3">
             <Button variant="outline" onClick={aoFechar} disabled={salvando}>

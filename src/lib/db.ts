@@ -28,6 +28,10 @@ export interface Ad {
   meta_creative_id: string | null;
   meta_account_id: string | null;
   meta_effective_status: string | null;
+  /** IG user id do criador parceiro (anuncio de parceria). Null = anuncio normal. */
+  parceria_ig_user_id: string | null;
+  /** @ do criador, so para exibicao na UI. */
+  parceria_username: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -83,6 +87,8 @@ export interface CriarAdInput {
   link_campanha?: string;
   link_anuncio_override?: string;
   link_aux?: string;
+  parceria_ig_user_id?: string;
+  parceria_username?: string;
   assets: { placement: string; asset_url: string; asset_type: "image" | "video" }[];
 }
 
@@ -275,6 +281,8 @@ export async function criarAd(input: CriarAdInput, userId: string, userName?: st
       link_campanha: input.link_campanha || null,
       link_anuncio: linkAnuncio,
       link_aux: input.link_aux || null,
+      parceria_ig_user_id: input.parceria_ig_user_id || null,
+      parceria_username: input.parceria_username || null,
       created_by: userId,
     })
     .select()
