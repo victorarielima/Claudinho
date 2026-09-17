@@ -35,6 +35,7 @@ import {
   normalizarPlacementImagem,
 } from "@/lib/ad-media";
 import { analisarProntidaoAnuncio } from "@/lib/ad-readiness";
+import { proximoNomeCopia } from "@/lib/utm";
 
 const SHEETS_ENABLED = process.env.NEXT_PUBLIC_ENABLE_SHEETS === "true";
 const STALE_PROCESSING_MS = 5 * 60 * 1000; // 5 minutos
@@ -927,17 +928,30 @@ export function PainelCriacao() {
                     ? [{ placement: "video_principal", asset_url: linha.linkVideo, asset_type: "video" as const }]
                     : [];
 
+                const campanhaCopia = linha.campaign || "(selecionar)";
+                const adSetCopia = linha.adSet || "(selecionar)";
+                // Nome livre dentro do destino da cópia: duplicar duas vezes o
+                // mesmo criativo gerava dois "X (cópia)" e batia no índice
+                // único do banco.
+                const nomeCopia = proximoNomeCopia(
+                  linha.adName,
+                  linhas
+                    .filter((l) => (l.campaign || "(selecionar)") === campanhaCopia
+                      && (l.adSet || "(selecionar)") === adSetCopia)
+                    .map((l) => l.adName)
+                );
+
                 const res = await fetch("/api/ads", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({
                     brand_id: brandSelecionado?.id,
                     type: linha.tipo ?? "video",
-                    campaign_name: linha.campaign || "(selecionar)",
+                    campaign_name: campanhaCopia,
                     campaign_id: "",
-                    ad_set_name: linha.adSet || "(selecionar)",
+                    ad_set_name: adSetCopia,
                     ad_set_id: "",
-                    ad_name: `${linha.adName} (cópia)`,
+                    ad_name: nomeCopia,
                     texto_principal: linha.textoPrincipal,
                     titulo: linha.titulo,
                     descricao: linha.descricao,
@@ -957,7 +971,7 @@ export function PainelCriacao() {
                 if (novoAd?.id) {
                   setEditarAdId(novoAd.id);
                   setEditarDados({
-                    ad_name: `${linha.adName} (cópia)`,
+                    ad_name: nomeCopia,
                     texto_principal: linha.textoPrincipal ?? "",
                     titulo: linha.titulo ?? "",
                     descricao: linha.descricao ?? "",

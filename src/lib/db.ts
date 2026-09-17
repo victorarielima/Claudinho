@@ -288,7 +288,14 @@ export async function criarAd(input: CriarAdInput, userId: string, userName?: st
     .select()
     .single();
 
-  if (error) throw new Error(`Erro ao criar ad: ${error.message}`);
+  if (error) {
+    if (error.code === "23505" || error.message.includes("idx_ads_unique_name")) {
+      throw new Error(
+        `Já existe um anúncio chamado '${input.ad_name}' neste destino. Use outro nome ou edite o existente.`
+      );
+    }
+    throw new Error(`Erro ao criar ad: ${error.message}`);
+  }
 
   // Inserir assets
   if (input.assets.length > 0) {
@@ -334,6 +341,44 @@ export async function atualizarAd(
   // `assets` não é coluna da tabela `ads` — tratado separadamente em ad_assets.
   delete updateData.assets;
 
+  // ── Colisão de nome ─────────────────────────────────────────
+  // O banco tem índice único em (brand, campanha, ad set, nome) para status
+  // ativos. Sem esta checagem o erro cru do Postgres ("duplicate key value
+  // violates unique constraint idx_ads_unique_name") vazava para o dialog de
+  // edição — típico ao salvar uma cópia num destino que já tem esse nome.
+  const campanhaFinal = input.campaign_name ?? anterior.campaign_name;
+  const adSetFinal = input.ad_set_name ?? anterior.ad_set_name;
+  const nomeFinal = input.ad_name ?? anterior.ad_name;
+  const chaveMudou =
+    campanhaFinal !== anterior.campaign_name ||
+    adSetFinal !== anterior.ad_set_name ||
+    nomeFinal !== anterior.ad_name;
+
+  if (chaveMudou) {
+    const { data: conflito } = await sb
+      .from("ads")
+      .select("id, status")
+      .eq("brand_id", anterior.brand_id)
+      .eq("campaign_name", campanhaFinal)
+      .eq("ad_set_name", adSetFinal)
+      .eq("ad_name", nomeFinal)
+      .in("status", ["pendente", "processando", "concluido"])
+      .neq("id", id)
+      .maybeSingle();
+
+    if (conflito) {
+      const label =
+        conflito.status === "concluido"
+          ? "já foi subido para a Meta"
+          : conflito.status === "processando"
+            ? "está sendo processado"
+            : "já existe como rascunho";
+      throw new Error(
+        `Já existe um anúncio chamado '${nomeFinal}' neste ad set (${adSetFinal}) e ele ${label}. Renomeie esta cópia ou escolha outro destino.`
+      );
+    }
+  }
+
   // ── Consistência do link/UTM ────────────────────────────────
   // O link do anúncio embute o nome do ad set (utm_campaign) e o nome do
   // anúncio (utm_content). Se o usuário renomear o rascunho, o link precisa
@@ -371,7 +416,16 @@ export async function atualizarAd(
   }
 
   const { error } = await sb.from("ads").update(updateData).eq("id", id);
-  if (error) throw new Error(`Erro ao atualizar ad: ${error.message}`);
+  if (error) {
+    // Rede de segurança: corrida entre duas edições simultâneas, ou índice
+    // antigo ainda não migrado. Traduz o erro do Postgres para linguagem humana.
+    if (error.code === "23505" || error.message.includes("idx_ads_unique_name")) {
+      throw new Error(
+        `Já existe um anúncio chamado '${nomeFinal}' neste destino. Renomeie esta cópia ou escolha outra campanha/ad set.`
+      );
+    }
+    throw new Error(`Erro ao atualizar ad: ${error.message}`);
+  }
 
   // Calcular diff para audit. Iteramos sobre updateData (e não input) para
   // que a regeneração do link_anuncio também apareça no histórico.

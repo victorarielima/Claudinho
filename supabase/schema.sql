@@ -92,7 +92,12 @@ CREATE INDEX idx_audit_created ON audit_log(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ads_meta_ad_id ON ads(meta_ad_id);
 CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_ads_unique_name ON ads(brand_id, ad_name, campaign_name);
+-- Unicidade de nome de anuncio: mesmo escopo da checagem em criarAd()
+-- (src/lib/db.ts) -> brand + campanha + ad set + nome, so para status ativos.
+-- Rascunhos em `erro` nao reservam o nome: o usuario pode recriar.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ads_unique_name
+  ON ads(brand_id, campaign_name, ad_set_name, ad_name)
+  WHERE status IN ('pendente', 'processando', 'concluido');
 
 -- Trigger para updated_at automático
 CREATE OR REPLACE FUNCTION update_updated_at()

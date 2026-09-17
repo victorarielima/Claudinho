@@ -88,3 +88,34 @@ export function aplicarUtmDestino(
 
   return url.toString();
 }
+
+/**
+ * Próximo nome livre para uma cópia de anúncio.
+ *
+ * Duplicar sempre gerando "NOME (cópia)" colidia com o índice único do banco
+ * (brand + campanha + ad set + nome) quando o mesmo criativo era duplicado
+ * duas vezes para o mesmo destino. Aqui procuramos o primeiro sufixo livre:
+ * "NOME (cópia)", "NOME (cópia) 2", "NOME (cópia) 3"...
+ *
+ * O formato com o número FORA dos parênteses é intencional: é o que
+ * `limparNomeParaUtm` sabe remover ao montar o `utm_content`.
+ */
+export function proximoNomeCopia(
+  nomeBase: string,
+  nomesOcupados: Iterable<string>
+): string {
+  const ocupados = new Set(
+    Array.from(nomesOcupados, (n) => n.trim().toLowerCase()).filter(Boolean)
+  );
+
+  const primeiro = `${nomeBase} (cópia)`;
+  if (!ocupados.has(primeiro.toLowerCase())) return primeiro;
+
+  for (let i = 2; i <= 99; i++) {
+    const candidato = `${nomeBase} (cópia) ${i}`;
+    if (!ocupados.has(candidato.toLowerCase())) return candidato;
+  }
+
+  // Fallback improvável: 99 cópias do mesmo anúncio no mesmo destino.
+  return `${nomeBase} (cópia) ${Date.now()}`;
+}
