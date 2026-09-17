@@ -23,6 +23,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useBrand } from "@/components/brand-provider";
 import type { VideoDrive } from "@/lib/drive-explorer";
 
 // ---------------------------------------------------------------------------
@@ -144,6 +145,9 @@ export function FormularioLoteVideos({
   videos,
   aoSalvar,
 }: FormularioLoteVideosProps) {
+  // Marca da aba aberta no painel (Evino / Grand Cru).
+  const { selectedBrand: marcaDaAba } = useBrand();
+
   // ─── Selector data ─────────────────────────────────────────
   const [brands, setBrands] = useState<Brand[]>([]);
   const [campanhas, setCampanhas] = useState<Campanha[]>([]);
@@ -311,9 +315,10 @@ export function FormularioLoteVideos({
     };
   }, [aberto, ehInfluencer, brandId]);
 
-  // ─── Auto-select brand from video tags (_EV_ / _GC_) ───────
-  useEffect(() => {
-    if (!aberto || brands.length === 0 || videos.length === 0 || brandId) return;
+  // ─── Marca sugerida pelas tags dos vídeos (_EV_ / _GC_) ────
+  // Só vale quando todos os vídeos apontam para o mesmo lado (sem mistura).
+  const marcaPorTag = useMemo<"evino" | "grand" | null>(() => {
+    if (videos.length === 0) return null;
 
     const ehEV = (t: string) => t.includes("_EV_") || t.includes("_EV ") || t.includes(" EV_") || t.includes("EVINO");
     const ehGC = (t: string) => t.includes("_GC_") || t.includes("_GC ") || t.includes(" GC_") || t.includes("GRAND CRU") || t.includes("GRANDCRU");
@@ -326,15 +331,38 @@ export function FormularioLoteVideos({
     const algumEV = textos.some(ehEV);
     const algumGC = textos.some(ehGC);
 
-    // Só auto-seleciona se não houver conflito (não mistura EV com GC)
-    if (algumEV && !algumGC) {
-      const brand = brands.find((b) => b.name.toLowerCase().includes("evino"));
-      if (brand) handleBrandChange(brand.id);
-    } else if (algumGC && !algumEV) {
-      const brand = brands.find((b) => b.name.toLowerCase().includes("grand"));
-      if (brand) handleBrandChange(brand.id);
-    }
-  }, [aberto, brands, videos, brandId, handleBrandChange]);
+    if (algumEV && !algumGC) return "evino";
+    if (algumGC && !algumEV) return "grand";
+    return null;
+  }, [videos]);
+
+  // ─── Marca inicial = aba aberta no painel ──────────────────
+  // A aba (Evino / Grand Cru) é a intenção explícita do usuário, então ela
+  // manda. As tags dos vídeos ficam como plano B (contexto sem marca) e como
+  // aviso quando contradizem a aba — ver `avisoMarca`.
+  useEffect(() => {
+    if (!aberto || brands.length === 0 || brandId) return;
+
+    const daAba = marcaDaAba ? brands.find((b) => b.id === marcaDaAba.id) : null;
+    const porTag = marcaPorTag
+      ? brands.find((b) => b.name.toLowerCase().includes(marcaPorTag))
+      : null;
+
+    const alvo = daAba ?? porTag;
+    if (alvo) handleBrandChange(alvo.id);
+  }, [aberto, brands, brandId, marcaDaAba, marcaPorTag, handleBrandChange]);
+
+  // ─── Aviso: tags dos vídeos x marca escolhida ──────────────
+  // Antes o nome do arquivo escolhia a marca sozinho; agora que a aba manda,
+  // o sinal das tags vira um alerta para não subir vídeo de uma marca na conta
+  // da outra.
+  const avisoMarca = useMemo(() => {
+    if (!marcaPorTag || !brandId) return null;
+    const atual = brands.find((b) => b.id === brandId);
+    if (!atual || atual.name.toLowerCase().includes(marcaPorTag)) return null;
+    const sugerida = brands.find((b) => b.name.toLowerCase().includes(marcaPorTag));
+    return `Os vídeos selecionados parecem ser da ${sugerida?.name ?? (marcaPorTag === "evino" ? "Evino" : "Grand Cru")}, mas a marca escolhida é ${atual.name}.`;
+  }, [marcaPorTag, brandId, brands]);
 
   // ─── Load adsets when campanha changes ─────────────────────
   const carregarAdsets = useCallback(async (campaignId: string) => {
@@ -583,6 +611,11 @@ export function FormularioLoteVideos({
                     ))}
                   </SelectContent>
                 </Select>
+                {avisoMarca && (
+                  <p className="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300">
+                    {avisoMarca} Confira antes de subir.
+                  </p>
+                )}
               </div>
 
               {/* Campanha */}

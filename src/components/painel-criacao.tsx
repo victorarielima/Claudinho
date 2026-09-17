@@ -980,7 +980,10 @@ export function PainelCriacao() {
                     campaign_id: "",
                     ad_set_name: "",
                     ad_set_id: "",
-                    link_anuncio: linha.linkAnuncio ?? linha.linkCampanha ?? "",
+                    // Link da CÓPIA (já gerado pelo backend com o nome novo),
+                    // não o do original — herdar o link do original fazia a
+                    // cópia subir com o utm_content do anúncio de origem.
+                    link_anuncio: novoAd.link_anuncio ?? linha.linkCampanha ?? "",
                     tipo: linha.tipo,
                     linkVideo: linha.linkVideo,
                     thumbnailLink: linha.thumbnailLink,
