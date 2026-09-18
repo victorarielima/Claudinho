@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Film, FolderOpen, Info, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -32,7 +32,6 @@ import {
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { CTA_OPTIONS } from "@/lib/constants";
 import { EditorUtmTrigger } from "@/components/editor-utm";
-import { aplicarUtmDestino } from "@/lib/utm";
 import { analisarProntidaoAnuncio, type AssetImagemValidavel } from "@/lib/ad-readiness";
 import { normalizarPlacementImagem, rotuloPlacementImagem } from "@/lib/ad-media";
 import { DialogExploradorClickUp } from "@/components/dialog-explorador-clickup";
@@ -114,10 +113,6 @@ export function DialogEditarAnuncio({
   const [erro, setErro] = useState<string | null>(null);
   const [confirmRecriar, setConfirmRecriar] = useState(false);
 
-  // O link só para de ser regenerado automaticamente depois que o usuário
-  // mexe nele à mão ("o link é do usuário", mesma regra do `atualizarAd`).
-  const linkEditadoManualmente = useRef(false);
-
   // Exploradores de arte: imagens vêm do ClickUp, vídeos do Drive.
   const [exploradorImagens, setExploradorImagens] = useState(false);
   const [exploradorVideos, setExploradorVideos] = useState(false);
@@ -132,7 +127,6 @@ export function DialogEditarAnuncio({
     if (aberto && dadosIniciais) {
       setForm(dadosIniciais);
       setErro(null);
-      linkEditadoManualmente.current = false;
       setCampanhas([]);
       setAdsets([]);
 
@@ -178,51 +172,20 @@ export function DialogEditarAnuncio({
       .finally(() => setCarregandoAdsets(false));
   }, [campanhas]);
 
-  // Link do anúncio com as UTMs do destino atual. `utm_campaign` carrega o
-  // nome do ad set e `utm_content` o nome do anúncio, então mudar de destino
-  // (ou renomear) invalida o link antigo. Ao duplicar um criativo para outra
-  // campanha isso era silencioso: o rascunho herdava o link do original e
-  // subia medindo no lugar errado.
-  const linkComUtmDoDestino = useCallback(
-    (link: string, adSetName: string, adName: string) => {
-      if (linkEditadoManualmente.current) return link; // o link é do usuário
-      if (!link?.trim() || !adSetName || !adName) return link;
-      return aplicarUtmDestino(link, adSetName, adName);
-    },
-    []
-  );
-
   const handleAdsetChange = useCallback((adsetId: string) => {
     const as_ = adsets.find((a) => a.id === adsetId);
-    setForm((prev) => {
-      const adSetName = as_?.nome ?? prev.ad_set_name;
-      return {
-        ...prev,
-        ad_set_id: adsetId,
-        ad_set_name: adSetName,
-        link_anuncio: linkComUtmDoDestino(prev.link_anuncio, adSetName, prev.ad_name),
-      };
-    });
-  }, [adsets, linkComUtmDoDestino]);
+    setForm((prev) => ({
+      ...prev,
+      ad_set_id: adsetId,
+      ad_set_name: as_?.nome ?? prev.ad_set_name,
+    }));
+  }, [adsets]);
 
   const atualizar = useCallback(
     (campo: keyof DadosEdicao, valor: string) => {
-      if (campo === "link_anuncio") linkEditadoManualmente.current = true;
-
-      setForm((prev) => {
-        const proximo = { ...prev, [campo]: valor };
-        // Renomear o anúncio também move o `utm_content`.
-        if (campo === "ad_name") {
-          proximo.link_anuncio = linkComUtmDoDestino(
-            prev.link_anuncio,
-            prev.ad_set_name,
-            valor
-          );
-        }
-        return proximo;
-      });
+      setForm((prev) => ({ ...prev, [campo]: valor }));
     },
-    [linkComUtmDoDestino]
+    []
   );
 
   // Detecta troca de arte (imagens ou vídeo) comparando com o estado inicial.

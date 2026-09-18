@@ -26,7 +26,6 @@ import {
   Sparkles,
 } from "lucide-react";
 import { CTA_OPTIONS } from "@/lib/constants";
-import { useBrand } from "@/components/brand-provider";
 import { gerarLegendaCliente, detectarMarca } from "@/lib/ai-cliente";
 import type { ClickUpTask } from "@/lib/clickup";
 import type { Brand } from "@/lib/db";
@@ -141,9 +140,6 @@ export function FormularioLoteImagens({
   cards,
   aoSalvar,
 }: FormularioLoteImagensProps) {
-  // Marca da aba aberta no painel (Evino / Grand Cru).
-  const { selectedBrand: marcaDaAba } = useBrand();
-
   // ── Destination selectors ───────────────────────────────
   const [brands, setBrands] = useState<Brand[]>([]);
   const [campanhas, setCampanhas] = useState<Campanha[]>([]);
@@ -247,14 +243,12 @@ export function FormularioLoteImagens({
     [brands, carregarCampanhas]
   );
 
-  // ── Marca inicial = aba aberta no painel ────────────────
-  // Antes era fixo em Evino: quem estava na aba Grand Cru tinha que trocar a
-  // marca na mão toda vez. A aba é a intenção explícita do usuário.
+  // ── Auto-select brand (Evino) ───────────────────────────
   useEffect(() => {
     if (!aberto || brands.length === 0 || brandId) return;
-    const daAba = marcaDaAba ? brands.find((b) => b.id === marcaDaAba.id) : null;
-    if (daAba) handleBrandChange(daAba.id);
-  }, [aberto, brands, brandId, marcaDaAba, handleBrandChange]);
+    const evino = brands.find((b) => b.name.toLowerCase().includes("evino"));
+    if (evino) handleBrandChange(evino.id);
+  }, [aberto, brands, brandId, handleBrandChange]);
 
   // ── Load adsets ─────────────────────────────────────────
   const carregarAdsets = useCallback(async (campaignId: string) => {
