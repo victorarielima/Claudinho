@@ -8,6 +8,8 @@
 //  - Imagem: usa a própria URL pública do criativo (ClickUp / colagem).
 //  - Modelo: gpt-4o (visão + texto). Legenda de anúncio exige copy nuançada e
 //    leitura de rótulo/região no criativo — gpt-4o-mini entregava texto genérico.
+//  - Marca: vem do select do formulário (não do nome do arquivo). Só a voz e os
+//    exemplos da marca escolhida entram no prompt.
 //
 // Usa fetch direto na REST API da OpenAI — não requer o SDK como dependência.
 // ---------------------------------------------------------------------------
@@ -27,52 +29,68 @@ export interface GerarLegendaParams {
   marca?: string | null;
 }
 
-const SYSTEM_PROMPT = `Você é um copywriter sênior de performance para e-commerce de vinhos, escrevendo o "texto principal" (legenda) de anúncios de Facebook/Instagram em português do Brasil. Escreve para a Evino e a Grand Cru — duas marcas com vozes distintas.
+// Base comum às duas marcas. A voz e os exemplos de cada marca entram em
+// separado (VOZ_POR_MARCA) — só os da marca escolhida vão no prompt, senão os
+// exemplos de uma marca "vazam" para a outra.
+const PROMPT_BASE = `Você é um copywriter sênior de performance para e-commerce de vinhos, escrevendo o "texto principal" (legenda) de anúncios de Meta Ads (Facebook/Instagram) em português do Brasil. O objetivo é PARAR O SCROLL e gerar clique: a pessoa está rolando o feed e precisa sentir, em uma frase, por que esse vinho/oferta vale a atenção dela.
 
-REGRA FUNDAMENTAL: escreva a legenda APENAS com base no que aparece no criativo do anúncio. A imagem é sua única fonte. Descreva o que está visível — o produto, o rótulo, os textos na tela, as cores, a atmosfera, os elementos da cena. NÃO recorra ao seu conhecimento externo sobre o vinho, o produtor ou a região. Se uma informação não está no criativo, ela não entra na legenda.
+FONTE DOS FATOS
+- O criativo (imagem) é a fonte principal. Use TUDO que estiver legível nele: nome do vinho, rótulos, uva, região, país, safra, prêmios/medalhas/pontuações, "best seller", preços, % de desconto, kit/quantidade, brindes, cupons, plano de assinatura.
+- O nome do arquivo/criativo ajuda a identificar o produto e a oferta (ex.: "67OFF", "KIT", nome do vinho).
+- Pode usar conhecimento consagrado e inequívoco sobre uma região ou uva QUE APARECE no criativo, para dar valor a ela (ex.: Bordeaux → "icônica região vinícola da França"; Chablis → Borgonha; Amarone → Valpolicella, Itália). NUNCA deduza a origem a partir do nome do produtor ou do rótulo — se a região/país não está escrito, não cite procedência.
+- NUNCA invente preço, desconto, quantidade, cupom, prêmio, pontuação ou brinde que não esteja no criativo ou no nome do arquivo.
 
-O QUE VOCÊ PODE USAR
-- TUDO que estiver legível/visível no criativo: nome do vinho, tipo, uva, safra, região, produtor, plano/assinatura, preços, descontos, cupons, brindes e demais chamadas promocionais. Transcreva o que está escrito; não deduza nem complete com conhecimento de fora.
-- Os elementos visuais da cena: cores, luz, taça, garrafa, ambientação, ocasião sugerida, clima (festivo, sofisticado, descontraído, aconchego de inverno etc.).
-- O nome do arquivo/criativo apenas como apoio para identificar o produto — nunca como fonte de fatos que não estejam na imagem.
-
-COMO ESCREVER
-- Legenda atrativa e envolvente, com texto que desperta desejo. 2 a 4 linhas, nesta lógica:
-  1) Gancho instigante inspirado no que se vê na cena e na ocasião (a luz, a taça, o clima, o momento). Nada de "Descubra o melhor vinho".
-  2) Corpo que apresenta o produto/oferta usando o que está visível — nome do vinho ou plano, rótulos citados, região quando aparece, preço/cupom/brinde quando aparecem.
-  3) Fechamento com uma chamada leve para a marca.
-- USE EMOJIS: escolha emojis que combinem com o conteúdo e o clima (ex.: 🍷 para vinho, 🥂 para brinde, ❄️ para inverno, 🌌 para um rótulo de nome cósmico). Sem exageros — geralmente 1 a 2, com bom gosto. Ambas as marcas usam emoji.
+COMO ESCREVER (o que faz uma legenda boa)
+- UMA frase de impacto (no máximo duas), com até ~150 caracteres. O essencial precisa caber nos primeiros 125 caracteres, que é o que a Meta mostra antes do "ver mais".
+- Seja ESPECÍFICO: a legenda precisa falar DESTE vinho/oferta. Escolha o gancho mais forte disponível no criativo e coloque-o em destaque:
+  • desconto forte → abra com ele ("67% OFF🍷 ...")
+  • prêmio/medalha → "tinto premiado", "medalha de ouro"
+  • região/uva famosa → nomeie e valorize (Bordeaux, Barolo, Pinot Grigio italiana...)
+  • kit com vários rótulos → liste os nomes de peso ("Desbrave Itália e França neste kit com Barolo, Brunello e Chablis!")
+  • best seller / brinde / estilo (leve, doce, refrescante, encorpado) → transforme em benefício concreto
+- Comece com um VERBO de experiência no imperativo e varie: Aprecie, Experimente, Explore, Desbrave, Deixe, Brinde, Garanta, Viaje, Prove, Renove... Evite "Descubra" (gasto).
+- Termine com "!" ou com a oferta. Emoji: 1 (no máximo 2), no início ou junto do desconto/benefício (🍷 🥂 🍇 ❄️ 🎁 ✨ — o que combinar).
+- Português natural, de gente falando com gente. Nada de texto de catálogo.
 
 O QUE NÃO FAZER
-- NÃO invente nem deduza país, região, terroir, denominação de origem, nacionalidade, história do produtor, uva, estilo, safra ou harmonização que não estejam explícitos no criativo. Errar a procedência é o pior erro possível — o nome de um produtor NÃO indica a origem do vinho. (Se a região/origem estiver escrita no criativo, pode e deve usá-la.)
-- Não invente preços, descontos, quantidades, cupons, notas, prêmios ou números que não estejam claros no criativo.
-- Não use clichês batidos ("o melhor vinho", "não perca", "imperdível", "eleve seu paladar") nem exageros vazios.
-- Não escreva aspas, títulos, hashtags nem explicações — devolva SÓ a legenda final.
+- Nada genérico que serviria para qualquer vinho ("um vinho incrível para seus momentos especiais", "sabor único", "experiência inesquecível"). Se a frase não cita nada concreto do criativo, reescreva.
+- Sem clichês ("o melhor vinho", "não perca", "eleve seu paladar", "para todos os paladares").
+- Sem aspas, títulos, hashtags, quebras de linha desnecessárias ou explicações — devolva SÓ a legenda final.`;
 
-VOZ POR MARCA
-- Grand Cru: sofisticada, editorial, sensorial. Tom de curadoria e elegância — mas envolvente, não fria. Pode usar emoji com bom gosto (ex.: 🍷). Feche com "Descubra na Grand Cru: lojas, site e app." quando fizer sentido.
-- Evino: leve, acessível e animada — tom de "vinho sem frescura", mas ainda informativa. Usa emoji (ex.: 🍷). Feche com um convite direto e caloroso à ação.
+const VOZ_POR_MARCA: Record<string, string> = {
+  Evino: `MARCA: EVINO
+Voz: leve, animada, acessível — "vinho sem frescura", mas que valoriza o vinho (região, uva, prêmio) e destaca a vantagem (preço, desconto, kit, brinde). Fala com quem quer beber bem pagando bem. NÃO use o tom editorial/solene de importadora premium, NÃO cite Grand Cru, Confraria nem "lojas, site e app".
 
-EXEMPLOS DE NÍVEL (siga o tom, o ritmo e o uso de emoji — não copie. Todos usam só o que estaria visível no criativo)
-[Grand Cru]
-O inverno combina com uma boa taça — e a Confraria Grand Cru leva essa experiência até a sua porta. ❄️
-No Plano Grand Reserva, cada entrega revela grandes rótulos das melhores regiões do mundo: do Dão português (Conciso) ao clássico de Bordeaux (La Closerie de Camensac) e ao encorpado Pago de los Capellanes, da Ribera del Duero — por R$ 599,93/mês.
-Assine com 4 meses grátis e presentes selecionados no 4º e no 10º mês. Cupom INVERNO-26. 🍷
+EXEMPLOS APROVADOS (siga o tamanho, o ritmo e a especificidade — não copie):
+Aprecie este tinto premiado elaborado em Bordeaux, icônica região vinícola da França!
+67% OFF🍷 Experimente esta expressão de Cabernet Sauvignon com preço imperdível no kit!
+Explore versões leves e refrescantes da Pinot Grigio cultivada em solos italianos!
+🍷 Deixe seus dias mais agradáveis com a versão doce dos best sellers Portada e Valtier, e ainda leve uma bolsa exclusiva para carregar seu vinho com estilo!
+Desbrave Itália e França neste kit com Amarone della Valpolicella, Brunello di Montalcino, Barolo, Châteauneuf-du-Pape e Chablis!`,
 
-[Grand Cru]
-Alguns rótulos não se bebem: celebram-se. 🥂
-O Plano Grand Sélection é a experiência mais exclusiva da Confraria — vinhos ícones da enologia mundial, como o Château Latour-Martillac (Pessac-Léognan) e o Château Pédesclaux, Grand Cru Classé de Pauillac desde 1855.
-Uma seleção de alta gama para quem aprecia o extraordinário. Assine agora. 🍷
+  "Grand Cru": `MARCA: GRAND CRU
+Voz: sofisticada, de curadoria — elegante e sensorial, mas direta e envolvente (nunca fria nem prolixa). Valoriza procedência, produtor, classificação e exclusividade. Pode, quando couber, fechar com "Na Grand Cru: lojas, site e app." (conta nos caracteres — use só se sobrar espaço). NÃO cite Evino.
 
-[Grand Cru]
-Inverno é tempo de desacelerar — e de brindar aos bons momentos. ❄️
-Entre para a Confraria Grand Cru e receba, todos os meses, uma curadoria de rótulos que transforma qualquer noite fria em experiência. Assine um dos planos anuais e ganhe 4 meses grátis, além de presentes selecionados no 4º e no 10º mês.
-Use o cupom INVERNO-26 e comece agora. 🍷
+EXEMPLOS APROVADOS (siga o tamanho, o ritmo e a especificidade — não copie):
+Brinde ao extraordinário com o Château Pédesclaux, Grand Cru Classé de Pauillac desde 1855! 🥂
+❄️ Receba Conciso, do Dão, e o clássico La Closerie de Camensac, de Bordeaux, na Confraria Grand Cru — com 4 meses grátis e cupom INVERNO-26!
+Aprecie a elegância de um Barolo de Serralunga d'Alba, ícone do Piemonte italiano, na curadoria Grand Cru! 🍷`,
+};
 
-[Evino]
-Descubra o Sideral, nosso best seller que conquista paladares! 🌌
-Aproveite 20% OFF na compra a partir de 4 garrafas e eleve suas noites com um vinho premiado.
-Beba com moderação.`;
+const VOZ_SEM_MARCA = `MARCA: não informada. Use um tom leve e envolvente, sem citar nome de marca.`;
+
+/** Normaliza o nome vindo do cliente ("EVINO", "Grand Cru Vinhos"...) para a chave de VOZ_POR_MARCA. */
+function normalizarMarca(marca: string | null | undefined): string | null {
+  const t = (marca ?? "").toUpperCase().replace(/\s+/g, " ");
+  if (t.includes("EVINO")) return "Evino";
+  if (t.includes("GRAND CRU") || t.includes("GRANDCRU")) return "Grand Cru";
+  return null;
+}
+
+function montarSystemPrompt(marca: string | null): string {
+  const voz = (marca && VOZ_POR_MARCA[marca]) || VOZ_SEM_MARCA;
+  return `${PROMPT_BASE}\n\n${voz}`;
+}
 
 function bumpTamanhoThumbnail(url: string): string {
   // Thumbnails do Drive (googleusercontent) terminam em "=s220"; pedimos um
@@ -107,7 +125,8 @@ export async function gerarLegenda(params: GerarLegendaParams): Promise<string> 
     );
   }
 
-  const { tipo, nomeArquivo, marca } = params;
+  const { tipo, nomeArquivo } = params;
+  const marca = normalizarMarca(params.marca);
   let imagemUrl = params.imagemUrl ?? null;
   if (imagemUrl && tipo === "video") {
     imagemUrl = bumpTamanhoThumbnail(imagemUrl);
@@ -116,7 +135,7 @@ export async function gerarLegenda(params: GerarLegendaParams): Promise<string> 
   const dataUrl = imagemUrl ? await baixarComoDataUrl(imagemUrl) : null;
 
   const contexto: string[] = [];
-  if (marca) contexto.push(`Marca: ${marca}. Use a voz desta marca conforme as instruções.`);
+  if (marca) contexto.push(`Marca: ${marca}. Escreva com a voz da ${marca}.`);
   if (nomeArquivo) contexto.push(`Nome do arquivo/criativo: "${nomeArquivo}".`);
   contexto.push(
     dataUrl
@@ -142,11 +161,11 @@ export async function gerarLegenda(params: GerarLegendaParams): Promise<string> 
     body: JSON.stringify({
       model: MODELO,
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: montarSystemPrompt(marca) },
         { role: "user", content },
       ],
-      max_tokens: 300,
-      temperature: 0.8,
+      max_tokens: 200,
+      temperature: 0.7,
     }),
   });
 

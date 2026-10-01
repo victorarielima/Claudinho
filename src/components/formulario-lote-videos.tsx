@@ -182,6 +182,12 @@ export function FormularioLoteVideos({
     Record<string, "gerando" | "erro" | undefined>
   >({});
   const legendasDisparadasRef = useRef<Set<string>>(new Set());
+  // Última legenda gerada por vídeo — se o texto ainda é ela (não editado),
+  // trocar de marca regera com a voz certa.
+  const legendasGeradasRef = useRef<Record<string, string>>({});
+  // A auto-seleção de marca pelas tags já rodou (com ou sem sucesso). Evita
+  // gerar a legenda sem marca e logo depois regerar com a marca auto-escolhida.
+  const [marcaAutoResolvida, setMarcaAutoResolvida] = useState(false);
 
   // ─── Save state ────────────────────────────────────────────
   const [salvando, setSalvando] = useState(false);
@@ -234,6 +240,8 @@ export function FormularioLoteVideos({
     setMensagemSucesso(null);
     // Reset do tracking de legendas IA para a nova seleção
     legendasDisparadasRef.current = new Set();
+    legendasGeradasRef.current = {};
+    setMarcaAutoResolvida(false);
     setStatusLegenda({});
   }, [aberto, videos]);
 
@@ -334,6 +342,7 @@ export function FormularioLoteVideos({
       const brand = brands.find((b) => b.name.toLowerCase().includes("grand"));
       if (brand) handleBrandChange(brand.id);
     }
+    setMarcaAutoResolvida(true);
   }, [aberto, brands, videos, brandId, handleBrandChange]);
 
   // ─── Load adsets when campanha changes ─────────────────────
@@ -424,24 +433,38 @@ export function FormularioLoteVideos({
     []
   );
 
+  // Marca escolhida no select manda na voz da legenda; o nome do arquivo é só fallback.
+  const marcaSelecionada = useMemo(() => {
+    const nome = brands.find((b) => b.id === brandId)?.name;
+    return nome ? detectarMarca(nome) ?? nome : null;
+  }, [brands, brandId]);
+
+  // Vazia ou ainda igual à última gerada pela IA (usuário não mexeu).
+  const legendaIntocada = useCallback(
+    (id: string, texto: string) =>
+      !texto.trim() || texto === legendasGeradasRef.current[id],
+    []
+  );
+
   // ─── Gerar legenda com IA (analisa o thumbnail do vídeo) ───
   const gerarLegendaPara = useCallback(
     async (anuncio: AnuncioItem, forcar = false) => {
       // Não sobrescreve o que o usuário já escreveu (a menos que forçado)
-      if (!forcar && anuncio.textoPrincipal.trim()) return;
+      if (!forcar && !legendaIntocada(anuncio.videoId, anuncio.textoPrincipal)) return;
       setStatusLegenda((s) => ({ ...s, [anuncio.videoId]: "gerando" }));
       try {
         const legenda = await gerarLegendaCliente({
           tipo: "video",
           imagemUrl: anuncio.thumbnailLink,
           nomeArquivo: anuncio.nomeArquivo,
-          marca: detectarMarca(anuncio.nomeArquivo),
+          marca: marcaSelecionada ?? detectarMarca(anuncio.nomeArquivo),
         });
         setAnuncios((prev) =>
           prev.map((a) => {
             if (a.videoId !== anuncio.videoId) return a;
             // Se o usuário digitou algo nesse meio-tempo, respeita (salvo forçar)
-            if (!forcar && a.textoPrincipal.trim()) return a;
+            if (!forcar && !legendaIntocada(a.videoId, a.textoPrincipal)) return a;
+            legendasGeradasRef.current[a.videoId] = legenda;
             return { ...a, textoPrincipal: legenda };
           })
         );
@@ -450,18 +473,20 @@ export function FormularioLoteVideos({
         setStatusLegenda((s) => ({ ...s, [anuncio.videoId]: "erro" }));
       }
     },
-    []
+    [marcaSelecionada, legendaIntocada]
   );
 
-  // Auto-dispara a geração assim que os anúncios são inicializados.
+  // Auto-dispara a geração assim que os anúncios são inicializados — e de novo
+  // ao trocar a marca, para as legendas que o usuário ainda não editou.
   useEffect(() => {
-    if (!aberto) return;
+    if (!aberto || (!marcaSelecionada && !marcaAutoResolvida)) return;
     for (const a of anuncios) {
-      if (legendasDisparadasRef.current.has(a.videoId)) continue;
-      legendasDisparadasRef.current.add(a.videoId);
+      const chave = `${marcaSelecionada ?? "-"}:${a.videoId}`;
+      if (legendasDisparadasRef.current.has(chave)) continue;
+      legendasDisparadasRef.current.add(chave);
       void gerarLegendaPara(a);
     }
-  }, [aberto, anuncios, gerarLegendaPara]);
+  }, [aberto, anuncios, marcaSelecionada, marcaAutoResolvida, gerarLegendaPara]);
 
   // ─── Save ──────────────────────────────────────────────────
   const parceriaSelecionada = parcerias.find((p) => p.creatorId === parceriaId);

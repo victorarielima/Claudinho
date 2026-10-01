@@ -96,6 +96,27 @@ const REGRAS: RegraErro[] = [
     marcadores: ["Falha ao baixar video do Drive", "Drive", /URL de v[ií]deo inv[aá]lida/i],
   },
   {
+    tipo: "Sessão do token invalidada",
+    explicacao:
+      "O token foi derrubado pelo Facebook — acontece quando a senha da conta muda ou quando o FB encerra a sessão por segurança (é o desfecho normal de um checkpoint). Não adianta tentar de novo com o mesmo token: gere um novo META_ACCESS_TOKEN, atualize a env var na Vercel (e o .env.local, se rodar local) e redeploy. Token de System User da Business Manager não morre por troca de senha.",
+    marcadores: [
+      "subcode 460",
+      "session has been invalidated",
+      "user changed their password",
+    ],
+  },
+  {
+    tipo: "Conta do Facebook em checkpoint",
+    explicacao:
+      "O Facebook bloqueou (checkpoint) a conta dona do META_ACCESS_TOKEN — normalmente uma verificação de segurança pendente. Enquanto isso, TODA chamada à Graph API falha: campanhas e conjuntos aparecem vazios e nada sobe. Para resolver: (1) entre em www.facebook.com com a conta que gerou o token e siga as instruções da tela de verificação; (2) gere um novo META_ACCESS_TOKEN, porque o checkpoint invalida o antigo; (3) atualize a variável na Vercel e faça redeploy. Para não repetir, migre o token para um System User da Business Manager — esse tipo de conta não entra em checkpoint.",
+    marcadores: [
+      "You cannot access the app till you log in",
+      "subcode 459",
+      "[subcode 464]",
+      /checkpoint/i,
+    ],
+  },
+  {
     tipo: "Token Meta inválido",
     explicacao:
       "O META_ACCESS_TOKEN expirou ou não tem permissão para essa ação. Gere um novo token de longa duração e atualize o .env.",

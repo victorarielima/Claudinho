@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { CTA_OPTIONS } from "@/lib/constants";
 import { gerarLegendaCliente, detectarMarca } from "@/lib/ai-cliente";
+import { interpretarErroMeta } from "@/lib/erros-meta";
 import type { ClickUpTask } from "@/lib/clickup";
 import type { Brand } from "@/lib/db";
 
@@ -149,6 +150,11 @@ export function FormularioLoteImagens({
   const [carregandoCampanhas, setCarregandoCampanhas] = useState(false);
   const [carregandoAdsets, setCarregandoAdsets] = useState(false);
 
+  // Falha ao buscar marca/campanha/ad set na Meta. Sem isso, token expirado,
+  // sessão caída ou erro da Graph API viravam um select mudo com "Selecione"
+  // e nenhuma opção — sem nenhuma pista do motivo.
+  const [erroDestino, setErroDestino] = useState<string | null>(null);
+
   const [brandId, setBrandId] = useState("");
   const [campanhaId, setCampanhaId] = useState("");
   const [adSetId, setAdSetId] = useState("");
@@ -167,6 +173,9 @@ export function FormularioLoteImagens({
     Record<string, "gerando" | "erro" | undefined>
   >({});
   const legendasDisparadasRef = useRef<Set<string>>(new Set());
+  // Última legenda gerada por anúncio — se o texto ainda é ela (não editado),
+  // trocar de marca regera com a voz certa.
+  const legendasGeradasRef = useRef<Record<string, string>>({});
 
   // ── Save state ──────────────────────────────────────────
   const [salvando, setSalvando] = useState(false);
@@ -199,6 +208,7 @@ export function FormularioLoteImagens({
       }))
     );
     legendasDisparadasRef.current = new Set();
+    legendasGeradasRef.current = {};
     setStatusLegenda({});
   }, [aberto, cards]);
 
@@ -207,9 +217,18 @@ export function FormularioLoteImagens({
     if (!aberto) return;
     setCarregandoBrands(true);
     fetch("/api/brands")
-      .then((r) => r.json())
+      .then(async (r) => {
+        const json = await r.json();
+        if (!r.ok) throw new Error(json.erro ?? "Erro ao carregar marcas");
+        return json;
+      })
       .then((json) => setBrands(json.data ?? []))
-      .catch(() => setBrands([]))
+      .catch((e: unknown) => {
+        setBrands([]);
+        setErroDestino(
+          `Não foi possível carregar as marcas: ${e instanceof Error ? e.message : "erro desconhecido"}`
+        );
+      })
       .finally(() => setCarregandoBrands(false));
   }, [aberto]);
 
@@ -220,15 +239,30 @@ export function FormularioLoteImagens({
     setCampanhaId("");
     setAdSetId("");
     setDestinos([]);
-    if (!accountId) return;
+    setErroDestino(null);
+    if (!accountId) {
+      setErroDestino("Esta marca não tem conta de anúncios (meta_account_id) cadastrada.");
+      return;
+    }
 
     setCarregandoCampanhas(true);
     try {
       const res = await fetch(`/api/meta/campanhas?accountId=${accountId}`);
       const json = await res.json();
-      setCampanhas(json.campanhas ?? []);
-    } catch {
+      if (!res.ok) throw new Error(json.erro ?? `Erro ${res.status} ao buscar campanhas`);
+
+      const lista: Campanha[] = json.campanhas ?? [];
+      setCampanhas(lista);
+      if (lista.length === 0) {
+        setErroDestino(
+          `Nenhuma campanha ativa ou pausada encontrada na conta ${accountId}.`
+        );
+      }
+    } catch (e: unknown) {
       setCampanhas([]);
+      setErroDestino(
+        `Não foi possível carregar as campanhas: ${e instanceof Error ? e.message : "erro desconhecido"}`
+      );
     } finally {
       setCarregandoCampanhas(false);
     }
@@ -257,12 +291,22 @@ export function FormularioLoteImagens({
     if (!campaignId) return;
 
     setCarregandoAdsets(true);
+    setErroDestino(null);
     try {
       const res = await fetch(`/api/meta/adsets?campaignId=${campaignId}`);
       const json = await res.json();
-      setAdsets(json.adsets ?? []);
-    } catch {
+      if (!res.ok) throw new Error(json.erro ?? `Erro ${res.status} ao buscar conjuntos`);
+
+      const lista: AdSet[] = json.adsets ?? [];
+      setAdsets(lista);
+      if (lista.length === 0) {
+        setErroDestino("Nenhum conjunto ativo ou pausado nesta campanha.");
+      }
+    } catch (e: unknown) {
       setAdsets([]);
+      setErroDestino(
+        `Não foi possível carregar os conjuntos: ${e instanceof Error ? e.message : "erro desconhecido"}`
+      );
     } finally {
       setCarregandoAdsets(false);
     }
@@ -337,10 +381,23 @@ export function FormularioLoteImagens({
     });
   }, []);
 
+  // Marca escolhida no select manda na voz da legenda; o nome do card é só fallback.
+  const marcaSelecionada = useMemo(() => {
+    const nome = brands.find((b) => b.id === brandId)?.name;
+    return nome ? detectarMarca(nome) ?? nome : null;
+  }, [brands, brandId]);
+
+  // Vazia ou ainda igual à última gerada pela IA (usuário não mexeu).
+  const legendaIntocada = useCallback(
+    (id: string, texto: string) =>
+      !texto.trim() || texto === legendasGeradasRef.current[id],
+    []
+  );
+
   // ── Gerar legenda com IA (analisa o criativo estático) ──
   const gerarLegendaPara = useCallback(
     async (anuncio: AnuncioForm, forcar = false) => {
-      if (!forcar && anuncio.textoPrincipal.trim()) return;
+      if (!forcar && !legendaIntocada(anuncio.taskId, anuncio.textoPrincipal)) return;
       // Usa o primeiro criativo selecionado (ou o primeiro anexo) como visual.
       const visual =
         anuncio.attachments.find((a) => a.selecionado) ?? anuncio.attachments[0];
@@ -350,12 +407,13 @@ export function FormularioLoteImagens({
           tipo: "imagem",
           imagemUrl: visual?.url ?? null,
           nomeArquivo: anuncio.taskName,
-          marca: detectarMarca(anuncio.taskName),
+          marca: marcaSelecionada ?? detectarMarca(anuncio.taskName),
         });
         setAnuncios((prev) =>
           prev.map((a) => {
             if (a.taskId !== anuncio.taskId) return a;
-            if (!forcar && a.textoPrincipal.trim()) return a;
+            if (!forcar && !legendaIntocada(a.taskId, a.textoPrincipal)) return a;
+            legendasGeradasRef.current[a.taskId] = legenda;
             return { ...a, textoPrincipal: legenda };
           })
         );
@@ -364,18 +422,20 @@ export function FormularioLoteImagens({
         setStatusLegenda((s) => ({ ...s, [anuncio.taskId]: "erro" }));
       }
     },
-    []
+    [marcaSelecionada, legendaIntocada]
   );
 
-  // Auto-dispara a geração quando os anúncios são inicializados.
+  // Auto-dispara a geração quando os anúncios são inicializados — e de novo ao
+  // trocar a marca, para as legendas que o usuário ainda não editou.
   useEffect(() => {
-    if (!aberto) return;
+    if (!aberto || !marcaSelecionada) return;
     for (const a of anuncios) {
-      if (legendasDisparadasRef.current.has(a.taskId)) continue;
-      legendasDisparadasRef.current.add(a.taskId);
+      const chave = `${marcaSelecionada}:${a.taskId}`;
+      if (legendasDisparadasRef.current.has(chave)) continue;
+      legendasDisparadasRef.current.add(chave);
       void gerarLegendaPara(a);
     }
-  }, [aberto, anuncios, gerarLegendaPara]);
+  }, [aberto, anuncios, marcaSelecionada, gerarLegendaPara]);
 
   // ── Sort: ACTIVE first, then alphabetical ───────────────
   const campanhasOrdenadas = useMemo(
@@ -387,6 +447,13 @@ export function FormularioLoteImagens({
         return a.nome.localeCompare(b.nome);
       }),
     [campanhas],
+  );
+
+  // Traduz o erro da Graph API (token em checkpoint, permissão etc.) para
+  // linguagem humana usando o mesmo catálogo do pipeline de criação.
+  const diagnosticoDestino = useMemo(
+    () => (erroDestino ? interpretarErroMeta(erroDestino) : null),
+    [erroDestino],
   );
 
   const adsetsOrdenados = useMemo(
@@ -609,7 +676,17 @@ export function FormularioLoteImagens({
                 <label className="text-xs text-muted-foreground">Campanha</label>
                 <Select value={campanhaId} onValueChange={handleCampanhaChange} disabled={!brandId || carregandoCampanhas}>
                   <SelectTrigger className="h-9 text-sm truncate">
-                    <SelectValue placeholder={carregandoCampanhas ? "Carregando..." : "Selecione"} />
+                    <SelectValue
+                      placeholder={
+                        carregandoCampanhas
+                          ? "Carregando..."
+                          : !brandId
+                            ? "Escolha a marca"
+                            : campanhas.length === 0
+                              ? "Nenhuma campanha"
+                              : "Selecione"
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     {campanhasOrdenadas.map((c) => (
@@ -633,7 +710,17 @@ export function FormularioLoteImagens({
                 <label className="text-xs text-muted-foreground">Conjunto</label>
                 <Select value={adSetId} onValueChange={setAdSetId} disabled={!campanhaId || carregandoAdsets}>
                   <SelectTrigger className="h-9 text-sm truncate">
-                    <SelectValue placeholder={carregandoAdsets ? "Carregando..." : "Selecione"} />
+                    <SelectValue
+                      placeholder={
+                        carregandoAdsets
+                          ? "Carregando..."
+                          : !campanhaId
+                            ? "Escolha a campanha"
+                            : adsets.length === 0
+                              ? "Nenhum conjunto"
+                              : "Selecione"
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     {adsetsOrdenados.map((a) => (
@@ -654,6 +741,35 @@ export function FormularioLoteImagens({
                 </Select>
               </div>
             </div>
+
+            {/* Por que os selects estão vazios */}
+            {erroDestino && (
+              <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300">
+                <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+                <span className="flex-1 space-y-1">
+                  {diagnosticoDestino?.conhecido ? (
+                    <>
+                      <span className="block font-medium">{diagnosticoDestino.tipo}</span>
+                      <span className="block">{diagnosticoDestino.explicacao}</span>
+                      <span className="block opacity-70">{erroDestino}</span>
+                    </>
+                  ) : (
+                    <span className="block">{erroDestino}</span>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  className="shrink-0 font-medium underline underline-offset-2"
+                  onClick={() => {
+                    const brand = brands.find((b) => b.id === brandId);
+                    if (brand) carregarCampanhas(brand.meta_account_id);
+                  }}
+                  disabled={!brandId || carregandoCampanhas}
+                >
+                  Tentar de novo
+                </button>
+              </div>
+            )}
 
             {/* Multi-destino */}
             <div className="flex items-center gap-2">

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { META_API_BASE } from "@/lib/meta-config";
+import { META_API_BASE, extrairErroMeta } from "@/lib/meta-config";
 import { logger } from "@/lib/logger";
 import { metaFetchWithRetry } from "@/lib/meta-retry";
 
@@ -48,10 +48,10 @@ export async function GET(request: NextRequest) {
       logger.error("Meta API error fetching adsets", {
         fn: "GET /api/meta/adsets",
         campaignId,
-        error: data.error.message,
+        error: extrairErroMeta(data),
       });
       return NextResponse.json(
-        { erro: data.error.message ?? "Erro na API do Meta" },
+        { erro: extrairErroMeta(data) },
         { status: response.status }
       );
     }

@@ -123,6 +123,7 @@ A correção (`ensureVideoExtension` em `meta-criar.ts`) detecta filenames sem `
 | `1363024` / `[code 352]` / "format that isn't supported" | "Formato de vídeo não suportado" |
 | "não conseguiu processar o vídeo" | "Vídeo rejeitado pelo Meta" |
 | "Falha ao baixar video do Drive" | "Vídeo sem acesso no Drive" |
+| "You cannot access the app till you log in" / `subcode 459` / `subcode 464` / regex `checkpoint` | "Conta do Facebook em checkpoint" (vem ANTES da regra #190) |
 | `OAuthException` / `(#190)` | "Token Meta inválido" |
 | "Page ID nao encontrado" | "Page ID não configurado" |
 | "Erro ao buscar account do adset" | "Ad Set inválido" |
@@ -131,6 +132,30 @@ A correção (`ensureVideoExtension` em `meta-criar.ts`) detecta filenames sem `
 
 Se um erro novo aparecer, adicionar em `REGRAS[]` em
 `src/lib/erros-meta.ts` com marcador estável (string ou regex).
+
+## Checkpoint de conta (code 190 / subcode 459)
+
+Mensagem: **"You cannot access the app till you log in to www.facebook.com and follow the instructions given."**
+
+Não é bug de payload: o Facebook colocou a conta dona do `META_ACCESS_TOKEN` em
+checkpoint (verificação de segurança pendente). Enquanto durar, **toda** chamada à
+Graph API falha — inclusive `GET /act_x/campaigns`, então os selects de campanha e
+conjunto no Claudinho aparecem vazios.
+
+Sintoma clássico na UI: dropdown "Campanha" só com o placeholder, sem nenhuma opção.
+
+Correção (operacional, não de código):
+1. Entrar em www.facebook.com com a conta que gerou o token e cumprir a verificação.
+2. Gerar novo `META_ACCESS_TOKEN` — o checkpoint invalida o anterior.
+3. Atualizar a env var na Vercel e redeployar.
+4. Preventivo: migrar para token de **System User** da Business Manager, que não
+   entra em checkpoint (mesma recomendação do playbook de #190).
+
+Diagnóstico rápido: `GET /debug_token?input_token={TOKEN}&access_token={APP_ID}|{APP_SECRET}`.
+
+As rotas `/api/meta/campanhas` e `/api/meta/adsets` passaram a usar
+`extrairErroMeta()` (regra de ouro #9), então code/subcode/fbtrace chegam à UI em
+vez de só a `message`.
 
 ## Headers úteis para diagnóstico
 
