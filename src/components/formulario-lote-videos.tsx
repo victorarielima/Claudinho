@@ -82,6 +82,8 @@ export interface FormularioLoteVideosProps {
   aoFechar: () => void;
   videos: VideoDrive[];
   aoSalvar: () => void;
+  /** Marca da página atual — vem pré-selecionada no formulário. */
+  brandIdPadrao?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +145,7 @@ export function FormularioLoteVideos({
   aoFechar,
   videos,
   aoSalvar,
+  brandIdPadrao,
 }: FormularioLoteVideosProps) {
   // ─── Selector data ─────────────────────────────────────────
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -319,9 +322,16 @@ export function FormularioLoteVideos({
     };
   }, [aberto, ehInfluencer, brandId]);
 
-  // ─── Auto-select brand from video tags (_EV_ / _GC_) ───────
+  // ─── Auto-select brand: a da página; senão pelas tags (_EV_ / _GC_) ───
   useEffect(() => {
     if (!aberto || brands.length === 0 || videos.length === 0 || brandId) return;
+
+    const brandPagina = brands.find((b) => b.id === brandIdPadrao);
+    if (brandPagina) {
+      handleBrandChange(brandPagina.id);
+      setMarcaAutoResolvida(true);
+      return;
+    }
 
     const ehEV = (t: string) => t.includes("_EV_") || t.includes("_EV ") || t.includes(" EV_") || t.includes("EVINO");
     const ehGC = (t: string) => t.includes("_GC_") || t.includes("_GC ") || t.includes(" GC_") || t.includes("GRAND CRU") || t.includes("GRANDCRU");
@@ -343,7 +353,7 @@ export function FormularioLoteVideos({
       if (brand) handleBrandChange(brand.id);
     }
     setMarcaAutoResolvida(true);
-  }, [aberto, brands, videos, brandId, handleBrandChange]);
+  }, [aberto, brands, videos, brandId, brandIdPadrao, handleBrandChange]);
 
   // ─── Load adsets when campanha changes ─────────────────────
   const carregarAdsets = useCallback(async (campaignId: string) => {

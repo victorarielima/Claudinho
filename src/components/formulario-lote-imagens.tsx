@@ -38,6 +38,8 @@ export interface FormularioLoteImagensProps {
   aoFechar: () => void;
   cards: ClickUpTask[];
   aoSalvar: () => void;
+  /** Marca da página atual — vem pré-selecionada no formulário. */
+  brandIdPadrao?: string | null;
 }
 
 // ─── Types ─────────────────────────────────────────────────
@@ -140,6 +142,7 @@ export function FormularioLoteImagens({
   aoFechar,
   cards,
   aoSalvar,
+  brandIdPadrao,
 }: FormularioLoteImagensProps) {
   // ── Destination selectors ───────────────────────────────
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -277,12 +280,14 @@ export function FormularioLoteImagens({
     [brands, carregarCampanhas]
   );
 
-  // ── Auto-select brand (Evino) ───────────────────────────
+  // ── Auto-select brand (a da página; senão Evino) ────────
   useEffect(() => {
     if (!aberto || brands.length === 0 || brandId) return;
-    const evino = brands.find((b) => b.name.toLowerCase().includes("evino"));
-    if (evino) handleBrandChange(evino.id);
-  }, [aberto, brands, brandId, handleBrandChange]);
+    const brand =
+      brands.find((b) => b.id === brandIdPadrao) ??
+      brands.find((b) => b.name.toLowerCase().includes("evino"));
+    if (brand) handleBrandChange(brand.id);
+  }, [aberto, brands, brandId, brandIdPadrao, handleBrandChange]);
 
   // ── Load adsets ─────────────────────────────────────────
   const carregarAdsets = useCallback(async (campaignId: string) => {

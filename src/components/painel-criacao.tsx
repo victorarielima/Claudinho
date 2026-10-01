@@ -1105,6 +1105,7 @@ export function PainelCriacao() {
         aoFechar={() => setDialogLote(false)}
         videos={videosSelecionados}
         aoSalvar={carregarDados}
+        brandIdPadrao={brandSelecionado?.id}
       />
 
       {/* Dialog: Explorador ClickUp (Estáticos) */}
@@ -1124,6 +1125,7 @@ export function PainelCriacao() {
         aoFechar={() => setDialogLoteImagens(false)}
         cards={cardsClickUp}
         aoSalvar={carregarDados}
+        brandIdPadrao={brandSelecionado?.id}
       />
 
       <DialogEditarAnuncio
