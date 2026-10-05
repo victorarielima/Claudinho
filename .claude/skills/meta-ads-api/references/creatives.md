@@ -301,6 +301,32 @@ GET /{ig-user-id-da-marca}/branded_content_ad_permissions
 os outros fazem o creative falhar com code 100. O `{ig-user-id}` sai de
 `buscarInstagramActorId(pageId)`.
 
+**Lista vazia ≠ sem parceiros.** Esse endpoint só traz quem tem permissão de
+*nível de conta*. Os influencers que "já fizeram parceria" (o que o Ads Manager
+mostra) vêm de outro endpoint, e o app mescla os dois em `listarParcerias()`:
+
+```
+GET /{business-id}/partnership-ads-advertisable-content
+    ?ig_user_id=<ig da marca>&platform_types=["INSTAGRAM"]
+    &content_types=["BRANDED_CONTENT","COLLAB_POST"]&fields=author&limit=50
+```
+
+`author` = `{ ig_user_id, display_name, fb_page_id, profile_picture_url }`
+(sem @). `{business-id}` = Business Manager — env `META_BUSINESS_ID` ou campo
+`business` da página.
+
+**Pedir permissão ao criador** (ele aceita uma vez no app do IG → PENDING até lá):
+
+```
+POST /{ig-user-id-da-marca}/branded_content_ad_permissions
+     creator_instagram_account=<creator ig id>   (ou creator_instagram_username)
+     revoke=true                                  (para revogar)
+```
+
+O pedido "por anúncio" do Ads Manager (criador aprova cada ad) **não existe na
+API pública** para creative novo — via API é sempre permissão de conta (ou ad
+code de post já publicado pelo criador).
+
 Token precisa de `instagram_branded_content_ads_brand`, `instagram_basic` e
 `business_management`; sem elas o endpoint responde erro (o Claudinho propaga
 para a UI em vez de mostrar lista vazia).
@@ -310,8 +336,9 @@ para a UI em vez de mostrar lista vazia).
 | Peça | Onde |
 |---|---|
 | Monta o `branded_content` | `construirBrandedContent()` em `src/lib/meta-criar.ts` |
-| Lista criadores aprovados | `buscarParceriasAprovadas()` em `src/lib/meta-criar.ts` |
-| Endpoint da UI | `GET /api/meta/parcerias?brandId=` |
+| Lista criadores + status | `listarParcerias()` em `src/lib/meta-criar.ts` |
+| Pede permissão ao criador | `solicitarPermissaoParceria()` em `src/lib/meta-criar.ts` |
+| Endpoint da UI | `GET /api/meta/parcerias?brandId=` · `POST /api/meta/parcerias {brandId, creatorId}` |
 | Persistência | `ads.parceria_ig_user_id` / `ads.parceria_username` |
 | UI | checkbox "Vídeo de influencer" em `formulario-lote-videos.tsx` |
 

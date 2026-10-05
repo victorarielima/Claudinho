@@ -1130,7 +1130,9 @@ function construirOmnichannelSpec(link: string, cc: CrossChannelInfo & { applica
  * depois recusava o creative.
  */
 export async function buscarInstagramActorId(
-  pageId: string
+  pageId: string,
+  /** Se passado, recebe o motivo de cada tentativa que falhou (para mostrar na UI). */
+  motivos?: string[]
 ): Promise<string | null> {
   // 1. Env overrides
   const envOverride =
@@ -1168,11 +1170,15 @@ export async function buscarInstagramActorId(
         });
         return resolved;
       }
+      motivos?.push(
+        "a página não retornou instagram_business_account/connected_instagram_account (IG não vinculado, ou token sem acesso ao IG desta página)"
+      );
       logger.warn("Page has no instagram_business_account/connected_instagram_account", {
         fn: "buscarInstagramActorId",
         pageId,
       });
     } else {
+      motivos?.push(`campos da página: ${extrairErroMeta(json)}`);
       logger.warn("Failed to read page IG fields", {
         fn: "buscarInstagramActorId",
         pageId,
@@ -1203,6 +1209,7 @@ export async function buscarInstagramActorId(
         return resolved;
       }
     } else {
+      motivos?.push(`/instagram_accounts: ${extrairErroMeta(json)}`);
       logger.warn("Legacy /instagram_accounts call failed", {
         fn: "buscarInstagramActorId",
         pageId,
@@ -1310,7 +1317,7 @@ const PARCERIAS_MAX_PAGINAS = 10;
  * (ADVERTISER | PARTNER_BUSINESS | PARTNER_CREATOR) e
  * `creator_ad_permission_type`. Usamos `IG_ADS_PERMISSION` — a permissão de
  * nível de conta concedida em `/{ig-user-id}/branded_content_ad_permissions`,
- * que é exatamente o que `buscarParceriasAprovadas()` lista.
+ * que `listarParcerias()` marca como APPROVED.
  *
  * Sem permissão APPROVED do criador o Meta recusa o creative (code 100), por
  * isso o seletor da UI só oferece parcerias aprovadas.
@@ -1332,38 +1339,73 @@ export function construirBrandedContent(parceriaIgUserId?: string | null) {
   };
 }
 
+/**
+ * Status da permissão de anúncio de parceria (nível de conta) do criador.
+ * `SEM_PERMISSAO` = criador já fez parceria com a marca, mas nunca recebeu
+ * (ou nunca teve) pedido de permissão de anúncio.
+ */
+export type StatusParceria = "APPROVED" | "PENDING" | "REVOKED" | "SEM_PERMISSAO";
+
 export interface ParceriaMeta {
   /** IG user id do criador — vai em `branded_content.partners[].ig_user_id`. */
   creatorId: string;
-  /** @ do criador, para exibição no seletor. */
+  /** @ (ou nome de exibição) do criador, para o seletor. */
   username: string;
+  status: StatusParceria;
+}
+
+export interface ListaParcerias {
+  parcerias: ParceriaMeta[];
+  /** Falhas não fatais (ex.: não deu para ler os parceiros anteriores). */
+  avisos: string[];
+}
+
+const ORDEM_STATUS: Record<StatusParceria, number> = {
+  APPROVED: 0,
+  PENDING: 1,
+  SEM_PERMISSAO: 2,
+  REVOKED: 3,
+};
+
+/** Resolve o IG Business da marca ou lança erro com o motivo da Meta. */
+async function resolverIgDaMarca(pageId: string): Promise<string> {
+  const motivos: string[] = [];
+  const igUserId = await buscarInstagramActorId(pageId, motivos);
+  if (!igUserId) {
+    throw new Error(
+      `Instagram da marca não encontrado para a página ${pageId}. Sem ele não é possível listar as parcerias. ` +
+        `Motivo: ${motivos.join(" | ") || "desconhecido"}. ` +
+        `Garanta instagram_basic + pages_read_engagement no token para esta página/IG, ou defina META_INSTAGRAM_ACTOR_ID_<MARCA> na Vercel.`
+    );
+  }
+  return igUserId;
 }
 
 /**
- * Lista os criadores que já concederam à marca permissão de anúncio de
- * parceria no nível de conta (o "allowlist" de influencers).
- *
- * `GET /{ig-user-id}/branded_content_ad_permissions` — o `{ig-user-id}` é a
- * conta Instagram Business da MARCA, resolvida a partir da página via
- * `buscarInstagramActorId()`. Só entram na lista os `permission_status`
- * APPROVED; PENDING/REVOKED fariam o creative falhar na criação.
- *
- * Requer no token: `instagram_branded_content_ads_brand`, `instagram_basic` e
- * `business_management`. Sem elas o Meta responde erro — que é propagado para
- * a UI em vez de virar lista vazia silenciosa.
- *
- * Docs: https://developers.facebook.com/documentation/ads-commerce/marketing-api/ad-creative/partnership-ads/account-level-permissioning
+ * Business Manager dono da página — path de `/partnership-ads-advertisable-content`.
+ * Ordem: env `META_BUSINESS_ID_<PAGEID>` → `META_BUSINESS_ID` → campo `business` da página.
  */
-export async function buscarParceriasAprovadas(pageId: string): Promise<ParceriaMeta[]> {
-  const igUserId = await buscarInstagramActorId(pageId);
-  if (!igUserId) {
-    throw new Error(
-      `Instagram da marca não encontrado para a página ${pageId}. Sem ele não é possível listar as parcerias.`
-    );
-  }
+async function buscarBusinessIdDaPagina(pageId: string): Promise<string | null> {
+  const env =
+    process.env[`META_BUSINESS_ID_${pageId}`]?.trim() || process.env.META_BUSINESS_ID?.trim();
+  if (env) return env;
 
+  const res = await metaFetchWithRetry(
+    `${META_API_BASE}/${pageId}?fields=business&access_token=${getAccessToken()}`
+  );
+  const json = await safeResponseJson(res);
+  if (!res.ok || json.error) {
+    throw new Error(`não foi possível ler o Business Manager da página: ${extrairErroMeta(json)}`);
+  }
+  return (json.business as { id?: string } | undefined)?.id ?? null;
+}
+
+/** Permissões de nível de conta (todas, qualquer status), por creator_id. */
+async function buscarPermissoesParceria(
+  igUserId: string
+): Promise<Map<string, { username?: string; status: StatusParceria }>> {
   const token = getAccessToken();
-  const parcerias: ParceriaMeta[] = [];
+  const permissoes = new Map<string, { username?: string; status: StatusParceria }>();
   let proxima: string | null =
     `${META_API_BASE}/${igUserId}/branded_content_ad_permissions` +
     `?fields=creator_username,creator_id,permission_status&limit=100&access_token=${token}`;
@@ -1371,14 +1413,7 @@ export async function buscarParceriasAprovadas(pageId: string): Promise<Parceria
   for (let pagina = 0; pagina < PARCERIAS_MAX_PAGINAS && proxima; pagina += 1) {
     const res = await metaFetchWithRetry(proxima);
     const json = await safeResponseJson(res);
-
     if (!res.ok || json.error) {
-      logger.error("Failed to list branded content ad permissions", {
-        fn: "buscarParceriasAprovadas",
-        pageId,
-        igUserId,
-        error: extrairErroMeta(json),
-      });
       throw new Error(`Erro ao listar parcerias: ${extrairErroMeta(json)}`);
     }
 
@@ -1387,27 +1422,167 @@ export async function buscarParceriasAprovadas(pageId: string): Promise<Parceria
       creator_username?: string;
       permission_status?: string;
     }[];
-
     for (const item of data) {
       if (!item.creator_id) continue;
-      if ((item.permission_status ?? "").toUpperCase() !== "APPROVED") continue;
-      parcerias.push({
-        creatorId: String(item.creator_id),
-        username: item.creator_username ?? String(item.creator_id),
-      });
+      const bruto = (item.permission_status ?? "").toUpperCase();
+      const status: StatusParceria =
+        bruto === "APPROVED" || bruto === "PENDING" ? bruto : "REVOKED";
+      permissoes.set(String(item.creator_id), { username: item.creator_username, status });
     }
-
     proxima = (json.paging?.next as string | undefined) ?? null;
   }
+  return permissoes;
+}
 
-  parcerias.sort((a, b) => a.username.localeCompare(b.username));
+/**
+ * Criadores que já fizeram parceria com a marca: autores de conteúdo de
+ * parceria (publi / collab) em que a marca foi marcada.
+ *
+ * `GET /{business-id}/partnership-ads-advertisable-content?ig_user_id=` —
+ * `author` traz `ig_user_id` e `display_name` (sem @).
+ */
+async function buscarParceirosAnteriores(
+  businessId: string,
+  igUserId: string
+): Promise<Map<string, string>> {
+  const token = getAccessToken();
+  const parceiros = new Map<string, string>();
+  const params = new URLSearchParams({
+    ig_user_id: igUserId,
+    platform_types: JSON.stringify(["INSTAGRAM"]),
+    content_types: JSON.stringify(["BRANDED_CONTENT", "COLLAB_POST"]),
+    fields: "author",
+    limit: "50",
+    access_token: token,
+  });
+  let proxima: string | null =
+    `${META_API_BASE}/${businessId}/partnership-ads-advertisable-content?${params}`;
 
-  logger.info("Branded content ad permissions listed", {
-    fn: "buscarParceriasAprovadas",
+  for (let pagina = 0; pagina < PARCERIAS_MAX_PAGINAS && proxima; pagina += 1) {
+    const res = await metaFetchWithRetry(proxima);
+    const json = await safeResponseJson(res);
+    if (!res.ok || json.error) {
+      throw new Error(extrairErroMeta(json));
+    }
+
+    const data = (json.data ?? []) as {
+      author?: { ig_user_id?: string; display_name?: string };
+    }[];
+    for (const item of data) {
+      const id = item.author?.ig_user_id;
+      if (!id || id === igUserId || parceiros.has(String(id))) continue;
+      parceiros.set(String(id), item.author?.display_name ?? String(id));
+    }
+    proxima = (json.paging?.next as string | undefined) ?? null;
+  }
+  return parceiros;
+}
+
+/**
+ * Lista os criadores para o seletor de "vídeo de influencer": quem já fez
+ * parceria com a marca + quem tem permissão de anúncio de nível de conta, com
+ * o status dessa permissão. Só APPROVED pode subir anúncio — os demais
+ * precisam de `solicitarPermissaoParceria()` e do aceite do criador no app do
+ * Instagram (uma vez por criador; vale para os próximos anúncios).
+ *
+ * Requer no token: `instagram_branded_content_ads_brand`, `instagram_basic` e
+ * `business_management`.
+ *
+ * Docs: https://developers.facebook.com/documentation/ads-commerce/marketing-api/ad-creative/partnership-ads/account-level-permissioning
+ *       https://developers.facebook.com/documentation/ads-commerce/marketing-api/ad-creative/partnership-ads/content-discovery-api
+ */
+export async function listarParcerias(pageId: string): Promise<ListaParcerias> {
+  const igUserId = await resolverIgDaMarca(pageId);
+  const avisos: string[] = [];
+
+  const permissoes = await buscarPermissoesParceria(igUserId);
+
+  // Parceiros anteriores é "melhor esforço": se falhar, a lista de permissões
+  // continua útil e o motivo vai como aviso para a UI.
+  let anteriores = new Map<string, string>();
+  try {
+    const businessId = await buscarBusinessIdDaPagina(pageId);
+    if (businessId) {
+      anteriores = await buscarParceirosAnteriores(businessId, igUserId);
+    } else {
+      avisos.push(
+        "Business Manager da página não encontrado — defina META_BUSINESS_ID para listar os influencers que já fizeram parceria."
+      );
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    avisos.push(`Não foi possível listar os influencers que já fizeram parceria: ${msg}`);
+    logger.warn("Failed to list previous partners", { fn: "listarParcerias", pageId, error: msg });
+  }
+
+  const parcerias = new Map<string, ParceriaMeta>();
+  for (const [creatorId, nome] of anteriores) {
+    parcerias.set(creatorId, { creatorId, username: nome, status: "SEM_PERMISSAO" });
+  }
+  for (const [creatorId, p] of permissoes) {
+    parcerias.set(creatorId, {
+      creatorId,
+      username: p.username ?? anteriores.get(creatorId) ?? creatorId,
+      status: p.status,
+    });
+  }
+
+  const lista = [...parcerias.values()].sort(
+    (a, b) =>
+      ORDEM_STATUS[a.status] - ORDEM_STATUS[b.status] || a.username.localeCompare(b.username)
+  );
+
+  logger.info("Partnerships listed", {
+    fn: "listarParcerias",
     pageId,
     igUserId,
-    aprovadas: parcerias.length,
+    total: lista.length,
+    comPermissao: permissoes.size,
+    anteriores: anteriores.size,
   });
 
-  return parcerias;
+  return { parcerias: lista, avisos };
+}
+
+/**
+ * Envia ao criador o pedido de permissão de anúncio de parceria (nível de
+ * conta). Ele aceita no app do Instagram; até lá o status fica PENDING.
+ *
+ * `POST /{ig-user-id-da-marca}/branded_content_ad_permissions` com
+ * `creator_instagram_account`.
+ */
+export async function solicitarPermissaoParceria(
+  pageId: string,
+  creatorId: string
+): Promise<void> {
+  const igUserId = await resolverIgDaMarca(pageId);
+  const body = new URLSearchParams({
+    creator_instagram_account: creatorId,
+    access_token: getAccessToken(),
+  });
+  const res = await metaFetchWithRetry(
+    `${META_API_BASE}/${igUserId}/branded_content_ad_permissions`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    }
+  );
+  const json = await safeResponseJson(res);
+  if (!res.ok || json.error) {
+    logger.error("Failed to request partnership ad permission", {
+      fn: "solicitarPermissaoParceria",
+      pageId,
+      igUserId,
+      creatorId,
+      error: extrairErroMeta(json),
+    });
+    throw new Error(`Erro ao solicitar permissão de parceria: ${extrairErroMeta(json)}`);
+  }
+  logger.info("Partnership ad permission requested", {
+    fn: "solicitarPermissaoParceria",
+    pageId,
+    igUserId,
+    creatorId,
+  });
 }

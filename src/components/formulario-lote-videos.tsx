@@ -57,11 +57,22 @@ interface Destino {
   adSetName: string;
 }
 
-/** Criador com permissão de anúncio de parceria aprovada para a marca. */
+/**
+ * Criador que já fez parceria com a marca ou tem permissão de anúncio. Só
+ * APPROVED sobe anúncio; os demais precisam que o criador aceite o pedido.
+ */
 interface Parceria {
   creatorId: string;
   username: string;
+  status: "APPROVED" | "PENDING" | "REVOKED" | "SEM_PERMISSAO";
 }
+
+const ROTULO_STATUS_PARCERIA: Record<Parceria["status"], string> = {
+  APPROVED: "aprovado",
+  PENDING: "aguardando aprovação",
+  SEM_PERMISSAO: "sem permissão",
+  REVOKED: "permissão revogada",
+};
 
 interface AnuncioItem {
   videoId: string;
@@ -170,12 +181,16 @@ export function FormularioLoteVideos({
 
   // ─── Form: anúncio de parceria (vídeo de influencer) ───────
   // Marcado, o lote inteiro sobe como anúncio de parceria com o criador
-  // escolhido no header. A lista vem das permissões aprovadas no Meta.
+  // escolhido no header. A lista traz quem já fez parceria com a marca e o
+  // status da permissão de anúncio de cada um.
   const [ehInfluencer, setEhInfluencer] = useState(false);
   const [parcerias, setParcerias] = useState<Parceria[]>([]);
   const [parceriaId, setParceriaId] = useState("");
   const [carregandoParcerias, setCarregandoParcerias] = useState(false);
   const [erroParcerias, setErroParcerias] = useState<string | null>(null);
+  const [avisoParcerias, setAvisoParcerias] = useState<string | null>(null);
+  const [recarregarParcerias, setRecarregarParcerias] = useState(0);
+  const [solicitandoPermissao, setSolicitandoPermissao] = useState(false);
 
   // ─── Form: individual ads ──────────────────────────────────
   const [anuncios, setAnuncios] = useState<AnuncioItem[]>([]);
@@ -291,6 +306,7 @@ export function FormularioLoteVideos({
     let cancelado = false;
     setCarregandoParcerias(true);
     setErroParcerias(null);
+    setAvisoParcerias(null);
 
     fetch(`/api/meta/parcerias?brandId=${brandId}`)
       .then(async (r) => {
@@ -301,10 +317,12 @@ export function FormularioLoteVideos({
       .then((json) => {
         if (cancelado) return;
         const lista: Parceria[] = json.parcerias ?? [];
+        const avisos: string[] = json.avisos ?? [];
         setParcerias(lista);
+        setAvisoParcerias(avisos.length > 0 ? avisos.join(" ") : null);
         if (lista.length === 0) {
           setErroParcerias(
-            "Nenhuma parceria aprovada para esta marca. O criador precisa aprovar a permissão de anúncios de parceria no Instagram."
+            "Nenhum influencer encontrado: a Meta não retornou parceiros anteriores nem permissões de anúncio para o Instagram desta marca."
           );
         }
       })
@@ -320,7 +338,30 @@ export function FormularioLoteVideos({
     return () => {
       cancelado = true;
     };
-  }, [aberto, ehInfluencer, brandId]);
+  }, [aberto, ehInfluencer, brandId, recarregarParcerias]);
+
+  // Pede ao criador a permissão de anúncio (ele aceita no app do Instagram).
+  const solicitarPermissao = useCallback(async () => {
+    if (!brandId || !parceriaId) return;
+    setSolicitandoPermissao(true);
+    setErroParcerias(null);
+    try {
+      const r = await fetch("/api/meta/parcerias", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brandId, creatorId: parceriaId }),
+      });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.erro ?? "Erro ao solicitar permissão");
+      setParcerias((prev) =>
+        prev.map((p) => (p.creatorId === parceriaId ? { ...p, status: "PENDING" } : p))
+      );
+    } catch (e) {
+      setErroParcerias(e instanceof Error ? e.message : "Erro ao solicitar permissão");
+    } finally {
+      setSolicitandoPermissao(false);
+    }
+  }, [brandId, parceriaId]);
 
   // ─── Auto-select brand: a da página; senão pelas tags (_EV_ / _GC_) ───
   useEffect(() => {
@@ -501,8 +542,10 @@ export function FormularioLoteVideos({
   // ─── Save ──────────────────────────────────────────────────
   const parceriaSelecionada = parcerias.find((p) => p.creatorId === parceriaId);
   // Marcar influencer sem escolher o criador subiria o vídeo como anúncio
-  // comum, sem o header de parceria — bloqueia em vez de ignorar.
-  const parceriaPendente = ehInfluencer && !parceriaSelecionada;
+  // comum, sem o header de parceria — bloqueia em vez de ignorar. Criador sem
+  // permissão APPROVED faria a Meta recusar o creative (code 100).
+  const parceriaPendente =
+    ehInfluencer && parceriaSelecionada?.status !== "APPROVED";
   const podeSalvar =
     brandId &&
     destinosEfetivos.length > 0 &&
@@ -742,6 +785,7 @@ export function FormularioLoteVideos({
                     if (!marcado) {
                       setParceriaId("");
                       setErroParcerias(null);
+                      setAvisoParcerias(null);
                     }
                   }}
                 />
@@ -759,7 +803,9 @@ export function FormularioLoteVideos({
                   <SearchableSelect
                     options={parcerias.map((p) => ({
                       value: p.creatorId,
-                      label: `@${p.username.replace(/^@/, "")}`,
+                      label: `${p.username} · ${ROTULO_STATUS_PARCERIA[p.status]}`,
+                      // Ponto verde = pode subir anúncio já.
+                      status: p.status === "APPROVED" ? "ACTIVE" : "INACTIVE",
                     }))}
                     value={parceriaId}
                     onValueChange={setParceriaId}
@@ -770,11 +816,55 @@ export function FormularioLoteVideos({
                     }
                   />
                   {erroParcerias ? (
-                    <p className="text-xs text-destructive">{erroParcerias}</p>
+                    <p className="text-xs text-destructive break-words">{erroParcerias}</p>
+                  ) : parceriaSelecionada?.status === "PENDING" ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-xs text-amber-700">
+                        Pedido enviado — o criador precisa aceitar no app do
+                        Instagram. Depois disso, os próximos anúncios com ele sobem
+                        direto.
+                      </p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs"
+                        disabled={carregandoParcerias}
+                        onClick={() => setRecarregarParcerias((n) => n + 1)}
+                      >
+                        Verificar aprovação
+                      </Button>
+                    </div>
+                  ) : parceriaSelecionada && parceriaSelecionada.status !== "APPROVED" ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-xs text-amber-700">
+                        {parceriaSelecionada.status === "REVOKED"
+                          ? "A permissão deste criador foi revogada."
+                          : "Este criador ainda não deu permissão de anúncio para a marca."}{" "}
+                        Envie o pedido; ele aprova uma vez no Instagram.
+                      </p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-7 text-xs"
+                        disabled={solicitandoPermissao}
+                        onClick={solicitarPermissao}
+                      >
+                        {solicitandoPermissao && (
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        )}
+                        Solicitar permissão
+                      </Button>
+                    </div>
                   ) : (
                     <p className="text-xs text-muted-foreground">
                       Todos os vídeos do lote sobem como anúncio de parceria com
                       esse criador.
+                    </p>
+                  )}
+                  {avisoParcerias && (
+                    <p className="text-xs text-muted-foreground break-words">
+                      {avisoParcerias}
                     </p>
                   )}
                 </div>
