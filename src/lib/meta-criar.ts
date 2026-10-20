@@ -1,4 +1,8 @@
-import { normalizarPlacementImagem } from "./ad-media";
+import {
+  lerDimensoesImagem,
+  normalizarPlacementImagem,
+  placementPorDimensoes,
+} from "./ad-media";
 import { META_API_BASE, getAccessToken, extrairErroMeta } from "./meta-config";
 import { logger } from "./logger";
 import { metaFetchWithRetry, safeResponseJson } from "./meta-retry";
@@ -373,6 +377,21 @@ export async function uploadImage(
   accountId: string,
   imageUrl: string
 ): Promise<string> {
+  return (await uploadImageDetalhado(accountId, imageUrl)).hash;
+}
+
+/**
+ * Igual a `uploadImage`, mas também devolve o placement medido pela
+ * proporção real do arquivo (null se não deu para ler as dimensões). Esse
+ * placement deve prevalecer sobre o deduzido pelo nome — nomes como
+ * "2026_10_09…" ou "untitled" caíam em "formato_1", eram descartados do
+ * asset_feed_spec e o creative virava imagem única para todos os
+ * posicionamentos (a 1200x628 aparecendo em Stories etc.).
+ */
+export async function uploadImageDetalhado(
+  accountId: string,
+  imageUrl: string
+): Promise<{ hash: string; placement: string | null }> {
   const token = getAccessToken();
   const endpoint = `${META_API_BASE}/${accountId}/adimages`;
 
@@ -383,6 +402,10 @@ export async function uploadImage(
   }
   const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
   const filename = imageUrl.split("/").pop()?.split("?")[0] || "image.jpg";
+  const dimensoes = lerDimensoesImagem(imgBuffer);
+  const placement = dimensoes
+    ? placementPorDimensoes(dimensoes.largura, dimensoes.altura)
+    : null;
 
   // Montar multipart/form-data
   const formData = new FormData();
@@ -429,9 +452,11 @@ export async function uploadImage(
     accountId,
     filename,
     imageHash: hash,
+    dimensoes: dimensoes ? `${dimensoes.largura}x${dimensoes.altura}` : null,
+    placement,
   });
 
-  return hash;
+  return { hash, placement };
 }
 
 // ─── Video Creative ─────────────────────────────────────────
@@ -579,7 +604,7 @@ function limparObjeto<T extends Record<string, unknown>>(objeto: T): T {
 const PLACEMENT_RULES: Record<PlacementImagemNormalizado, Record<string, unknown>> = {
   feed: {
     publisher_platforms: ["facebook", "instagram"],
-    facebook_positions: ["feed", "marketplace", "search"],
+    facebook_positions: ["feed", "marketplace"],
     instagram_positions: ["stream", "explore", "profile_feed"],
   },
   stories: {
@@ -589,7 +614,9 @@ const PLACEMENT_RULES: Record<PlacementImagemNormalizado, Record<string, unknown
   },
   horizontal: {
     publisher_platforms: ["facebook"],
-    facebook_positions: ["instant_article", "right_hand_column", "suggested_video", "video_feeds"],
+    // "search" (Resultados da pesquisa) fica com a 1200x628, junto da coluna
+    // da direita — é o que a Meta recomenda no diagnóstico do anúncio.
+    facebook_positions: ["instant_article", "right_hand_column", "search", "suggested_video", "video_feeds"],
   },
 };
 

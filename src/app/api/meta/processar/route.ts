@@ -3,7 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { baixarArquivoDrive } from "@/lib/drive";
 import {
   uploadVideo,
-  uploadImage,
+  uploadImageDetalhado,
   verificarStatusVideo,
   criarCreativeVideo,
   criarCreativeImagem,
@@ -258,8 +258,9 @@ async function stepUploadAssets(
     const pendentes = imageAssets.filter((asset) => !asset.meta_asset_id);
     const resultados = await Promise.allSettled(
       pendentes.map(async (asset) => {
-        const hash = await uploadImage(accountId, asset.asset_url);
-        await atualizarMetaAssetId(asset.id, hash);
+        // O placement medido pelo arquivo prevalece sobre o do nome.
+        const { hash, placement } = await uploadImageDetalhado(accountId, asset.asset_url);
+        await atualizarMetaAssetId(asset.id, hash, placement);
       })
     );
 

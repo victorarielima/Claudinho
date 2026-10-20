@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import {
   uploadVideo,
-  uploadImage,
+  uploadImageDetalhado,
   criarCreativeVideo,
   criarCreativeImagem,
   criarAnuncio,
@@ -270,10 +270,11 @@ async function processarFluxoLegado(body: CorpoLegado) {
       }
 
       const imagensComHash: ImagemPlacement[] = await Promise.all(
-        imageAssets.map(async (asset) => ({
-          imageHash: await uploadImage(accountId, asset.url),
-          placement: asset.placement,
-        }))
+        imageAssets.map(async (asset) => {
+          // O placement medido pelo arquivo prevalece sobre o do nome.
+          const { hash, placement } = await uploadImageDetalhado(accountId, asset.url);
+          return { imageHash: hash, placement: placement ?? asset.placement };
+        })
       );
 
       creativeId = await criarCreativeImagem(accountId, {

@@ -586,12 +586,14 @@ export async function atualizarMetaEffectiveStatus(
 
 export async function atualizarMetaAssetId(
   assetId: string,
-  metaAssetId: string
+  metaAssetId: string,
+  /** Placement medido pelas dimensões reais — corrige o deduzido pelo nome. */
+  placement?: string | null
 ): Promise<void> {
   const sb = getSupabase();
   const { error } = await sb
     .from("ad_assets")
-    .update({ meta_asset_id: metaAssetId })
+    .update(placement ? { meta_asset_id: metaAssetId, placement } : { meta_asset_id: metaAssetId })
     .eq("id", assetId);
 
   if (error) throw new Error(`Erro ao atualizar meta_asset_id: ${error.message}`);

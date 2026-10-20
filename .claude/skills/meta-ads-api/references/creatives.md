@@ -344,3 +344,23 @@ para a UI em vez de mostrar lista vazia).
 
 Docs: [adcreatives POST params](https://developers.facebook.com/docs/marketing-api/reference/ad-account/adcreatives/) ·
 [account-level permissioning](https://developers.facebook.com/documentation/ads-commerce/marketing-api/ad-creative/partnership-ads/account-level-permissioning)
+
+---
+
+## War story 2026-10-20 — imagens no posicionamento errado
+
+**Sintoma**: Ads Manager pede "troque a imagem principal pela 1080x1080 e
+personalize por posicionamento" — a 1200x628 aparecia em Stories, etc.
+
+**Causa**: o placement era deduzido só pelo **nome** do anexo do ClickUp
+(`classificarPlacementImagem`: "1080x1920", "vertical", "quadrado"...).
+Arquivos nomeados "2026_10_09…" / "untitled" viravam `formato_1`, eram
+descartados em `criarCreativeImagem` e o creative caía em
+`criarCreativeImagemSimples` com a **primeira** imagem para tudo.
+
+**Fix**: `uploadImageDetalhado()` lê largura/altura do arquivo
+(`lerDimensoesImagem` em `ad-media.ts`) e o placement medido
+(`placementPorDimensoes`: ≤0.7 stories, ≥1.4 horizontal, senão feed)
+prevalece sobre o nome — e é gravado em `ad_assets.placement`.
+Também: `search` (Resultados da pesquisa) saiu da regra de feed e foi para a
+horizontal (1200x628), como a Meta recomenda.
