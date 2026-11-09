@@ -76,6 +76,8 @@ interface Destino {
 interface AnuncioForm {
   taskId: string;
   taskName: string;
+  /** Briefing do card do ClickUp — dá preço/oferta/KV para a legenda. */
+  briefing: string | null;
   adName: string;
   adNameEditado: boolean;
   titulo: string;
@@ -187,11 +189,13 @@ export function FormularioLoteImagens({
       cards.map((card) => ({
         taskId: card.id,
         taskName: card.name,
-        adName: gerarAdName(card.name, "Gen", ""),
+        briefing: card.descricao ?? null,
+        // Link do produto que já está no briefing do card ("Link: https://...").
+        adName: gerarAdName(card.name, "Gen", card.linkProduto ?? ""),
         adNameEditado: false,
         titulo: "",
         textoPrincipal: "",
-        linkCampanha: "",
+        linkCampanha: card.linkProduto ?? "",
         linkAnuncioOverride: null,
         attachments: card.attachments.map((a) => ({
           placement: a.placement,
@@ -419,6 +423,7 @@ export function FormularioLoteImagens({
           tipo: "imagem",
           imagemUrl: visual?.url ?? null,
           nomeArquivo: anuncio.taskName,
+          briefing: anuncio.briefing,
           marca: marcaSelecionada ?? detectarMarca(anuncio.taskName),
         });
         setAnuncios((prev) =>

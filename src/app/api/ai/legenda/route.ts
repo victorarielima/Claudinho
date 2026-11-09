@@ -9,6 +9,7 @@ interface Body {
   tipo?: TipoCriativo;
   imagemUrl?: string | null;
   nomeArquivo?: string | null;
+  briefing?: string | null;
   marca?: string | null;
 }
 
@@ -38,6 +39,7 @@ export async function POST(req: Request) {
       tipo,
       imagemUrl: body.imagemUrl ?? null,
       nomeArquivo: body.nomeArquivo ?? null,
+      briefing: typeof body.briefing === "string" ? body.briefing.slice(0, 2000) : null,
       marca: body.marca ?? null,
     });
     return Response.json({ legenda });

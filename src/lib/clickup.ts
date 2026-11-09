@@ -32,6 +32,10 @@ export interface ClickUpTask {
   yearMonth: string | null;
   entrega: string | null;
   url: string;
+  /** Descrição do card em texto puro (briefing: link, preço, KV...). */
+  descricao: string | null;
+  /** URL do produto/campanha encontrada na descrição (linha "Link: ..."). */
+  linkProduto: string | null;
   attachments: ClickUpAttachment[];
 }
 
@@ -124,6 +128,8 @@ interface RawTask {
   url: string;
   custom_fields: { name: string; type: string; value: unknown }[];
   attachments?: RawAttachment[];
+  text_content?: string | null;
+  description?: string | null;
 }
 
 interface RawAttachment {
@@ -187,6 +193,38 @@ function resolverCustomField(
   return String(cf.value);
 }
 
+const DOMINIOS_LOJA = /(^|\.)(evino|grandcru)\.com\.br$/i;
+
+function urlsDoTexto(texto: string): string[] {
+  return (texto.match(/https?:\/\/[^\s<>()"'\][]+/gi) ?? []).map((u) =>
+    u.replace(/[.,;:!?*_]+$/, "")
+  );
+}
+
+function ehUrlDaLoja(url: string): boolean {
+  try {
+    return DOMINIOS_LOJA.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Link do produto no briefing do card. Os cards seguem o modelo
+ * "Link: https://www.grandcru.com.br/vinho/..." — essa linha tem prioridade;
+ * sem ela, vale a primeira URL de evino.com.br / grandcru.com.br do texto.
+ * Links de Drive, Figma, ClickUp etc. são ignorados.
+ */
+export function extrairLinkProduto(texto: string | null | undefined): string | null {
+  if (!texto) return null;
+  for (const linha of texto.split(/\r?\n/)) {
+    if (!/^\s*(link|url|lp|landing)[^:\n]{0,30}:/i.test(linha)) continue;
+    const url = urlsDoTexto(linha).find(ehUrlDaLoja);
+    if (url) return url;
+  }
+  return urlsDoTexto(texto).find(ehUrlDaLoja) ?? null;
+}
+
 function mapearTask(
   raw: RawTask,
   tipoMap: DropdownMap,
@@ -213,6 +251,8 @@ function mapearTask(
     yearMonth: resolverCustomField(raw, "Y-M", ymMap),
     entrega: resolverCustomField(raw, "Entrega", new Map()),
     url: raw.url,
+    descricao: raw.text_content?.trim() || raw.description?.trim() || null,
+    linkProduto: extrairLinkProduto(raw.text_content ?? raw.description),
     attachments: imageAttachments,
   };
 }

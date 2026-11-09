@@ -94,13 +94,13 @@ export function conteudoCamelCase(nome: string): string {
 }
 
 /**
- * Destino a partir do link do anúncio: página de produto/kit → PDP;
+ * Destino a partir do link do anúncio: página de produto/kit (Grand Cru: /vinho/{slug}) → PDP;
  * qualquer outro link do site → CAT. Sem link → null (usuário escolhe).
  */
 export function destinoPorLink(link: string | null | undefined): DestinoAnuncio | null {
   const url = (link ?? "").trim().toLowerCase();
   if (!url) return null;
-  if (/\/(produtos?|product|combos?|kits?|p)\/[^/?#]+/.test(url)) return "PDP";
+  if (/\/(produtos?|product|vinho|combos?|kits?|p)\/[^/?#]+/.test(url)) return "PDP";
   return "CAT";
 }
 

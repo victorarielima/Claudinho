@@ -25,6 +25,8 @@ export interface GerarLegendaParams {
   imagemUrl?: string | null;
   /** Nome do arquivo/card — dá contexto do produto mesmo sem imagem. */
   nomeArquivo?: string | null;
+  /** Briefing do card do ClickUp (preço, % OFF, conceito do KV). */
+  briefing?: string | null;
   /** Marca (ex.: "Evino", "Grand Cru") para calibrar o tom. */
   marca?: string | null;
 }
@@ -114,6 +116,25 @@ async function baixarComoDataUrl(url: string): Promise<string | null> {
 }
 
 /**
+ * Tira do briefing o que não ajuda a legenda: formatos/cortes, SKUs, links,
+ * campos vazios ("CTA: ____") e o aviso legal.
+ */
+function limparBriefing(texto: string | null | undefined): string | null {
+  if (!texto) return null;
+  const limpo = texto
+    .replace(/https?:\/\/\S+/g, "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l && !/^\d{3,4}\s*x\s*\d{3,4}$/i.test(l) && !/^\d{6,}$/.test(l))
+    .filter((l) => !/^(formatos?|skus?|link)\s*:/i.test(l))
+    .filter((l) => !/^[^:]{1,30}:\s*[_\s]*$/.test(l))
+    .filter((l) => !/beba com modera/i.test(l))
+    .join("\n")
+    .trim();
+  return limpo ? limpo.slice(0, 1500) : null;
+}
+
+/**
  * Gera uma legenda ("texto principal") para o criativo usando a OpenAI.
  * Lança erro com mensagem clara em caso de falha (chave ausente, API off, etc).
  */
@@ -137,6 +158,15 @@ export async function gerarLegenda(params: GerarLegendaParams): Promise<string> 
   const contexto: string[] = [];
   if (marca) contexto.push(`Marca: ${marca}. Escreva com a voz da ${marca}.`);
   if (nomeArquivo) contexto.push(`Nome do arquivo/criativo: "${nomeArquivo}".`);
+  const briefing = limparBriefing(params.briefing);
+  if (briefing) {
+    contexto.push(
+      `Briefing do card (pedido do time ao designer — use preço, desconto e oferta daqui se baterem com o criativo; o conceito do KV é só inspiração, não descreva a arte):
+"""
+${briefing}
+"""`
+    );
+  }
   contexto.push(
     dataUrl
       ? tipo === "video"

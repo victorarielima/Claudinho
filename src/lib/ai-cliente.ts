@@ -4,6 +4,8 @@ export interface GerarLegendaPayload {
   tipo: "video" | "imagem";
   imagemUrl?: string | null;
   nomeArquivo?: string | null;
+  /** Descrição do card do ClickUp (preço, desconto, KV). */
+  briefing?: string | null;
   marca?: string | null;
 }
 
