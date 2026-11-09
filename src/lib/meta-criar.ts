@@ -1379,6 +1379,13 @@ export interface ParceriaMeta {
   /** @ (ou nome de exibição) do criador, para o seletor. */
   username: string;
   status: StatusParceria;
+  /**
+   * Permissão vista nos conteúdos de parceria do criador
+   * (partnership_info.permission_type/permission_status), ex.:
+   * "IG_ADS_PERMISSION: APPROVED". Ajuda a entender permissões que não
+   * aparecem como permissão de conta.
+   */
+  detalhe?: string;
 }
 
 export interface ListaParcerias {
@@ -1468,17 +1475,30 @@ async function buscarPermissoesParceria(
  * `GET /{business-id}/partnership-ads-advertisable-content?ig_user_id=` —
  * `author` traz `ig_user_id` e `display_name` (sem @).
  */
+interface ParceiroAnterior {
+  nome: string;
+  /** "TIPO: STATUS" das permissões vistas nos conteúdos (sem repetição). */
+  permissoes: Set<string>;
+  /** Algum conteúdo do criador tem permission_status APPROVED. */
+  aprovado: boolean;
+}
+
 async function buscarParceirosAnteriores(
   businessId: string,
-  igUserId: string
-): Promise<Map<string, string>> {
+  igUserId: string,
+  comPermissoes = true
+): Promise<Map<string, ParceiroAnterior>> {
   const token = getAccessToken();
-  const parceiros = new Map<string, string>();
+  const parceiros = new Map<string, ParceiroAnterior>();
   const params = new URLSearchParams({
     ig_user_id: igUserId,
     platform_types: JSON.stringify(["INSTAGRAM"]),
     content_types: JSON.stringify(["BRANDED_CONTENT", "COLLAB_POST"]),
-    fields: "author",
+    // partnership_info traz a permissão POR CONTEÚDO — o criador pode ter
+    // liberado a marca sem que isso apareça em branded_content_ad_permissions.
+    fields: comPermissoes
+      ? "author,partnership_info{permission_status,permission_type,ad_eligibility}"
+      : "author",
     limit: "50",
     access_token: token,
   });
@@ -1489,16 +1509,37 @@ async function buscarParceirosAnteriores(
     const res = await metaFetchWithRetry(proxima);
     const json = await safeResponseJson(res);
     if (!res.ok || json.error) {
+      // Se a Meta recusar a expansão de partnership_info, ainda dá para
+      // listar os parceiros (sem o detalhe da permissão).
+      if (comPermissoes && pagina === 0) {
+        logger.warn("partnership_info rejected, retrying with author only", {
+          fn: "buscarParceirosAnteriores",
+          error: extrairErroMeta(json),
+        });
+        return buscarParceirosAnteriores(businessId, igUserId, false);
+      }
       throw new Error(extrairErroMeta(json));
     }
 
     const data = (json.data ?? []) as {
       author?: { ig_user_id?: string; display_name?: string };
+      partnership_info?: { permission_status?: string; permission_type?: string }[];
     }[];
     for (const item of data) {
       const id = item.author?.ig_user_id;
-      if (!id || id === igUserId || parceiros.has(String(id))) continue;
-      parceiros.set(String(id), item.author?.display_name ?? String(id));
+      if (!id || id === igUserId) continue;
+      const atual = parceiros.get(String(id)) ?? {
+        nome: item.author?.display_name ?? String(id),
+        permissoes: new Set<string>(),
+        aprovado: false,
+      };
+      for (const info of item.partnership_info ?? []) {
+        const status = (info.permission_status ?? "").toUpperCase();
+        if (!status && !info.permission_type) continue;
+        atual.permissoes.add(`${info.permission_type ?? "?"}: ${status || "?"}`);
+        if (status === "APPROVED") atual.aprovado = true;
+      }
+      parceiros.set(String(id), atual);
     }
     proxima = (json.paging?.next as string | undefined) ?? null;
   }
@@ -1526,7 +1567,7 @@ export async function listarParcerias(pageId: string): Promise<ListaParcerias> {
 
   // Parceiros anteriores é "melhor esforço": se falhar, a lista de permissões
   // continua útil e o motivo vai como aviso para a UI.
-  let anteriores = new Map<string, string>();
+  let anteriores = new Map<string, ParceiroAnterior>();
   try {
     const businessId = await buscarBusinessIdDaPagina(pageId);
     if (businessId) {
@@ -1543,14 +1584,24 @@ export async function listarParcerias(pageId: string): Promise<ListaParcerias> {
   }
 
   const parcerias = new Map<string, ParceriaMeta>();
-  for (const [creatorId, nome] of anteriores) {
-    parcerias.set(creatorId, { creatorId, username: nome, status: "SEM_PERMISSAO" });
-  }
-  for (const [creatorId, p] of permissoes) {
+  for (const [creatorId, a] of anteriores) {
     parcerias.set(creatorId, {
       creatorId,
-      username: p.username ?? anteriores.get(creatorId) ?? creatorId,
+      username: a.nome,
+      // Permissão aprovada vista no conteúdo conta como aprovada — se for de
+      // um tipo que não serve para criativo novo, a Meta recusa o creative
+      // com o motivo (melhor que esconder o criador).
+      status: a.aprovado ? "APPROVED" : "SEM_PERMISSAO",
+      detalhe: a.permissoes.size > 0 ? [...a.permissoes].join(", ") : undefined,
+    });
+  }
+  for (const [creatorId, p] of permissoes) {
+    const anterior = anteriores.get(creatorId);
+    parcerias.set(creatorId, {
+      creatorId,
+      username: p.username ?? anterior?.nome ?? creatorId,
       status: p.status,
+      detalhe: [`conta: ${p.status}`, ...(anterior?.permissoes ?? [])].join(", "),
     });
   }
 

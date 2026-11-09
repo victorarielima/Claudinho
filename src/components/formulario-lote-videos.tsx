@@ -79,6 +79,8 @@ interface Parceria {
   creatorId: string;
   username: string;
   status: "APPROVED" | "PENDING" | "REVOKED" | "SEM_PERMISSAO";
+  /** Permissões que a Meta mostra para o criador (conta / conteúdos). */
+  detalhe?: string;
 }
 
 const ROTULO_STATUS_PARCERIA: Record<Parceria["status"], string> = {
@@ -896,6 +898,11 @@ export function FormularioLoteVideos({
                     <p className="text-xs text-muted-foreground">
                       Todos os vídeos do lote sobem como anúncio de parceria com
                       esse criador.
+                    </p>
+                  )}
+                  {parceriaSelecionada?.detalhe && (
+                    <p className="text-xs text-muted-foreground break-words">
+                      Permissões na Meta: {parceriaSelecionada.detalhe}
                     </p>
                   )}
                   {avisoParcerias && (
