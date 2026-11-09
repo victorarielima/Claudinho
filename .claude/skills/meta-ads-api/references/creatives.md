@@ -315,6 +315,19 @@ GET /{business-id}/partnership-ads-advertisable-content
 (sem @). `{business-id}` = Business Manager — env `META_BUSINESS_ID` ou campo
 `business` da página.
 
+**Permissão por conteúdo (partnership_info)** — a fonte que funciona. Em
+2026-11 `branded_content_ad_permissions` voltava vazio para criadores que
+tinham permissão de conta; o status real só apareceu expandindo
+`fields=author,partnership_info{permission_status,permission_type,ad_eligibility}`.
+Valores vistos em produção (não documentados pela Meta):
+
+| campo | valores |
+|---|---|
+| `permission_status` | `AUTHORIZED` · `UNAUTHORIZED` (não é APPROVED!) |
+| `permission_type` | `account_level_ad_partnership` · `pre_approved_ugc` · `none` |
+
+`listarParcerias()` trata qualquer tipo AUTHORIZED (≠ `none`) como aprovado.
+
 **Pedir permissão ao criador** (ele aceita uma vez no app do IG → PENDING até lá):
 
 ```
