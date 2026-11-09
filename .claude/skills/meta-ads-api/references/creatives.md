@@ -273,8 +273,7 @@ Vídeo de criador subido pelo Drive que precisa aparecer com o header
     "partners": [
       {
         "ig_user_id": "<IG user id do criador>",
-        "identity_type": "PARTNER_CREATOR",
-        "creator_ad_permission_type": "IG_ADS_PERMISSION"
+        "identity_type": "PARTNER_CREATOR"
       }
     ]
   }
@@ -282,8 +281,10 @@ Vídeo de criador subido pelo Drive que precisa aparecer com o header
 ```
 
 - `identity_type`: `ADVERTISER | PARTNER_BUSINESS | PARTNER_CREATOR`.
-- `creator_ad_permission_type`: `IG_ADS_PERMISSION` = permissão de **nível
-  de conta** (allowlist), que é a que o Claudinho usa.
+- ⚠️ **NÃO enviar `creator_ad_permission_type`**: aparece na referência v25,
+  mas na v23.0 (nossa versão) dá `(#100) Unexpected key
+  "creator_ad_permission_type" on param "branded_content['partners'][0]"`
+  (2026-11-09). Rever ao subir a versão da API.
 - `object_story_spec.instagram_user_id` continua sendo o IG da **marca** —
   o parceiro entra só em `branded_content`.
 - Não confundir com `branded_content_sponsor_page_id` (legado, para

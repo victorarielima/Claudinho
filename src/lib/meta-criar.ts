@@ -1339,12 +1339,10 @@ const PARCERIAS_MAX_PAGINAS = 10;
  * Monta o `branded_content` do creative para um anúncio de parceria
  * (vídeo de influencer).
  *
- * Shape validado contra os parâmetros de `POST /act_{id}/adcreatives`:
- * `branded_content.partners[]` aceita `ig_user_id`, `identity_type`
- * (ADVERTISER | PARTNER_BUSINESS | PARTNER_CREATOR) e
- * `creator_ad_permission_type`. Usamos `IG_ADS_PERMISSION` — a permissão de
- * nível de conta concedida em `/{ig-user-id}/branded_content_ad_permissions`,
- * que `listarParcerias()` marca como APPROVED.
+ * `branded_content.partners[]` com `ig_user_id` + `identity_type`
+ * (ADVERTISER | PARTNER_BUSINESS | PARTNER_CREATOR). A permissão usada é a de
+ * conta que o criador já concedeu (partnership_info.permission_type
+ * account_level_ad_partnership), que `listarParcerias()` marca como APPROVED.
  *
  * Sem permissão APPROVED do criador o Meta recusa o creative (code 100), por
  * isso o seletor da UI só oferece parcerias aprovadas.
@@ -1355,12 +1353,15 @@ export function construirBrandedContent(parceriaIgUserId?: string | null) {
   const igUserId = parceriaIgUserId?.trim();
   if (!igUserId) return null;
 
+  // Sem `creator_ad_permission_type`: existe na referência v25, mas a v23.0
+  // (META_API_VERSION) responde "(#100) Unexpected key creator_ad_permission_type
+  // on param branded_content['partners'][0]". A Meta usa a permissão de conta
+  // que o criador já concedeu (account_level_ad_partnership).
   return {
     partners: [
       {
         ig_user_id: igUserId,
         identity_type: "PARTNER_CREATOR",
-        creator_ad_permission_type: "IG_ADS_PERMISSION",
       },
     ],
   };
