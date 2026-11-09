@@ -29,6 +29,7 @@ import { CTA_OPTIONS } from "@/lib/constants";
 import { gerarLegendaCliente, detectarMarca } from "@/lib/ai-cliente";
 import {
   CARACTERISTICAS_ESTATICO,
+  caracteristicaDoNome,
   destinoPorLink,
   montarAdName,
   type Caracteristica,
@@ -88,7 +89,13 @@ interface AnuncioForm {
 
 /** Nome inicial do anúncio no padrão EST-{Característica}-{Conteúdo}-{Destino}-W{NN}-{AAAA}. */
 function gerarAdName(taskName: string, caracteristica: Caracteristica, link: string): string {
-  return montarAdName({ tipo: "EST", caracteristica, nomeOrigem: taskName, destino: destinoPorLink(link) });
+  return montarAdName({
+    tipo: "EST",
+    // "Prod"/"Gen"/"FP" escrito no nome do card vale mais que o do lote.
+    caracteristica: caracteristicaDoNome(taskName, "EST") ?? caracteristica,
+    nomeOrigem: taskName,
+    destino: destinoPorLink(link),
+  });
 }
 
 function escaparRegex(s: string): string {

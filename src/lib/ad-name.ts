@@ -67,6 +67,8 @@ export function conteudoCamelCase(nome: string): string {
     .replace(/%/g, "")
     .replace(/\b\d{3,4}\s*x\s*\d{3,4}\b/gi, " ") // cortes 1080x1920
     .replace(/\b\d{4}[-_.]\d{1,2}[-_.]\d{1,2}\b/g, " ") // datas 2026_10_09
+    // datas "04_NOV", "15 out" (dia + mês abreviado)
+    .replace(/(^|[^a-zA-Z0-9])\d{1,2}[\s_.-]*(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)(?![a-zA-Z])/gi, " ")
     .replace(/\bW\d{1,2}\b/gi, " ")
     .replace(/\b20\d{2}\b/g, " ")
     .split(/[^a-zA-Z0-9]+/)
@@ -74,6 +76,9 @@ export function conteudoCamelCase(nome: string): string {
 
   // O "0" do vídeo interno só é token quando vem logo depois do VID.
   if (palavras[0] === "0") palavras.shift();
+  // Número solto no fim é versão do arquivo ("BLACK NOVEMBER 2"), não conteúdo.
+  // Só 1 dígito, para não comer "Top 10".
+  if (palavras.length > 1 && /^\d$/.test(palavras[palavras.length - 1])) palavras.pop();
 
   return palavras
     .map((p) => {
@@ -95,6 +100,32 @@ export function destinoPorLink(link: string | null | undefined): DestinoAnuncio 
   if (!url) return null;
   if (/\/(produtos?|product|combos?|kits?|p)\/[^/?#]+/.test(url)) return "PDP";
   return "CAT";
+}
+
+/**
+ * Característica escrita no próprio nome do arquivo/card (ex.: "..._MOTION ...").
+ * Quando existe, vale mais que a escolhida no formulário para o lote.
+ */
+export function caracteristicaDoNome(nome: string, tipo: TipoAnuncio): Caracteristica | null {
+  const tokens = new Set(
+    nome
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .toUpperCase()
+      .split(/[^A-Z0-9]+/)
+  );
+  if (tipo === "VID") return tokens.has("MOTION") ? "Motion" : null;
+  if (tipo === "EST") {
+    if (tokens.has("PROD")) return "Prod";
+    if (tokens.has("FP")) return "FP";
+    if (tokens.has("GEN")) return "Gen";
+  }
+  return null;
+}
+
+/** Título automático: {Característica}-{Conteúdo}, ex.: "Motion-BlackNovember". */
+export function montarTitulo(caracteristica: Caracteristica, nomeOrigem: string): string {
+  return [caracteristica, conteudoCamelCase(nomeOrigem) || "Anuncio"].join("-");
 }
 
 export interface ParamsAdName {

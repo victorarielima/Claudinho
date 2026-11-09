@@ -8,8 +8,10 @@ import { PreviewLinkAnuncio } from "@/components/editor-utm";
 import { gerarLegendaCliente, detectarMarca } from "@/lib/ai-cliente";
 import {
   CARACTERISTICAS_VIDEO,
+  caracteristicaDoNome,
   destinoPorLink,
   montarAdName,
+  montarTitulo,
   type Caracteristica,
   type CaracteristicaVideo,
 } from "@/lib/ad-name";
@@ -92,6 +94,8 @@ interface AnuncioItem {
   nomeArquivo: string;
   /** true se o usuário editou o adName manualmente */
   nomeEditado?: boolean;
+  /** true se o usuário editou o título manualmente */
+  tituloEditado?: boolean;
   linkAnuncioOverride: string | null;
 }
 
@@ -108,9 +112,23 @@ export interface FormularioLoteVideosProps {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Nome inicial do anúncio no padrão VID-{Característica}-{Conteúdo}-{Destino}-W{NN}-{AAAA}. */
+/**
+ * Nome no padrão VID-{Característica}-{Conteúdo}-{Destino}-W{NN}-{AAAA}. A
+ * característica escrita no nome do arquivo (ex.: "_MOTION") vale mais que a
+ * escolhida para o lote.
+ */
 function gerarAdName(nomeArquivo: string, caracteristica: Caracteristica, link: string): string {
-  return montarAdName({ tipo: "VID", caracteristica, nomeOrigem: nomeArquivo, destino: destinoPorLink(link) });
+  return montarAdName({
+    tipo: "VID",
+    caracteristica: caracteristicaDoNome(nomeArquivo, "VID") ?? caracteristica,
+    nomeOrigem: nomeArquivo,
+    destino: destinoPorLink(link),
+  });
+}
+
+/** Título automático: {Característica}-{Conteúdo}, ex.: "Motion-BlackNovember". */
+function gerarTitulo(nomeArquivo: string, caracteristica: Caracteristica): string {
+  return montarTitulo(caracteristicaDoNome(nomeArquivo, "VID") ?? caracteristica, nomeArquivo);
 }
 
 import { CTA_OPTIONS } from "@/lib/constants";
@@ -205,7 +223,7 @@ export function FormularioLoteVideos({
       videos.map((v) => ({
         videoId: v.id,
         adName: gerarAdName(v.nome, "0", ""),
-        titulo: v.nome.replace(/\.[^.]+$/, ""),
+        titulo: gerarTitulo(v.nome, "0"),
         textoPrincipal: "",
         linkCampanha: "",
         linkAnuncioOverride: null,
@@ -237,17 +255,19 @@ export function FormularioLoteVideos({
     setStatusLegenda({});
   }, [aberto, videos]);
 
-  // Mantém o nome no padrão quando a característica ou o link (→ PDP/CAT)
-  // mudam — só para os nomes que o usuário não editou à mão.
+  // Mantém nome e título no padrão quando a característica ou o link
+  // (→ PDP/CAT) mudam — só os que o usuário não editou à mão.
   useEffect(() => {
     setAnuncios((prev) => {
       let mudou = false;
       const next = prev.map((a) => {
-        if (a.nomeEditado) return a;
-        const nome = gerarAdName(a.nomeArquivo, caracteristica, a.linkCampanha);
-        if (nome === a.adName) return a;
+        const nome = a.nomeEditado
+          ? a.adName
+          : gerarAdName(a.nomeArquivo, caracteristica, a.linkCampanha);
+        const titulo = a.tituloEditado ? a.titulo : gerarTitulo(a.nomeArquivo, caracteristica);
+        if (nome === a.adName && titulo === a.titulo) return a;
         mudou = true;
-        return { ...a, adName: nome };
+        return { ...a, adName: nome, titulo };
       });
       return mudou ? next : prev;
     });
@@ -456,6 +476,7 @@ export function FormularioLoteVideos({
           if (a.videoId !== videoId) return a;
           const atualizado = { ...a, [campo]: valor };
           if (campo === "adName") atualizado.nomeEditado = true;
+          if (campo === "titulo") atualizado.tituloEditado = true;
           return atualizado;
         })
       );
