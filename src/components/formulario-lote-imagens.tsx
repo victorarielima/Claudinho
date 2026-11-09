@@ -31,6 +31,7 @@ import {
   CARACTERISTICAS_ESTATICO,
   caracteristicaDoNome,
   destinoPorLink,
+  linkFixoPorNome,
   montarAdName,
   type Caracteristica,
   type CaracteristicaEstatico,
@@ -186,24 +187,27 @@ export function FormularioLoteImagens({
   useEffect(() => {
     if (!aberto || cards.length === 0) return;
     setAnuncios(
-      cards.map((card) => ({
-        taskId: card.id,
-        taskName: card.name,
-        briefing: card.descricao ?? null,
-        // Link do produto que já está no briefing do card ("Link: https://...").
-        adName: gerarAdName(card.name, "Gen", card.linkProduto ?? ""),
-        adNameEditado: false,
-        titulo: "",
-        textoPrincipal: "",
-        linkCampanha: card.linkProduto ?? "",
-        linkAnuncioOverride: null,
-        attachments: card.attachments.map((a) => ({
-          placement: a.placement,
-          url: a.url,
-          title: a.title,
-          selecionado: true,
-        })),
-      }))
+      cards.map((card) => {
+        // Confraria tem link fixo; nos demais, o link do briefing do card.
+        const link = linkFixoPorNome(card.name) ?? card.linkProduto ?? "";
+        return {
+          taskId: card.id,
+          taskName: card.name,
+          briefing: card.descricao ?? null,
+          adName: gerarAdName(card.name, "Gen", link),
+          adNameEditado: false,
+          titulo: "",
+          textoPrincipal: "",
+          linkCampanha: link,
+          linkAnuncioOverride: null,
+          attachments: card.attachments.map((a) => ({
+            placement: a.placement,
+            url: a.url,
+            title: a.title,
+            selecionado: true,
+          })),
+        };
+      })
     );
     legendasDisparadasRef.current = new Set();
     legendasGeradasRef.current = {};

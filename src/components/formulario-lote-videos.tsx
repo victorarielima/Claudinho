@@ -15,6 +15,7 @@ import {
   CARACTERISTICAS_VIDEO,
   caracteristicaDoNome,
   destinoPorLink,
+  linkFixoPorNome,
   montarAdName,
   montarTitulo,
   type Caracteristica,
@@ -245,17 +246,21 @@ export function FormularioLoteVideos({
   useEffect(() => {
     if (!aberto) return;
     setAnuncios(
-      videos.map((v) => ({
-        videoId: v.id,
-        adName: gerarAdName(v.nome, "0", ""),
-        titulo: gerarTitulo(v.nome, "0"),
-        textoPrincipal: "",
-        linkCampanha: "",
-        linkAnuncioOverride: null,
-        driveUrl: v.driveUrl,
-        thumbnailLink: v.thumbnailLink,
-        nomeArquivo: v.nome,
-      }))
+      videos.map((v) => {
+        // Confraria (no nome ou na pasta) sempre aponta para a página da Confraria.
+        const link = linkFixoPorNome(v.nome, v.pastaOrigem) ?? "";
+        return {
+          videoId: v.id,
+          adName: gerarAdName(v.nome, "0", link),
+          titulo: gerarTitulo(v.nome, "0"),
+          textoPrincipal: "",
+          linkCampanha: link,
+          linkAnuncioOverride: null,
+          driveUrl: v.driveUrl,
+          thumbnailLink: v.thumbnailLink,
+          nomeArquivo: v.nome,
+        };
+      })
     );
     // Reset form on open
     setBrandId("");

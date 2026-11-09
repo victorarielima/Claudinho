@@ -151,3 +151,21 @@ export function montarAdName(p: ParamsAdName): string {
     .filter(Boolean)
     .join("-");
 }
+
+/** Página única da Confraria Grand Cru — todo criativo de Confraria aponta para ela. */
+export const URL_CONFRARIA = "https://confraria.grandcru.com.br/";
+
+/**
+ * Links fixos por tipo de conteúdo, detectados no nome do card/arquivo ou da
+ * pasta. Confraria ("Confraria", "Confra") sempre vai para a página da
+ * Confraria, mesmo que o briefing traga outro link.
+ */
+export function linkFixoPorNome(...textos: (string | null | undefined)[]): string | null {
+  const texto = textos
+    .filter(Boolean)
+    .join(" ")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+  if (/(^|[^a-z])confra(ria)?([^a-z]|$)/i.test(texto)) return URL_CONFRARIA;
+  return null;
+}
