@@ -1475,6 +1475,13 @@ async function buscarPermissoesParceria(
  * `GET /{business-id}/partnership-ads-advertisable-content?ig_user_id=` —
  * `author` traz `ig_user_id` e `display_name` (sem @).
  */
+/** Rótulos legíveis de partnership_info.permission_type. */
+const ROTULO_TIPO_PERMISSAO: Record<string, string> = {
+  account_level_ad_partnership: "permissão da conta",
+  pre_approved_ugc: "UGC pré-aprovado",
+  none: "sem permissão",
+};
+
 interface ParceiroAnterior {
   nome: string;
   /** "TIPO: STATUS" das permissões vistas nos conteúdos (sem repetição). */
@@ -1535,9 +1542,16 @@ async function buscarParceirosAnteriores(
       };
       for (const info of item.partnership_info ?? []) {
         const status = (info.permission_status ?? "").toUpperCase();
-        if (!status && !info.permission_type) continue;
-        atual.permissoes.add(`${info.permission_type ?? "?"}: ${status || "?"}`);
-        if (status === "APPROVED") atual.aprovado = true;
+        const tipo = (info.permission_type ?? "").toLowerCase();
+        if (!status && !tipo) continue;
+        // Valores vistos em produção (2026-11): permission_status
+        // AUTHORIZED | UNAUTHORIZED; permission_type
+        // account_level_ad_partnership | pre_approved_ugc | none.
+        const autorizado = status === "AUTHORIZED" || status === "APPROVED";
+        atual.permissoes.add(
+          `${ROTULO_TIPO_PERMISSAO[tipo] ?? (tipo || "?")}: ${autorizado ? "autorizada" : "não autorizada"}`
+        );
+        if (autorizado && tipo !== "none") atual.aprovado = true;
       }
       parceiros.set(String(id), atual);
     }
