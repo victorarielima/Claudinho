@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
+import { temTagEvino, temTagGrandCru } from "@/lib/ai-cliente";
 import {
   Dialog,
   DialogContent,
@@ -532,9 +533,8 @@ export function DialogExploradorVideos({
     // Filter by brand tag
     if (filtroMarca !== "todos") {
       lista = lista.filter((v) => {
-        const texto = [v.nome, v.pastaOrigem].join(" ").toUpperCase();
-        if (filtroMarca === "evino") return texto.includes("_EV_") || texto.includes("EVINO");
-        return texto.includes("_GC_") || texto.includes("GRANDCRU") || texto.includes("GRAND CRU");
+        const texto = [v.nome, v.pastaOrigem].join(" ");
+        return filtroMarca === "evino" ? temTagEvino(texto) : temTagGrandCru(texto);
       });
     }
 

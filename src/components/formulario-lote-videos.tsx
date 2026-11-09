@@ -5,7 +5,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Plus, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PreviewLinkAnuncio } from "@/components/editor-utm";
-import { gerarLegendaCliente, detectarMarca } from "@/lib/ai-cliente";
+import {
+  gerarLegendaCliente,
+  detectarMarca,
+  temTagEvino,
+  temTagGrandCru,
+} from "@/lib/ai-cliente";
 import {
   CARACTERISTICAS_VIDEO,
   caracteristicaDoNome,
@@ -384,16 +389,11 @@ export function FormularioLoteVideos({
       return;
     }
 
-    const ehEV = (t: string) => t.includes("_EV_") || t.includes("_EV ") || t.includes(" EV_") || t.includes("EVINO");
-    const ehGC = (t: string) => t.includes("_GC_") || t.includes("_GC ") || t.includes(" GC_") || t.includes("GRAND CRU") || t.includes("GRANDCRU");
+    // Checar tag no nome do arquivo e na pasta de origem ("Influs GC" etc.)
+    const textos = videos.map((v) => [v.nome, v.pastaOrigem].join(" "));
 
-    // Checar tag no nome do arquivo e na pasta de origem
-    const textos = videos.map((v) =>
-      [v.nome, v.pastaOrigem].join(" ").toUpperCase()
-    );
-
-    const algumEV = textos.some(ehEV);
-    const algumGC = textos.some(ehGC);
+    const algumEV = textos.some(temTagEvino);
+    const algumGC = textos.some(temTagGrandCru);
 
     // Só auto-seleciona se não houver conflito (não mistura EV com GC)
     if (algumEV && !algumGC) {

@@ -21,13 +21,29 @@ export async function gerarLegendaCliente(
   return json.legenda as string;
 }
 
-/** Deduz a marca a partir de nomes/tags (_EV_/EVINO, _GC_/GRAND CRU). */
+// "EV"/"GC" como token solto: "_EV_", "04_NOV_GC_..." e também pastas como
+// "Conteúdos EV" / "Influs GC" (separadas por espaço).
+const TAG_EV = /(^|[^A-Z0-9])EV([^A-Z0-9]|$)/;
+const TAG_GC = /(^|[^A-Z0-9])GC([^A-Z0-9]|$)/;
+
+/** Texto (nome de arquivo/pasta) marcado como Evino. */
+export function temTagEvino(texto: string): boolean {
+  const t = texto.toUpperCase();
+  return TAG_EV.test(t) || t.includes("EVINO");
+}
+
+/** Texto (nome de arquivo/pasta) marcado como Grand Cru. */
+export function temTagGrandCru(texto: string): boolean {
+  const t = texto.toUpperCase();
+  return TAG_GC.test(t) || t.includes("GRAND CRU") || t.includes("GRANDCRU");
+}
+
+/** Deduz a marca a partir de nomes/tags (EV/EVINO, GC/GRAND CRU). */
 export function detectarMarca(
   ...textos: (string | null | undefined)[]
 ): string | null {
-  const t = textos.filter(Boolean).join(" ").toUpperCase();
-  if (t.includes("_EV_") || t.includes("EVINO")) return "Evino";
-  if (t.includes("_GC_") || t.includes("GRAND CRU") || t.includes("GRANDCRU"))
-    return "Grand Cru";
+  const t = textos.filter(Boolean).join(" ");
+  if (temTagEvino(t)) return "Evino";
+  if (temTagGrandCru(t)) return "Grand Cru";
   return null;
 }
