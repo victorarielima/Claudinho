@@ -474,7 +474,7 @@ export interface ParamsCriativoVideo {
   instagramActorId?: string | null;
   /**
    * IG user id do criador parceiro — vídeo de influencer. Quando presente, o
-   * creative sobe como anúncio de parceria (`branded_content.partners`).
+   * creative sobe como anúncio de parceria (`instagram_branded_content`).
    */
   parceriaIgUserId?: string | null;
 }
@@ -538,7 +538,7 @@ export async function criarCreativeVideo(
   }
   const brandedContent = construirBrandedContent(params.parceriaIgUserId);
   if (brandedContent) {
-    formData.append("branded_content", JSON.stringify(brandedContent));
+    formData.append("instagram_branded_content", JSON.stringify(brandedContent));
   }
   formData.append("access_token", token);
 
@@ -1336,35 +1336,26 @@ export async function buscarCrossChannelInfo(
 const PARCERIAS_MAX_PAGINAS = 10;
 
 /**
- * Monta o `branded_content` do creative para um anúncio de parceria
- * (vídeo de influencer).
+ * Monta o `instagram_branded_content` do creative para um anúncio de
+ * parceria (vídeo de influencer): `{ sponsor_id: <IG user id do criador> }`.
  *
- * `branded_content.partners[]` com `ig_user_id` + `identity_type`
- * (ADVERTISER | PARTNER_BUSINESS | PARTNER_CREATOR). A permissão usada é a de
- * conta que o criador já concedeu (partnership_info.permission_type
- * account_level_ad_partnership), que `listarParcerias()` marca como APPROVED.
+ * É o formato do exemplo oficial "Instagram Partnership Ads with a New Ad
+ * Creative". O `branded_content.partners[]` (referência v25) foi descartado:
+ * na v23.0 ele dá "(#100) Unexpected key creator_ad_permission_type" e, sem
+ * essa chave, "Application does not have the capability to make this API
+ * call [code 1]" — é recurso restrito a apps liberados.
  *
- * Sem permissão APPROVED do criador o Meta recusa o creative (code 100), por
- * isso o seletor da UI só oferece parcerias aprovadas.
+ * A permissão usada é a de conta que o criador já concedeu
+ * (partnership_info.permission_type account_level_ad_partnership), que
+ * `listarParcerias()` marca como APPROVED. Sem permissão, a Meta publica o
+ * anúncio em entrega pendente.
  *
- * Docs: https://developers.facebook.com/docs/marketing-api/reference/ad-account/adcreatives/
+ * Docs: https://developers.facebook.com/documentation/ads-commerce/marketing-api/ad-creative/partnership-ads/ads-creation/use-new-creative
  */
 export function construirBrandedContent(parceriaIgUserId?: string | null) {
   const igUserId = parceriaIgUserId?.trim();
   if (!igUserId) return null;
-
-  // Sem `creator_ad_permission_type`: existe na referência v25, mas a v23.0
-  // (META_API_VERSION) responde "(#100) Unexpected key creator_ad_permission_type
-  // on param branded_content['partners'][0]". A Meta usa a permissão de conta
-  // que o criador já concedeu (account_level_ad_partnership).
-  return {
-    partners: [
-      {
-        ig_user_id: igUserId,
-        identity_type: "PARTNER_CREATOR",
-      },
-    ],
-  };
+  return { sponsor_id: igUserId };
 }
 
 /**
@@ -1375,7 +1366,7 @@ export function construirBrandedContent(parceriaIgUserId?: string | null) {
 export type StatusParceria = "APPROVED" | "PENDING" | "REVOKED" | "SEM_PERMISSAO";
 
 export interface ParceriaMeta {
-  /** IG user id do criador — vai em `branded_content.partners[].ig_user_id`. */
+  /** IG user id do criador — vai em `instagram_branded_content.sponsor_id`. */
   creatorId: string;
   /** @ (ou nome de exibição) do criador, para o seletor. */
   username: string;

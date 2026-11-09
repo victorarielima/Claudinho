@@ -30,6 +30,12 @@ interface RegraErro {
 
 const REGRAS: RegraErro[] = [
   {
+    tipo: "App sem acesso a anúncio de parceria",
+    explicacao:
+      "A Meta não liberou para o app do Claudinho a chamada usada no anúncio de parceria (vídeo de influencer). Confira no painel do app (developers.facebook.com → seu app → Revisão do app → Permissões e recursos) se ads_management, instagram_branded_content_ads_brand, instagram_basic, business_management, pages_read_engagement e pages_show_list estão com Acesso Avançado, e se o token foi gerado por alguém com função de anunciante na página/Instagram da marca. Enquanto isso, suba o vídeo sem marcar influencer e adicione o parceiro direto no Gerenciador de Anúncios.",
+    marcadores: ["does not have the capability to make this API call"],
+  },
+  {
     tipo: "Identidade do Instagram",
     explicacao:
       "O criativo precisa de uma conta do Instagram vinculada à página do Facebook para rodar nos placements do IG. Verifique se a página tem um IG Business Account conectado em Meta Business Suite → Configurações → Contas conectadas.",

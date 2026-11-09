@@ -264,27 +264,24 @@ Ad-readiness bloqueia CTA fora da whitelist (`cta_invalido`).
 Vídeo de criador subido pelo Drive que precisa aparecer com o header
 "parceria paga". Vale **só para vídeo** no Claudinho (`criarCreativeVideo`).
 
-### Payload (campo `branded_content`, nível do creative)
+### Payload (campo `instagram_branded_content`, nível do creative)
 
 ```jsonc
 // POST /act_<id>/adcreatives — junto com object_story_spec normal
 {
-  "branded_content": {
-    "partners": [
-      {
-        "ig_user_id": "<IG user id do criador>",
-        "identity_type": "PARTNER_CREATOR"
-      }
-    ]
-  }
+  "instagram_branded_content": { "sponsor_id": "<IG user id do criador>" }
 }
 ```
 
-- `identity_type`: `ADVERTISER | PARTNER_BUSINESS | PARTNER_CREATOR`.
-- ⚠️ **NÃO enviar `creator_ad_permission_type`**: aparece na referência v25,
-  mas na v23.0 (nossa versão) dá `(#100) Unexpected key
-  "creator_ad_permission_type" on param "branded_content['partners'][0]"`
-  (2026-11-09). Rever ao subir a versão da API.
+É o formato do exemplo oficial "Partnership Ads with a New Ad Creative".
+
+⚠️ **NÃO usar `branded_content.partners[]`** (aparece na referência v25).
+Histórico 2026-11-09, v23.0:
+1. com `creator_ad_permission_type` → `(#100) Unexpected key
+   "creator_ad_permission_type" on param "branded_content[partners][0]"`;
+2. sem ela → `Application does not have the capability to make this API call
+   [code 1]` (recurso restrito a apps liberados).
+
 - `object_story_spec.instagram_user_id` continua sendo o IG da **marca** —
   o parceiro entra só em `branded_content`.
 - Não confundir com `branded_content_sponsor_page_id` (legado, para
