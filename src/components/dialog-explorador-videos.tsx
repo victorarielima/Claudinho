@@ -605,7 +605,8 @@ export function DialogExploradorVideos({
               <DialogTitle className="flex items-center gap-2">
                 <Video className="size-5 text-primary" />
                 Explorar Vídeos
-                {raizId && (
+                {/* Com várias pastas configuradas a raiz é virtual — sem link. */}
+                {raizId && raizId !== "__varias_pastas__" && (
                   <a
                     href={`https://drive.google.com/drive/folders/${raizId}`}
                     target="_blank"

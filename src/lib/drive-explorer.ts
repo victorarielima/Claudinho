@@ -81,12 +81,28 @@ export function invalidarCacheDrive() {
 // `emit` with each event as it's discovered.
 // ---------------------------------------------------------------------------
 
+/**
+ * Raiz "virtual" usada quando DRIVE_PASTA_VIDEOS lista mais de uma pasta:
+ * cada pasta configurada vira um filho de primeiro nível dela.
+ * (A UI compara com este mesmo literal para esconder o link do Drive.)
+ */
+const RAIZ_VIRTUAL = "__varias_pastas__";
+
+/** DRIVE_PASTA_VIDEOS aceita um ID ou vários separados por vírgula. */
+function pastasRaizConfiguradas(): string[] {
+  return (process.env.DRIVE_PASTA_VIDEOS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 export async function explorar(emit: EmitFn): Promise<void> {
-  const raiz = process.env.DRIVE_PASTA_VIDEOS;
-  if (!raiz) {
+  const raizes = pastasRaizConfiguradas();
+  if (raizes.length === 0) {
     emit({ tipo: "erro", mensagem: "DRIVE_PASTA_VIDEOS não configurada." });
     return;
   }
+  const raiz = raizes.length === 1 ? raizes[0] : RAIZ_VIRTUAL;
 
   // Cache hit → emit everything from memory
   if (cacheCompleto && Date.now() - cacheCompleto.timestamp < CACHE_TTL_MS) {
@@ -112,6 +128,35 @@ export async function explorar(emit: EmitFn): Promise<void> {
   ];
 
   try {
+    if (raiz === RAIZ_VIRTUAL) {
+      // Várias pastas: busca nome/data de cada uma e começa a varredura nelas.
+      const pastas: PastaDrive[] = [];
+      for (const id of raizes) {
+        try {
+          const { data } = await drive.files.get({
+            fileId: id,
+            fields: "id, name, modifiedTime",
+            supportsAllDrives: true,
+          });
+          mapaNomes.set(id, data.name ?? id);
+          pastas.push({
+            id,
+            nome: data.name ?? id,
+            modifiedTime: data.modifiedTime ?? new Date(0).toISOString(),
+            filhos: [],
+          });
+        } catch {
+          emit({
+            tipo: "erro",
+            mensagem: `Sem acesso à pasta do Drive ${id}. Compartilhe-a com o e-mail da service account (client_email de GOOGLE_SERVICE_ACCOUNT_JSON) como Leitor.`,
+          });
+        }
+      }
+      filhosPorParent.set(RAIZ_VIRTUAL, pastas);
+      emit({ tipo: "pastas", parentId: RAIZ_VIRTUAL, filhos: pastas });
+      nivelAtual = pastas.map((p) => ({ id: p.id, modifiedTime: p.modifiedTime, depth: 1 }));
+    }
+
     while (nivelAtual.length > 0) {
       // Sort: most recent first → events emit in recency order
       nivelAtual.sort(
