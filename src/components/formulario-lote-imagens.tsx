@@ -27,6 +27,13 @@ import {
 } from "lucide-react";
 import { CTA_OPTIONS } from "@/lib/constants";
 import { gerarLegendaCliente, detectarMarca } from "@/lib/ai-cliente";
+import {
+  CARACTERISTICAS_ESTATICO,
+  destinoPorLink,
+  montarAdName,
+  type Caracteristica,
+  type CaracteristicaEstatico,
+} from "@/lib/ad-name";
 import { interpretarErroMeta } from "@/lib/erros-meta";
 import type { ClickUpTask } from "@/lib/clickup";
 import type { Brand } from "@/lib/db";
@@ -79,34 +86,9 @@ interface AnuncioForm {
 
 // ─── Helpers ───────────────────────────────────────────────
 
-function semanaAno(): string {
-  const now = new Date();
-  const oneJan = new Date(now.getFullYear(), 0, 1);
-  const days = Math.floor((now.getTime() - oneJan.getTime()) / 86400000);
-  const week = Math.ceil((days + oneJan.getDay() + 1) / 7);
-  return `W${String(week).padStart(2, "0")}-${now.getFullYear()}`;
-}
-
-function limparMiolo(nome: string): string {
-  let s = nome
-    .replace(/^(face|display|display e face)\s*\|\s*/i, "")
-    .replace(/\s*\|\s*\d+\s*formatos?\s*$/i, "")
-    .trim();
-  s = s
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-zA-Z0-9\s-]/g, "")
-    .replace(/\s+/g, "-")
-    .toUpperCase()
-    .slice(0, 50);
-  return s;
-}
-
-function gerarAdName(taskName: string): string {
-  const miolo = limparMiolo(taskName);
-  const semana = semanaAno();
-
-  return ["EST", miolo, semana].join("-");
+/** Nome inicial do anúncio no padrão EST-{Característica}-{Conteúdo}-{Destino}-W{NN}-{AAAA}. */
+function gerarAdName(taskName: string, caracteristica: Caracteristica, link: string): string {
+  return montarAdName({ tipo: "EST", caracteristica, nomeOrigem: taskName, destino: destinoPorLink(link) });
 }
 
 function escaparRegex(s: string): string {
@@ -167,6 +149,8 @@ export function FormularioLoteImagens({
   // ── Shared fields ───────────────────────────────────────
   const [descricao, setDescricao] = useState("");
   const [cta, setCta] = useState("SHOP_NOW");
+  // Característica do estático na nomenclatura (Gen / Prod / FP).
+  const [caracteristica, setCaracteristica] = useState<CaracteristicaEstatico>("Gen");
 
   // ── Per-ad form ─────────────────────────────────────────
   const [anuncios, setAnuncios] = useState<AnuncioForm[]>([]);
@@ -196,7 +180,7 @@ export function FormularioLoteImagens({
       cards.map((card) => ({
         taskId: card.id,
         taskName: card.name,
-        adName: gerarAdName(card.name),
+        adName: gerarAdName(card.name, "Gen", ""),
         adNameEditado: false,
         titulo: "",
         textoPrincipal: "",
@@ -214,6 +198,22 @@ export function FormularioLoteImagens({
     legendasGeradasRef.current = {};
     setStatusLegenda({});
   }, [aberto, cards]);
+
+  // Mantém o nome no padrão quando a característica ou o link (→ PDP/CAT)
+  // mudam — só para os nomes que o usuário não editou à mão.
+  useEffect(() => {
+    setAnuncios((prev) => {
+      let mudou = false;
+      const next = prev.map((a) => {
+        if (a.adNameEditado) return a;
+        const nome = gerarAdName(a.taskName, caracteristica, a.linkCampanha);
+        if (nome === a.adName) return a;
+        mudou = true;
+        return { ...a, adName: nome };
+      });
+      return mudou ? next : prev;
+    });
+  }, [caracteristica, anuncios]);
 
   // ── Load brands ─────────────────────────────────────────
   useEffect(() => {
@@ -631,6 +631,7 @@ export function FormularioLoteImagens({
       setDestinos([]);
       setDescricao("");
       setCta("SHOP_NOW");
+      setCaracteristica("Gen");
       setAnuncios([]);
       setMensagemErro(null);
       setMensagemSucesso(null);
@@ -844,6 +845,28 @@ export function FormularioLoteImagens({
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="space-y-1 col-span-2">
+                <label className="text-xs text-muted-foreground">
+                  Característica (nome do anúncio)
+                </label>
+                <Select
+                  value={caracteristica}
+                  onValueChange={(v) => setCaracteristica(v as CaracteristicaEstatico)}
+                >
+                  <SelectTrigger className="h-9 text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CARACTERISTICAS_ESTATICO.map((o) => (
+                      <SelectItem key={o.valor} value={o.valor}>{o.rotulo}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Nome: EST-{caracteristica}-Conteúdo-PDP/CAT-Semana-Ano. O PDP/CAT sai do
+                  link de cada anúncio.
+                </p>
               </div>
             </div>
           </div>

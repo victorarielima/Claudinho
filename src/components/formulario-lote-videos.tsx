@@ -7,6 +7,13 @@ import { Button } from "@/components/ui/button";
 import { PreviewLinkAnuncio } from "@/components/editor-utm";
 import { gerarLegendaCliente, detectarMarca } from "@/lib/ai-cliente";
 import {
+  CARACTERISTICAS_VIDEO,
+  destinoPorLink,
+  montarAdName,
+  type Caracteristica,
+  type CaracteristicaVideo,
+} from "@/lib/ad-name";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -101,45 +108,9 @@ export interface FormularioLoteVideosProps {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Extrai o destino (PRODUCT, CAMPAIGN, etc.) a partir da URL de campanha.
- * Ex: evino.com.br/product/... → PRODUCT, evino.com.br/campaign/... → CAMPAIGN
- */
-/**
- * Retorna a semana ISO e o ano no formato W{NN}-{AAAA}.
- */
-function semanaAno(): string {
-  const now = new Date();
-  const jan4 = new Date(now.getFullYear(), 0, 4);
-  const dayOfYear = Math.floor(
-    (now.getTime() - new Date(now.getFullYear(), 0, 1).getTime()) / 86400000
-  ) + 1;
-  const weekNum = Math.ceil((dayOfYear + jan4.getDay()) / 7);
-  return `W${String(weekNum).padStart(2, "0")}-${now.getFullYear()}`;
-}
-
-/**
- * Limpa o nome do arquivo para usar como miolo do ad name.
- * Remove extensão, caracteres especiais, e limita tamanho.
- */
-function limparMiolo(nomeArquivo: string): string {
-  return nomeArquivo
-    .replace(/\.[^.]+$/, "")
-    .replace(/[^a-zA-Z0-9_-]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .substring(0, 50);
-}
-
-/**
- * Gera o ad name seguindo o padrão:
- * VID-{MIOLO}-W{NN}-{AAAA}
- */
-function gerarAdName(nomeArquivo: string): string {
-  const miolo = limparMiolo(nomeArquivo);
-  const semana = semanaAno();
-
-  return ["VID", miolo, semana].join("-");
+/** Nome inicial do anúncio no padrão VID-{Característica}-{Conteúdo}-{Destino}-W{NN}-{AAAA}. */
+function gerarAdName(nomeArquivo: string, caracteristica: Caracteristica, link: string): string {
+  return montarAdName({ tipo: "VID", caracteristica, nomeOrigem: nomeArquivo, destino: destinoPorLink(link) });
 }
 
 import { CTA_OPTIONS } from "@/lib/constants";
@@ -178,6 +149,8 @@ export function FormularioLoteVideos({
   // ─── Form: shared fields ───────────────────────────────────
   const [descricao, setDescricao] = useState(DESCRICAO_PADRAO_VINHO);
   const [cta, setCta] = useState(CTA_PADRAO_VINHO);
+  // Característica do vídeo na nomenclatura (0 / Motion).
+  const [caracteristica, setCaracteristica] = useState<CaracteristicaVideo>("0");
 
   // ─── Form: anúncio de parceria (vídeo de influencer) ───────
   // Marcado, o lote inteiro sobe como anúncio de parceria com o criador
@@ -231,7 +204,7 @@ export function FormularioLoteVideos({
     setAnuncios(
       videos.map((v) => ({
         videoId: v.id,
-        adName: gerarAdName(v.nome),
+        adName: gerarAdName(v.nome, "0", ""),
         titulo: v.nome.replace(/\.[^.]+$/, ""),
         textoPrincipal: "",
         linkCampanha: "",
@@ -248,6 +221,7 @@ export function FormularioLoteVideos({
     setDestinos([]);
     setDescricao(DESCRICAO_PADRAO_VINHO);
     setCta(CTA_PADRAO_VINHO);
+    setCaracteristica("0");
     setEhInfluencer(false);
     setParcerias([]);
     setParceriaId("");
@@ -262,6 +236,22 @@ export function FormularioLoteVideos({
     setMarcaAutoResolvida(false);
     setStatusLegenda({});
   }, [aberto, videos]);
+
+  // Mantém o nome no padrão quando a característica ou o link (→ PDP/CAT)
+  // mudam — só para os nomes que o usuário não editou à mão.
+  useEffect(() => {
+    setAnuncios((prev) => {
+      let mudou = false;
+      const next = prev.map((a) => {
+        if (a.nomeEditado) return a;
+        const nome = gerarAdName(a.nomeArquivo, caracteristica, a.linkCampanha);
+        if (nome === a.adName) return a;
+        mudou = true;
+        return { ...a, adName: nome };
+      });
+      return mudou ? next : prev;
+    });
+  }, [caracteristica, anuncios]);
 
   // ─── Load campanhas when brand changes ─────────────────────
   const carregarCampanhas = useCallback(async (accountId: string) => {
@@ -771,6 +761,31 @@ export function FormularioLoteVideos({
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="col-span-2 grid gap-1.5">
+                <label className="text-sm font-medium text-muted-foreground">
+                  Característica (nome do anúncio)
+                </label>
+                <Select
+                  value={caracteristica}
+                  onValueChange={(v) => setCaracteristica(v as CaracteristicaVideo)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CARACTERISTICAS_VIDEO.map((opt) => (
+                      <SelectItem key={opt.valor} value={opt.valor}>
+                        {opt.rotulo}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Nome: VID-{caracteristica}-Conteúdo-PDP/CAT-Semana-Ano. O PDP/CAT sai do
+                  link de cada anúncio.
+                </p>
               </div>
             </div>
 
