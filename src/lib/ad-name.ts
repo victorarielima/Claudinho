@@ -13,7 +13,9 @@
 // ---------------------------------------------------------------------------
 
 export type TipoAnuncio = "VID" | "EST" | "CAT";
-export type CaracteristicaVideo = "0" | "Motion";
+// "Influ" não aparece no seletor: entra sozinho quando o lote é marcado
+// como "Vídeo de influencer" (anúncio de parceria).
+export type CaracteristicaVideo = "0" | "Motion" | "Influ";
 export type CaracteristicaEstatico = "Gen" | "Prod" | "FP";
 export type Caracteristica = CaracteristicaVideo | CaracteristicaEstatico;
 export type DestinoAnuncio = "PDP" | "CAT";

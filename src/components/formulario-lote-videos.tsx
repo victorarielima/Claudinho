@@ -120,22 +120,40 @@ export interface FormularioLoteVideosProps {
 // ---------------------------------------------------------------------------
 
 /**
- * Nome no padrão VID-{Característica}-{Conteúdo}-{Destino}-W{NN}-{AAAA}. A
- * característica escrita no nome do arquivo (ex.: "_MOTION") vale mais que a
- * escolhida para o lote.
+ * Característica efetiva do vídeo: "Influ" quando o lote é de influencer;
+ * senão a escrita no nome do arquivo (ex.: "_MOTION"); senão a do lote.
  */
-function gerarAdName(nomeArquivo: string, caracteristica: Caracteristica, link: string): string {
+function caracteristicaEfetiva(
+  nomeArquivo: string,
+  caracteristica: Caracteristica,
+  influencer: boolean
+): Caracteristica {
+  if (influencer) return "Influ";
+  return caracteristicaDoNome(nomeArquivo, "VID") ?? caracteristica;
+}
+
+/** Nome no padrão VID-{Característica}-{Conteúdo}-{Destino}-W{NN}-{AAAA}. */
+function gerarAdName(
+  nomeArquivo: string,
+  caracteristica: Caracteristica,
+  link: string,
+  influencer = false
+): string {
   return montarAdName({
     tipo: "VID",
-    caracteristica: caracteristicaDoNome(nomeArquivo, "VID") ?? caracteristica,
+    caracteristica: caracteristicaEfetiva(nomeArquivo, caracteristica, influencer),
     nomeOrigem: nomeArquivo,
     destino: destinoPorLink(link),
   });
 }
 
 /** Título automático: {Característica}-{Conteúdo}, ex.: "Motion-BlackNovember". */
-function gerarTitulo(nomeArquivo: string, caracteristica: Caracteristica): string {
-  return montarTitulo(caracteristicaDoNome(nomeArquivo, "VID") ?? caracteristica, nomeArquivo);
+function gerarTitulo(
+  nomeArquivo: string,
+  caracteristica: Caracteristica,
+  influencer = false
+): string {
+  return montarTitulo(caracteristicaEfetiva(nomeArquivo, caracteristica, influencer), nomeArquivo);
 }
 
 import { CTA_OPTIONS } from "@/lib/constants";
@@ -262,23 +280,25 @@ export function FormularioLoteVideos({
     setStatusLegenda({});
   }, [aberto, videos]);
 
-  // Mantém nome e título no padrão quando a característica ou o link
-  // (→ PDP/CAT) mudam — só os que o usuário não editou à mão.
+  // Mantém nome e título no padrão quando a característica, o modo
+  // influencer ou o link (→ PDP/CAT) mudam — só os que o usuário não editou.
   useEffect(() => {
     setAnuncios((prev) => {
       let mudou = false;
       const next = prev.map((a) => {
         const nome = a.nomeEditado
           ? a.adName
-          : gerarAdName(a.nomeArquivo, caracteristica, a.linkCampanha);
-        const titulo = a.tituloEditado ? a.titulo : gerarTitulo(a.nomeArquivo, caracteristica);
+          : gerarAdName(a.nomeArquivo, caracteristica, a.linkCampanha, ehInfluencer);
+        const titulo = a.tituloEditado
+          ? a.titulo
+          : gerarTitulo(a.nomeArquivo, caracteristica, ehInfluencer);
         if (nome === a.adName && titulo === a.titulo) return a;
         mudou = true;
         return { ...a, adName: nome, titulo };
       });
       return mudou ? next : prev;
     });
-  }, [caracteristica, anuncios]);
+  }, [caracteristica, ehInfluencer, anuncios]);
 
   // ─── Load campanhas when brand changes ─────────────────────
   const carregarCampanhas = useCallback(async (accountId: string) => {
@@ -806,8 +826,9 @@ export function FormularioLoteVideos({
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  Nome: VID-{caracteristica}-Conteúdo-PDP/CAT-Semana-Ano. O PDP/CAT sai do
-                  link de cada anúncio.
+                  Nome: VID-{ehInfluencer ? "Influ" : caracteristica}-Conteúdo-PDP/CAT-Semana-Ano.
+                  O PDP/CAT sai do link de cada anúncio
+                  {ehInfluencer && "; com \"Vídeo de influencer\" marcado, a característica vira Influ"}.
                 </p>
               </div>
             </div>
