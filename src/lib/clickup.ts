@@ -1,4 +1,4 @@
-import { classificarPlacementImagem } from "@/lib/ad-media";
+import { classificarPlacementImagem, PREFIXO_ANEXO_CLICKUP } from "@/lib/ad-media";
 
 // ─── Config ────────────────────────────────────────────────
 const CLICKUP_BASE = "https://api.clickup.com/api/v2";
@@ -320,7 +320,7 @@ export async function carregarIndiceClickUp(
 // do próprio app (/api/clickup/anexo?task=…&id=…), que pede um link novo à API
 // do ClickUp a cada download.
 
-const PROXY_ANEXO = "/api/clickup/anexo";
+const PROXY_ANEXO = PREFIXO_ANEXO_CLICKUP;
 
 export function urlAnexoClickUp(taskId: string, attachmentId: string): string {
   return `${PROXY_ANEXO}?task=${encodeURIComponent(taskId)}&id=${encodeURIComponent(attachmentId)}`;

@@ -1,4 +1,5 @@
 import {
+  ehUrlAsset,
   extrairImageAssets,
   normalizarPlacementImagem,
   rotuloPlacementImagem,
@@ -98,7 +99,7 @@ function obterImageAssets(input: AnuncioValidavel): AssetImagemValidavel[] {
     : extrairImageAssets(input.linkVideo ?? "");
 
   return assetsOriginais
-    .filter((asset) => ehUrlHttp(asset.url))
+    .filter((asset) => ehUrlAsset(asset.url))
     .map((asset) => ({
       placement: normalizarPlacementImagem(asset.placement, asset.url),
       url: asset.url.trim(),

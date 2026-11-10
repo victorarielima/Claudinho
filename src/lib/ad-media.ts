@@ -6,6 +6,18 @@ function normalizarTexto(valor: string): string {
     .trim();
 }
 
+/**
+ * Anexos do ClickUp são guardados como URL relativa do proxy do app (os links
+ * do ClickUp valem um único acesso — ver baixarImagem em clickup.ts).
+ */
+export const PREFIXO_ANEXO_CLICKUP = "/api/clickup/anexo";
+
+/** URL aceita como asset: http(s) pública ou o proxy de anexos do ClickUp. */
+export function ehUrlAsset(valor: string | null | undefined): boolean {
+  const url = (valor ?? "").trim();
+  return /^https?:\/\//i.test(url) || url.startsWith(`${PREFIXO_ANEXO_CLICKUP}?`);
+}
+
 export function detectarTipoCriativo(
   tipoBruto: string | null | undefined,
   assetUrl: string | null | undefined
@@ -25,7 +37,7 @@ export function detectarTipoCriativo(
     return "video";
   }
 
-  if ((assetUrl ?? "").includes("cloudinary.com")) {
+  if ((assetUrl ?? "").includes("cloudinary.com") || (assetUrl ?? "").includes(PREFIXO_ANEXO_CLICKUP)) {
     return "image";
   }
 
@@ -34,9 +46,9 @@ export function detectarTipoCriativo(
 
 export function extrairUrlsDeAssets(valor: string): string[] {
   return valor
-    .split(/\r?\n|(?<=\S)\s*[;,]\s*(?=https?:\/\/)/)
+    .split(/\r?\n|(?<=\S)\s*[;,]\s*(?=https?:\/\/|\/api\/clickup\/anexo)/)
     .map((url) => url.trim())
-    .filter((url) => url.startsWith("http"));
+    .filter((url) => ehUrlAsset(url));
 }
 
 export function classificarPlacementImagem(url: string, indice = 0): string {

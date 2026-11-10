@@ -9,11 +9,12 @@ import {
   type TipoAd,
   type CriarAdInput,
 } from "@/lib/db";
-import { normalizarPlacementImagem } from "@/lib/ad-media";
+import { ehUrlAsset, normalizarPlacementImagem } from "@/lib/ad-media";
 import { appendAnunciosExportados, linhaExportacaoDeAd } from "@/lib/sheets";
 
 function ehUrlHttp(valor: unknown): valor is string {
-  return typeof valor === "string" && /^https?:\/\//i.test(valor.trim());
+  // http(s) público ou o proxy de anexos do ClickUp (/api/clickup/anexo?…).
+  return typeof valor === "string" && ehUrlAsset(valor);
 }
 
 type AssetNormalizado = {
@@ -81,7 +82,7 @@ export async function POST(request: NextRequest) {
 
     if (assetsNormalizados.some((asset: AssetNormalizado) => !ehUrlHttp(asset.asset_url))) {
       return NextResponse.json(
-        { erro: "Todos os assets precisam usar URLs públicas iniciando com http(s)." },
+        { erro: "Todos os assets precisam usar URLs públicas iniciando com http(s) ou anexos do ClickUp." },
         { status: 400 }
       );
     }
