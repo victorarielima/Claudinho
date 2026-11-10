@@ -95,6 +95,14 @@ function CardClickUp({
             alt={task.name}
             className="h-full w-full object-cover transition-transform group-hover:scale-105"
             loading="lazy"
+            // O link de miniatura do ClickUp vale um acesso; se já foi gasto
+            // (lista em cache), cai para a imagem servida pelo proxy do app.
+            onError={(e) => {
+              const fallback = task.attachments[0]?.url;
+              if (fallback && e.currentTarget.getAttribute("src") !== fallback) {
+                e.currentTarget.src = fallback;
+              }
+            }}
           />
         ) : (
           <div className="flex h-full items-center justify-center">

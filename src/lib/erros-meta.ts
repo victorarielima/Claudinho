@@ -141,6 +141,12 @@ const REGRAS: RegraErro[] = [
     marcadores: ["Erro ao buscar account do adset", /adset.*not.*found/i],
   },
   {
+    tipo: "Arte do ClickUp com link expirado",
+    explicacao:
+      "A Meta recebeu um arquivo que não é imagem. Os links de anexo do ClickUp valem um único acesso: se o link já foi aberto (preview, outra tentativa), o ClickUp devolve uma página HTML. Anúncios novos já usam um link do próprio Claudinho que renova sozinho; para este, clique em \"Trocar arte\", escolha o mesmo card no ClickUp e tente de novo.",
+    marcadores: ["2446496", "Não foi possível processar a imagem carregada", "valem um único acesso"],
+  },
+  {
     tipo: "Imagem não encontrada",
     explicacao:
       "Não foi possível baixar uma das imagens. Verifique se as URLs do ClickUp/Cloudinary ainda estão válidas e públicas.",

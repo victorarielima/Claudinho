@@ -3,6 +3,7 @@ import {
   normalizarPlacementImagem,
   placementPorDimensoes,
 } from "./ad-media";
+import { baixarImagem } from "./clickup";
 import { META_API_BASE, getAccessToken, extrairErroMeta } from "./meta-config";
 import { logger } from "./logger";
 import { metaFetchWithRetry, safeResponseJson } from "./meta-retry";
@@ -395,13 +396,9 @@ export async function uploadImageDetalhado(
   const token = getAccessToken();
   const endpoint = `${META_API_BASE}/${accountId}/adimages`;
 
-  // Baixar a imagem da URL pública
-  const imgRes = await fetch(imageUrl);
-  if (!imgRes.ok) {
-    throw new Error(`Erro ao baixar imagem de ${imageUrl}: ${imgRes.status}`);
-  }
-  const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
-  const filename = imageUrl.split("/").pop()?.split("?")[0] || "image.jpg";
+  // Baixa a imagem (proxy do ClickUp → link novo; demais URLs direto) e
+  // garante que são bytes de imagem: HTML aqui vira subcode 2446496 na Meta.
+  const { buffer: imgBuffer, nome: filename } = await baixarImagem(imageUrl);
   const dimensoes = lerDimensoesImagem(imgBuffer);
   const placement = dimensoes
     ? placementPorDimensoes(dimensoes.largura, dimensoes.altura)
@@ -409,7 +406,7 @@ export async function uploadImageDetalhado(
 
   // Montar multipart/form-data
   const formData = new FormData();
-  formData.append("filename", new Blob([imgBuffer]), filename);
+  formData.append("filename", new Blob([new Uint8Array(imgBuffer)]), filename);
   formData.append("access_token", token);
 
   logger.info("Uploading image to Meta", {

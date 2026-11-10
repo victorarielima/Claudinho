@@ -1,3 +1,4 @@
+import { baixarImagem } from "./clickup";
 // ---------------------------------------------------------------------------
 // Integração com OpenAI — geração de legenda ("texto principal") a partir do
 // criativo. Analisa 1 frame do criativo (imagem estática ou thumbnail do
@@ -102,11 +103,8 @@ function bumpTamanhoThumbnail(url: string): string {
 
 async function baixarComoDataUrl(url: string): Promise<string | null> {
   try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const contentType = res.headers.get("content-type") ?? "image/jpeg";
-    if (!contentType.startsWith("image/")) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
+    // baixarImagem resolve o proxy de anexos do ClickUp e rejeita não-imagens.
+    const { buffer: buf, contentType } = await baixarImagem(url);
     // Evita estourar limite de payload com imagens gigantes (~raro em thumb).
     if (buf.byteLength > 10 * 1024 * 1024) return null;
     return `data:${contentType};base64,${buf.toString("base64")}`;

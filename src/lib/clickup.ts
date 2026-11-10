@@ -235,7 +235,10 @@ function mapearTask(
     .map((a) => ({
       id: a.id,
       title: a.title,
-      url: a.url,
+      // URL estável do proxy: o link do ClickUp vale um único acesso.
+      url: urlAnexoClickUp(raw.id, a.id),
+      // Miniaturas para a grade do explorador; se o link já foi gasto,
+      // a tela cai para a imagem do proxy.
       thumbnailLarge: a.thumbnail_large ?? null,
       thumbnailSmall: a.thumbnail_small ?? null,
       extension: a.extension,
@@ -303,4 +306,100 @@ export async function carregarIndiceClickUp(
 
   cacheIndice.set(key, { data: indice, timestamp: Date.now() });
   return indice;
+}
+
+// ─── Anexos (links de uso único) ───────────────────────────
+//
+// Desde nov/2026 o ClickUp assina os links de anexo com um authz_token de
+// USO ÚNICO ("maxUsage": 1, expira em poucas horas). O primeiro GET devolve a
+// imagem; os seguintes devolvem uma página HTML com status 200. Como o
+// preview do formulário consumia o link, o servidor mandava HTML para a Meta
+// → "Não foi possível processar a imagem carregada" (subcode 2446496).
+//
+// Por isso o Claudinho nunca guarda o link do ClickUp: guarda uma URL estável
+// do próprio app (/api/clickup/anexo?task=…&id=…), que pede um link novo à API
+// do ClickUp a cada download.
+
+const PROXY_ANEXO = "/api/clickup/anexo";
+
+export function urlAnexoClickUp(taskId: string, attachmentId: string): string {
+  return `${PROXY_ANEXO}?task=${encodeURIComponent(taskId)}&id=${encodeURIComponent(attachmentId)}`;
+}
+
+/** Lê task/anexo de uma URL do proxy (relativa ou absoluta). */
+export function lerUrlAnexoClickUp(
+  url: string
+): { taskId: string; attachmentId: string } | null {
+  try {
+    const u = new URL(url, "http://local");
+    if (u.pathname !== PROXY_ANEXO) return null;
+    const taskId = u.searchParams.get("task");
+    const attachmentId = u.searchParams.get("id");
+    return taskId && attachmentId ? { taskId, attachmentId } : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface ImagemBaixada {
+  buffer: Buffer;
+  contentType: string;
+  /** Nome do arquivo com extensão (a Meta usa no upload). */
+  nome: string;
+}
+
+function pareceImagem(buf: Buffer): boolean {
+  if (buf.length < 12) return false;
+  const hex = buf.subarray(0, 4).toString("hex");
+  return (
+    hex.startsWith("ffd8ff") || // JPEG
+    hex === "89504e47" || // PNG
+    hex === "47494638" || // GIF
+    (hex === "52494646" && buf.subarray(8, 12).toString("ascii") === "WEBP")
+  );
+}
+
+async function baixarBytes(url: string, rotulo: string): Promise<{ buffer: Buffer; contentType: string }> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Erro ao baixar imagem (${rotulo}): HTTP ${res.status}`);
+  const buffer = Buffer.from(await res.arrayBuffer());
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!pareceImagem(buffer)) {
+    const ehClickUp = /clickup-attachments\.com/i.test(url);
+    throw new Error(
+      `Erro ao baixar imagem (${rotulo}): o link devolveu ${contentType || "um arquivo"} em vez de uma imagem.` +
+        (ehClickUp
+          ? " Links de anexo do ClickUp valem um único acesso — use \"Trocar arte\" e escolha o card de novo no ClickUp."
+          : "")
+    );
+  }
+  return { buffer, contentType: contentType.startsWith("image/") ? contentType : "image/jpeg" };
+}
+
+/** Baixa um anexo pedindo um link novo (de uso único) à API do ClickUp. */
+export async function baixarAnexoClickUp(taskId: string, attachmentId: string): Promise<ImagemBaixada> {
+  const task = await clickupGet<RawTask>(`/task/${encodeURIComponent(taskId)}`);
+  const anexo = (task.attachments ?? []).find((a) => a.id === attachmentId);
+  if (!anexo) {
+    throw new Error(
+      `Erro ao baixar imagem: o anexo ${attachmentId} não existe mais no card "${task.name}" do ClickUp.`
+    );
+  }
+  const { buffer, contentType } = await baixarBytes(anexo.url, anexo.title);
+  return { buffer, contentType, nome: anexo.title };
+}
+
+/**
+ * Baixa uma imagem para uso no servidor (upload na Meta, legenda com IA).
+ * Aceita a URL do proxy do ClickUp ou qualquer URL pública, e garante que os
+ * bytes são de fato uma imagem — nunca manda HTML para a Meta.
+ */
+export async function baixarImagem(url: string): Promise<ImagemBaixada> {
+  const anexo = lerUrlAnexoClickUp(url);
+  if (anexo) return baixarAnexoClickUp(anexo.taskId, anexo.attachmentId);
+  const nomeUrl = decodeURIComponent(url.split("?")[0].split("/").pop() || "");
+  const { buffer, contentType } = await baixarBytes(url, nomeUrl || "imagem");
+  const ext = contentType.split("/")[1]?.replace("jpeg", "jpg") || "jpg";
+  const nome = /\.[a-z0-9]{3,4}$/i.test(nomeUrl) ? nomeUrl : `image.${ext}`;
+  return { buffer, contentType, nome };
 }
